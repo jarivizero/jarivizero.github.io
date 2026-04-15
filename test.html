@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Environment Monitor v2</title>
+
+<style>
+    body {
+        font-family: monospace;
+        background: #0f1115;
+        color: #d6d6d6;
+        padding: 20px;
+    }
+
+    .ok { color: #7CFC90; }
+    .bad { color: #ff5c5c; }
+
+    pre {
+        background: #1a1d24;
+        padding: 12px;
+        border-radius: 8px;
+        overflow: auto;
+        white-space: pre-wrap;
+    }
+
+    #benchLog {
+        margin-top: 10px;
+        max-height: 200px;
+        overflow-y: auto;
+        background: #12141a;
+        padding: 10px;
+        border-radius: 8px;
+    }
+
+    .entry {
+        border-bottom: 1px solid #2a2d36;
+        padding: 4px 0;
+    }
+</style>
+</head>
+
+<body>
+
+<h2>Runtime Environment Monitor</h2>
+
+<pre id="output">Initializing...</pre>
+
+<h3>Crypto Benchmark History</h3>
+<div id="benchLog"></div>
+
+<script>
+const state = {
+    baseline: null,
+    cryptoBaseline: null,
+    startTime: Date.now(),
+    benchHistory: []
+};
+
+function runtimeSeconds() {
+    return ((Date.now() - state.startTime) / 1000).toFixed(2);
+}
+
+function getEnvSnapshot() {
+    const nav = navigator;
+
+    return {
+        userAgent: nav.userAgent,
+
+        screen: {
+            width: screen.width,
+            height: screen.height,
+            pixelRatio: window.devicePixelRatio
+        },
+
+        window: {
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight
+        },
+
+        document: {
+            width: document.documentElement.clientWidth,
+            height: document.documentElement.clientHeight
+        },
+
+        audio: {
+            audioContext: !!(window.AudioContext || window.webkitAudioContext)
+        },
+
+        webgl: (function () {
+            try {
+                const canvas = document.createElement("canvas");
+                const gl = canvas.getContext("webgl");
+                if (!gl) return { available: false };
+
+                const ext = gl.getExtension("WEBGL_debug_renderer_info");
+
+                return {
+                    available: true,
+                    renderer: ext
+                        ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)
+                        : "unknown"
+                };
+            } catch {
+                return { available: false };
+            }
+        })()
+    };
+}
+
+async function cryptoBenchmark() {
+    const data = new TextEncoder().encode("benchmark-test-data");
+    const start = performance.now();
+
+    for (let i = 0; i < 2000; i++) {
+        await crypto.subtle.digest("SHA-256", data);
+    }
+
+    return performance.now() - start;
+}
+
+function detectAnomalies(current) {
+    const anomalies = [];
+
+    if (!current.audio.audioContext) {
+        anomalies.push("Audio API missing");
+    }
+
+    if (!current.webgl.available) {
+        anomalies.push("WebGL unavailable");
+    }
+
+    if (state.baseline) {
+        const b = state.baseline;
+
+        if (
+            current.screen.width !== b.screen.width ||
+            current.screen.height !== b.screen.height
+        ) {
+            anomalies.push("Screen resolution change detected");
+        }
+
+        if (state.cryptoBaseline) {
+            const ratio = current.cryptoTime / state.cryptoBaseline;
+            if (ratio > 2) anomalies.push("Crypto slowdown detected");
+        }
+    }
+
+    return anomalies;
+}
+
+function renderEnv(data) {
+    document.getElementById("output").textContent =
+`RUNTIME: ${runtimeSeconds()}s
+
+USER AGENT:
+${data.userAgent}
+
+SCREEN:
+${data.screen.width}x${data.screen.height} (DPR ${window.devicePixelRatio})
+
+WINDOW:
+${data.window.innerWidth}x${data.window.innerHeight}
+
+DOCUMENT:
+${data.document.width}x${data.document.height}
+
+WEBGL:
+${data.webgl.available ? data.webgl.renderer : "Unavailable"}
+`;
+}
+
+function addBenchEntry(time) {
+    const log = document.getElementById("benchLog");
+
+    const entry = {
+        time: runtimeSeconds(),
+        value: time
+    };
+
+    state.benchHistory.push(entry);
+
+    const div = document.createElement("div");
+    div.className = "entry";
+    div.textContent = `[+${entry.time}s] SHA-256 bench: ${time.toFixed(2)} ms`;
+
+    log.prepend(div);
+}
+
+async function cryptoLoop() {
+    const time = await cryptoBenchmark();
+
+    if (!state.cryptoBaseline) {
+        state.cryptoBaseline = time;
+    }
+
+    addBenchEntry(time);
+
+    const snapshot = getEnvSnapshot();
+    snapshot.cryptoTime = time;
+
+    const anomalies = detectAnomalies(snapshot);
+
+    if (anomalies.length) {
+        anomalies.forEach(a => {
+            const div = document.createElement("div");
+            div.className = "entry bad";
+            div.textContent = `[ANOMALY] ${a}`;
+            document.getElementById("benchLog").prepend(div);
+        });
+    }
+}
+
+function init() {
+    state.baseline = getEnvSnapshot();
+
+    renderEnv(state.baseline);
+
+    // crypto benchmark loop every 2.5s
+    setInterval(cryptoLoop, 2500);
+
+    // UI refresh loop
+    setInterval(() => {
+        renderEnv(getEnvSnapshot());
+    }, 1000);
+}
+
+init();
+</script>
+
+</body>
+</html>
