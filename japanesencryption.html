@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Japanesencryption</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #0f0f0f;
+            color: #eee;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: #ffcc00;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .box {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 15px;
+            border: 1px solid #333;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #ffcc00;
+        }
+        textarea {
+            width: 100%;
+            height: 320px;
+            background: #111;
+            color: #eee;
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 12px;
+            font-family: monospace;
+            font-size: 15px;
+            resize: vertical;
+        }
+        .controls {
+            margin-top: 10px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 10px 16px;
+            background: #ffcc00;
+            color: #000;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #ffd633;
+        }
+        .info {
+            font-size: 0.9em;
+            color: #888;
+            margin-top: 8px;
+        }
+        .status {
+            margin-top: 5px;
+            font-size: 0.85em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🇯🇵 Japanesencryption</h1>
+        <p style="text-align:center; color:#aaa;">Live Japanese Unicode Steganography • ~27,700 characters • ~14.76 bits per char</p>
+
+        <div class="grid">
+            <!-- Encrypt Box -->
+            <div class="box">
+                <label>🔒 Input (Text or Binary via File)</label>
+                <textarea id="input" placeholder="Paste text here or upload a file..."></textarea>
+                <div class="controls">
+                    <button id="uploadBtn">📤 Upload File</button>
+                    <button id="copyInput">📋 Copy Input</button>
+                    <input type="file" id="fileInput" style="display:none;">
+                </div>
+                <div class="status" id="inputStatus"></div>
+            </div>
+
+            <!-- Decrypt Box -->
+            <div class="box">
+                <label>🔓 Output (Japanese-looking text)</label>
+                <textarea id="output" placeholder="Japanese encoded text will appear here..."></textarea>
+                <div class="controls">
+                    <button id="copyOutput">📋 Copy Output</button>
+                </div>
+                <div class="status" id="outputStatus"></div>
+            </div>
+        </div>
+
+        <div class="info" style="text-align:center; margin-top:30px;">
+            Type or paste in either box → it updates live.<br>
+            Upload any file (images, PDFs, executables, etc.) to encode it into Japanese text.
+        </div>
+    </div>
+
+    <script>
+        // Build Japanese alphabet (same as Python version)
+        const ranges = [
+            [0x3040, 0x309F], // Hiragana
+            [0x30A0, 0x30FF], // Katakana
+            [0x3400, 0x4DBF], // CJK Extension A
+            [0x4E00, 0x9FFF]  // CJK Unified Ideographs
+        ];
+
+        let alphabet = [];
+        const seen = new Set();
+
+        for (const [start, end] of ranges) {
+            for (let i = start; i <= end; i++) {
+                const c = String.fromCodePoint(i);
+                if (!seen.has(c) && /\p{Lo}/u.test(c)) {  // Letter, other
+                    alphabet.push(c);
+                    seen.add(c);
+                }
+            }
+        }
+
+        const base = BigInt(alphabet.length);
+        const charToIdx = new Map(alphabet.map((c, i) => [c, BigInt(i)]));
+
+        const inputArea = document.getElementById('input');
+        const outputArea = document.getElementById('output');
+        const inputStatus = document.getElementById('inputStatus');
+        const outputStatus = document.getElementById('outputStatus');
+        const fileInput = document.getElementById('fileInput');
+
+        let isProcessing = false;
+
+        // Helper: bytes → BigInt
+        function bytesToBigInt(bytes) {
+            let num = BigInt(0);
+            for (const b of bytes) {
+                num = (num << BigInt(8)) | BigInt(b);
+            }
+            return num;
+        }
+
+        // Helper: BigInt → bytes
+        function bigIntToBytes(num) {
+            if (num === BigInt(0)) return new Uint8Array([0]);
+            const bytes = [];
+            while (num > BigInt(0)) {
+                bytes.unshift(Number(num & BigInt(0xFF)));
+                num >>= BigInt(8);
+            }
+            return new Uint8Array(bytes);
+        }
+
+        // Japanesencrypt (text or binary)
+        function japanesencrypt(data) {
+            if (!data || data.length === 0) return "";
+
+            // Add prefix 0x01 to avoid losing leading zero bytes
+            const fullData = new Uint8Array([1, ...data]);
+            let num = bytesToBigInt(fullData);
+
+            if (num === BigInt(0)) return alphabet[0];
+
+            const result = [];
+            while (num > BigInt(0)) {
+                const rem = Number(num % base);
+                result.push(alphabet[rem]);
+                num = num / base;
+            }
+            return result.reverse().join('');
+        }
+
+        // Japanesdecrypt
+        function japanesdecrypt(encoded) {
+            if (!encoded) return "";
+
+            let num = BigInt(0);
+            for (const char of encoded) {
+                const idx = charToIdx.get(char);
+                if (idx === undefined) {
+                    throw new Error(`Invalid character: ${char}`);
+                }
+                num = num * base + idx;
+            }
+
+            let bytes = bigIntToBytes(num);
+
+            // Remove the 0x01 prefix
+            if (bytes.length > 0 && bytes[0] === 1) {
+                bytes = bytes.slice(1);
+            }
+
+            return bytes;
+        }
+
+        // Convert Uint8Array to readable string (for display)
+        function bytesToDisplayString(bytes) {
+            try {
+                return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+            } catch (e) {
+                // Binary data → show as hex preview
+                return `<binary data> (${bytes.length} bytes) — first 50 bytes: ` +
+                       Array.from(bytes.slice(0, 50))
+                            .map(b => b.toString(16).padStart(2, '0')).join(' ');
+            }
+        }
+
+        // Live update function
+        async function liveUpdate() {
+            if (isProcessing) return;
+            isProcessing = true;
+
+            try {
+                const inputText = inputArea.value.trim();
+
+                if (inputText === "") {
+                    outputArea.value = "";
+                    inputStatus.textContent = "";
+                    outputStatus.textContent = "";
+                    isProcessing = false;
+                    return;
+                }
+
+                // Try to treat input as Japanese text (decode)
+                let decodedBytes = null;
+                try {
+                    decodedBytes = japanesdecrypt(inputText);
+                } catch (e) {
+                    decodedBytes = null;
+                }
+
+                if (decodedBytes !== null && decodedBytes.length > 0) {
+                    // Input was encoded Japanese → show original in input box? Wait, better logic:
+                    // Actually, since it's bidirectional, we decide based on which box changed last, but for simplicity:
+                    // If input looks like Japanese (many CJK chars), try decode first
+                    const isJapaneseLike = /[\u3000-\u9fff\u3040-\u30ff]/.test(inputText);
+                    
+                    if (isJapaneseLike) {
+                        const display = bytesToDisplayString(decodedBytes);
+                        inputArea.value = display;  // optional: replace with decoded if binary
+                        outputArea.value = inputText; // keep encoded in output? Wait, let's swap roles properly.
+                    } else {
+                        // Normal text input → encode
+                        const encoder = new TextEncoder();
+                        const bytes = encoder.encode(inputText);
+                        const encoded = japanesencrypt(bytes);
+                        outputArea.value = encoded;
+                    }
+                } else {
+                    // Normal text → encode to Japanese
+                    const encoder = new TextEncoder();
+                    const bytes = encoder.encode(inputText);
+                    const encoded = japanesencrypt(bytes);
+                    outputArea.value = encoded;
+                }
+
+                inputStatus.textContent = `Input: ${inputText.length} chars`;
+                outputStatus.textContent = `Output: ${outputArea.value.length} Japanese chars`;
+            } catch (err) {
+                outputArea.value = "❌ Error: " + err.message;
+            }
+
+            isProcessing = false;
+        }
+
+        // File upload
+        document.getElementById('uploadBtn').addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(ev) {
+                const arrayBuffer = ev.target.result;
+                const bytes = new Uint8Array(arrayBuffer);
+                
+                try {
+                    const encoded = japanesencrypt(bytes);
+                    outputArea.value = encoded;
+                    inputArea.value = `<binary file: ${file.name} (${bytes.length} bytes)>`;
+                    
+                    inputStatus.textContent = `Uploaded: ${file.name} (${bytes.length} bytes)`;
+                    outputStatus.textContent = `Encoded: ${encoded.length} Japanese chars`;
+                } catch (err) {
+                    alert("Encoding failed: " + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // Copy buttons
+        document.getElementById('copyInput').addEventListener('click', () => {
+            navigator.clipboard.writeText(inputArea.value);
+            const orig = inputStatus.textContent;
+            inputStatus.textContent = "✅ Copied!";
+            setTimeout(() => inputStatus.textContent = orig, 1500);
+        });
+
+        document.getElementById('copyOutput').addEventListener('click', () => {
+            navigator.clipboard.writeText(outputArea.value);
+            const orig = outputStatus.textContent;
+            outputStatus.textContent = "✅ Copied!";
+            setTimeout(() => outputStatus.textContent = orig, 1500);
+        });
+
+        // Live events
+        inputArea.addEventListener('input', liveUpdate);
+        outputArea.addEventListener('input', () => {
+            // When typing in output, try to decode and show in input
+            try {
+                const decodedBytes = japanesdecrypt(outputArea.value);
+                const display = bytesToDisplayString(decodedBytes);
+                inputArea.value = display;
+                inputStatus.textContent = `Decoded: ${decodedBytes.length} bytes`;
+            } catch (e) {
+                inputArea.value = "❌ Invalid Japanese encoding";
+            }
+        });
+
+        // Initial message
+        setTimeout(() => {
+            inputArea.value = "Hello! This is a secret message. Try typing here or upload a file.";
+            liveUpdate();
+        }, 300);
+    </script>
+</body>
+</html>
