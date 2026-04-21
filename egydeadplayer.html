@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HLS Player</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=JetBrains+Mono:wght@300;400&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --surface2: #1a1a1a;
+    --border: #222;
+    --accent: #e8f026;
+    --accent2: #26f0b4;
+    --text: #f0ede8;
+    --muted: #555;
+    --danger: #f03726;
+  }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    overflow-x: hidden;
+  }
+
+  body {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    min-height: 100vh;
+  }
+
+  header {
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+    z-index: 10;
+  }
+
+  .logo-mark {
+    width: 28px; height: 28px;
+    background: var(--accent);
+    clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+    flex-shrink: 0;
+  }
+
+  header h1 {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  .badge {
+    margin-left: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--accent2);
+    border: 1px solid var(--accent2);
+    padding: 3px 8px;
+    border-radius: 2px;
+    letter-spacing: 0.08em;
+  }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .video-col {
+    display: flex;
+    flex-direction: column;
+    padding: 28px 28px 28px 32px;
+    gap: 20px;
+    overflow-y: auto;
+  }
+
+  .player-wrap {
+    position: relative;
+    background: #000;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  video {
+    width: 100%;
+    display: block;
+    aspect-ratio: 16/9;
+    background: #000;
+  }
+
+  .player-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.7);
+    transition: opacity 0.2s;
+    pointer-events: none;
+  }
+
+  .player-overlay.hidden { opacity: 0; }
+
+  .overlay-icon {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    color: #000;
+  }
+
+  .overlay-icon svg { width: 28px; height: 28px; }
+
+  .log-section {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .log-header {
+    padding: 10px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+
+  .log-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent2);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .log-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--muted);
+    min-height: 120px;
+    max-height: 200px;
+  }
+
+  .log-body .entry { display: flex; gap: 10px; }
+  .log-body .entry .ts { color: #333; flex-shrink: 0; }
+  .log-body .entry .msg { color: #888; }
+  .log-body .entry.ok .msg { color: var(--accent2); }
+  .log-body .entry.warn .msg { color: var(--accent); }
+  .log-body .entry.err .msg { color: var(--danger); }
+  .log-body .entry.info .msg { color: #aaa; }
+
+  .sidebar {
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .sidebar-section {
+    padding: 24px 24px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-section:last-child { border-bottom: none; }
+
+  .section-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  .input-group { display: flex; flex-direction: column; gap: 8px; }
+  .input-row { display: flex; gap: 8px; }
+
+  input[type="text"] {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 10px 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+    min-width: 0;
+  }
+
+  input[type="text"]:focus { border-color: var(--accent); }
+  input[type="text"]::placeholder { color: var(--muted); }
+
+  button {
+    cursor: pointer;
+    border: none;
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    border-radius: 3px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+    padding: 10px 16px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .btn-primary:hover { background: #f5ff50; }
+  .btn-primary:active { transform: scale(0.98); }
+  .btn-primary:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; transform: none; }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 9px 14px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+  }
+
+  .btn-secondary:hover { border-color: var(--text); color: var(--text); }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+  }
+
+  .toggle-label {
+    font-size: 12px;
+    color: #888;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-right: 12px;
+  }
+
+  .toggle-label small {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .toggle { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    background: var(--border);
+    border-radius: 11px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .toggle input:checked ~ .toggle-track { background: var(--accent); }
+
+  .toggle-thumb {
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 16px; height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+    pointer-events: none;
+  }
+
+  .toggle input:checked ~ .toggle-thumb { transform: translateX(16px); }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .stat-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 10px 12px;
+  }
+
+  .stat-card .stat-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    font-weight: 400;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .stat-card .stat-key {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .seg-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .seg-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--surface2);
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    border-left: 2px solid transparent;
+    transition: border-color 0.15s;
+  }
+
+  .seg-item.loaded { border-left-color: var(--accent2); color: #888; }
+  .seg-item.loading { border-left-color: var(--accent); color: var(--accent); animation: seg-pulse 0.8s ease-in-out infinite; }
+  .seg-item.error { border-left-color: var(--danger); color: var(--danger); }
+  .seg-item.png-wrap { border-left-color: #8844ff; }
+
+  @keyframes seg-pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  .seg-icon { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .seg-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .seg-size { flex-shrink: 0; }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 10px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .footer-status { display: flex; align-items: center; gap: 6px; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); transition: background 0.3s; }
+  .status-dot.active { background: var(--accent2); }
+  .status-dot.error { background: var(--danger); }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .sidebar { border-left: none; border-top: 1px solid var(--border); max-height: 500px; }
+    .video-col { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark"></div>
+  <h1>Stream Player</h1>
+  <span class="badge">PNG-WRAP AWARE</span>
+</header>
+
+<main>
+  <div class="video-col">
+    <div class="player-wrap">
+      <video id="video" controls preload="none"></video>
+      <div class="player-overlay" id="overlay">
+        <div class="overlay-icon">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="log-section">
+      <div class="log-header">
+        <span class="log-dot"></span>
+        <span>segment log</span>
+        <button class="btn-secondary" style="margin-left:auto;padding:4px 10px;font-size:10px" onclick="clearLog()">clear</button>
+      </div>
+      <div class="log-body" id="log"></div>
+    </div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="section-label">Source</div>
+      <div class="input-group">
+        <div class="input-row">
+          <input type="text" id="m3u8-input" placeholder="https://…/master.m3u8" />
+        </div>
+	<div class="input-row">
+			<button class="btn-primary" id="load-btn" onclick="loadStream()" style="flex:1">Load Stream</button>
+			<button class="btn-secondary" onclick="clearStream()">Clear</button>
+		  </div>
+		  <div class="input-group" style="margin-top:10px">
+			<label for="preset-select" style="font-family:JetBrains Mono,monospace;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted)">Preset Streams</label>
+			<select id="preset-select" style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:10px 12px;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--text);outline:none;min-width:0">
+			  <option value="">Choose a episode..</option>
+			</select>
+		  </div>
+		  <div style="font-family:JetBrains Mono,monospace;font-size:10px;color:var(--muted);line-height:1.6">Supports standard HLS and TikTok CDN .image segments (PNG-wrapped MPEG-TS).</div>
+		</div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">Options</div>
+
+      <div class="toggle-row">
+        <div class="toggle-label">
+          PNG Wrapper Strip
+          <small>strip PNG header from .image segments</small>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="opt-png" checked>
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <div class="toggle-label">
+          Auto-detect
+          <small>detect PNG wrap per-segment</small>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="opt-auto" checked>
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <div class="toggle-label">
+          CORS proxy fallback
+          <small>route through corsproxy.io</small>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="opt-proxy">
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="section-label">Stats</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-val" id="stat-segs">0</div>
+          <div class="stat-key">Segments</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="stat-wrap">0</div>
+          <div class="stat-key">PNG-Wrapped</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="stat-mb">0</div>
+          <div class="stat-key">MB loaded</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val" id="stat-bw">—</div>
+          <div class="stat-key">Bandwidth</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-section" style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <div class="section-label">Recent Segments</div>
+      <div class="seg-list" id="seg-list"></div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <div class="footer-status">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">idle</span>
+  </div>
+  <span style="margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%" id="footer-url"></span>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.7/hls.min.js"></script>
+<script>
+// ─── PNG DETECTION & STRIPPING ────────────────────────────────────
+const PNG_SIG = [0x89,0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a];
+
+function isPNGWrapped(buf) {
+  if (buf.byteLength < 8) return false;
+  const v = new Uint8Array(buf);
+  for (let i = 0; i < 8; i++) if (v[i] !== PNG_SIG[i]) return false;
+  return true;
+}
+
+// Walk PNG chunks to find where IEND ends, return byte offset after it
+function findPNGEnd(buf) {
+  const v = new Uint8Array(buf);
+  let pos = 8; // skip 8-byte PNG signature
+  while (pos + 12 <= v.length) {
+    const len = (v[pos]<<24)|(v[pos+1]<<16)|(v[pos+2]<<8)|v[pos+3];
+    const type = String.fromCharCode(v[pos+4],v[pos+5],v[pos+6],v[pos+7]);
+    pos += 12 + len; // length(4) + type(4) + data(len) + crc(4)
+    if (type === 'IEND') return pos;
+    if (pos > 8192) break; // PNG header chunks are tiny; bail early
+  }
+  return -1;
+}
+
+function stripPNG(buf) {
+  const end = findPNGEnd(buf);
+  if (end > 0 && end < buf.byteLength) return buf.slice(end);
+  return buf;
+}
+
+// ─── PROXY ───────────────────────────────────────────────────────
+const PROXY = 'https://corsproxy.io/?';
+function proxify(url) { return PROXY + encodeURIComponent(url); }
+
+const presetStreams = [
+  { title: "Family Guy 21 Episode 1", url: "https://notableuploads.s3.amazonaws.com/6ddb72c7bb9d680bf1f335b96b3510d3" },]
+function populatePresetStreams() {
+  const select = document.getElementById('preset-select')
+  if (!select) return
+  presetStreams.forEach(item => {
+    const opt = document.createElement('option')
+    opt.value = item.url
+    opt.textContent = item.title
+    select.appendChild(opt)
+  })
+  select.addEventListener('change', () => {
+    const url = select.value.trim()
+    if (!url) return
+    document.getElementById('m3u8-input').value = url
+    loadStream()
+    select.value = ''
+  })
+}
+
+// ─── STATE ───────────────────────────────────────────────────────
+let hls = null;
+let stats = { segs:0, wrapped:0, bytes:0 };
+
+function resetStats() {
+  stats = { segs:0, wrapped:0, bytes:0 };
+  updateStats();
+  document.getElementById('stat-bw').textContent = '—';
+}
+
+function updateStats() {
+  document.getElementById('stat-segs').textContent = stats.segs;
+  document.getElementById('stat-wrap').textContent = stats.wrapped;
+  document.getElementById('stat-mb').textContent = (stats.bytes/1048576).toFixed(1);
+}
+
+function updateBW(bytes, ms) {
+  const bps = (bytes * 8) / (ms / 1000);
+  const mbps = bps / 1048576;
+  document.getElementById('stat-bw').textContent =
+    mbps >= 1 ? mbps.toFixed(1)+'M' : (bps/1024).toFixed(0)+'K';
+}
+
+// ─── LOG ─────────────────────────────────────────────────────────
+function log(msg, level='info') {
+  const el = document.getElementById('log');
+  const ts = new Date().toTimeString().slice(0,8);
+  const d = document.createElement('div');
+  d.className = 'entry ' + level;
+  d.innerHTML = `<span class="ts">${ts}</span><span class="msg">${msg}</span>`;
+  el.appendChild(d);
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearLog() { document.getElementById('log').innerHTML = ''; }
+
+// ─── SEGMENT LIST ─────────────────────────────────────────────────
+function addSeg(name, cls, kb) {
+  const list = document.getElementById('seg-list');
+  const d = document.createElement('div');
+  d.className = 'seg-item ' + cls;
+  d.innerHTML = `<span class="seg-icon"></span><span class="seg-name">${name}</span><span class="seg-size">${kb||''}</span>`;
+  list.prepend(d);
+  while (list.children.length > 30) list.removeChild(list.lastChild);
+  return d;
+}
+
+// ─── STATUS ──────────────────────────────────────────────────────
+function setStatus(text, type='') {
+  document.getElementById('status-dot').className = 'status-dot' + (type ? ' '+type : '');
+  document.getElementById('status-text').textContent = text;
+}
+
+function showOverlay(show) {
+  document.getElementById('overlay').classList.toggle('hidden', !show);
+}
+
+// ─── CUSTOM HLS LOADER ────────────────────────────────────────────
+// Replaces HLS.js's default XHR loader for segment fetches
+// so we can intercept each .image URL and strip the PNG wrapper.
+function buildLoader(Base) {
+  return class PNGAwareLoader extends Base {
+    load(context, config, callbacks) {
+      const useProxy   = document.getElementById('opt-proxy').checked;
+      const forcePNG   = document.getElementById('opt-png').checked;
+      const autoDetect = document.getElementById('opt-auto').checked;
+
+      // For manifest/playlist fetches use the default loader (with optional proxy)
+      if (context.type !== 'frag') {
+        if (useProxy) context.url = proxify(context.url);
+        return super.load(context, config, callbacks);
+      }
+
+      // ── Segment fetch ──────────────────────────────────────────
+      const url = context.url;
+      const name = url.split('/').pop().split('?')[0].slice(-32);
+      const segEl = addSeg(name, 'loading', '');
+      log('→ ' + name, 'info');
+
+      const fetchUrl = useProxy ? proxify(url) : url;
+      const t0 = performance.now();
+
+      fetch(fetchUrl)
+        .then(r => {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.arrayBuffer();
+        })
+        .then(buf => {
+          const elapsed = performance.now() - t0;
+          let wasWrapped = false;
+
+          if (forcePNG || (autoDetect && isPNGWrapped(buf))) {
+            const stripped = stripPNG(buf);
+            if (stripped.byteLength < buf.byteLength) {
+              wasWrapped = true;
+              buf = stripped;
+            }
+          }
+
+          stats.segs++;
+          stats.bytes += buf.byteLength;
+          if (wasWrapped) stats.wrapped++;
+          updateStats();
+          updateBW(buf.byteLength, elapsed);
+
+          const cls = wasWrapped ? 'loaded png-wrap' : 'loaded';
+          segEl.className = 'seg-item ' + cls;
+          segEl.querySelector('.seg-size').textContent = (buf.byteLength/1024).toFixed(1)+'k';
+
+          log(
+            '✓ ' + name + ' — ' + (buf.byteLength/1024).toFixed(1) +
+            ' KB in ' + elapsed.toFixed(0) + 'ms' + (wasWrapped ? ' [PNG unwrapped]' : ''),
+            wasWrapped ? 'warn' : 'ok'
+          );
+
+          const now = performance.now();
+          callbacks.onSuccess(
+            { url, data: buf, currentTarget: null, total: buf.byteLength, loaded: buf.byteLength },
+            { aborted: false, retry: 0, trequest: now, tfirst: now, tload: now,
+              loaded: buf.byteLength, total: buf.byteLength, bwEstimate: 0, url },
+            context,
+            null
+          );
+        })
+        .catch(err => {
+          segEl.className = 'seg-item error';
+          log('✗ ' + name + ' — ' + err.message, 'err');
+          setStatus('segment error', 'error');
+          callbacks.onError({ code: 0, text: err.message }, context, null, {});
+        });
+    }
+  };
+}
+
+// ─── CLEAR ───────────────────────────────────────────────────────
+function clearStream() {
+  if (hls) { hls.destroy(); hls = null; }
+  const v = document.getElementById('video');
+  v.src = '';
+  document.getElementById('seg-list').innerHTML = '';
+  document.getElementById('footer-url').textContent = '';
+  resetStats();
+  setStatus('idle');
+  showOverlay(true);
+  log('Stream cleared', 'warn');
+}
+
+// ─── LOAD ─────────────────────────────────────────────────────────
+async function loadStream() {
+  const url = document.getElementById('m3u8-input').value.trim();
+  if (!url) { log('Enter a .m3u8 URL first', 'warn'); return; }
+
+  clearStream();
+
+  const footerEl = document.getElementById('footer-url');
+  footerEl.textContent = url.length > 65 ? '…' + url.slice(-62) : url;
+  setStatus('loading…', 'active');
+  log('Loading: ' + url, 'info');
+
+  const btn = document.getElementById('load-btn');
+  btn.disabled = true;
+
+  const video = document.getElementById('video');
+  const useProxy = document.getElementById('opt-proxy').checked;
+
+  if (Hls.isSupported()) {
+    const Loader = buildLoader(Hls.DefaultConfig.loader);
+
+    hls = new Hls({
+      loader: Loader,
+      maxBufferLength: 30,
+      maxMaxBufferLength: 60,
+      enableWorker: true,
+      lowLatencyMode: false,
+      backBufferLength: 20,
+    });
+
+    hls.on(Hls.Events.MEDIA_ATTACHED, () => log('HLS attached', 'ok'));
+
+    hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+      log('Manifest parsed — ' + data.levels.length + ' quality level(s)', 'ok');
+      data.levels.forEach((l, i) => {
+        log('  Level ' + i + ': ' + l.width + '×' + l.height + ' @ ' + (l.bitrate/1000|0) + ' kbps', 'info');
+      });
+      setStatus('buffering…', 'active');
+      video.play().catch(() => {});
+    });
+
+    hls.on(Hls.Events.FRAG_LOADED, () => { setStatus('playing', 'active'); showOverlay(false); });
+
+    hls.on(Hls.Events.ERROR, (_, data) => {
+      if (data.fatal) {
+        log('Fatal: ' + data.type + ' / ' + data.details, 'err');
+        setStatus('error', 'error');
+      } else {
+        log('Warning: ' + data.details, 'warn');
+      }
+    });
+
+    const manifest = useProxy ? proxify(url) : url;
+    hls.loadSource(manifest);
+    hls.attachMedia(video);
+
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    log('Native HLS (Safari) — PNG stripping unavailable in this mode', 'warn');
+    video.src = url;
+    video.addEventListener('loadedmetadata', () => {
+      setStatus('playing', 'active');
+      showOverlay(false);
+      video.play().catch(() => {});
+    }, { once: true });
+  } else {
+    log('HLS not supported in this browser', 'err');
+    setStatus('unsupported', 'error');
+  }
+
+  btn.disabled = false;
+}
+
+// ─── VIDEO EVENTS ─────────────────────────────────────────────────
+const video = document.getElementById('video');
+video.addEventListener('playing', () => { setStatus('playing', 'active'); showOverlay(false); });
+video.addEventListener('pause',   () => setStatus('paused'));
+video.addEventListener('ended',   () => { setStatus('ended'); showOverlay(true); });
+video.addEventListener('waiting', () => setStatus('buffering…', 'active'));
+video.addEventListener('error',   () => { setStatus('video error', 'error'); log('Video element error', 'err'); });
+
+document.getElementById('m3u8-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadStream();
+});
+
+log('Ready — paste a .m3u8 URL and press Load Stream', 'info');
+log('PNG-wrapper detection enabled by default', 'ok');
+populatePresetStreams();
+</script>
+</body>
+</html>
