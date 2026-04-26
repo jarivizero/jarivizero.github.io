@@ -11,3 +11,8 @@ The use for this is you can access the file from any site since the Access-Contr
 No server sees the FULL url because of the #, not even me.  
 Uses encryption passphrases.  
 Grabs only the bytes needed, not all files from the .bin  (Range requests and from githubencryptor.py)  
+or you can store messages images videos for a rough discord  
+and even with the range requests, you can update the .bin file and extend the size  
+or just update the .bin file around the original file.  
+
+I should include multiple ranges incase the file is spread through out it like 0-200,500-550  
