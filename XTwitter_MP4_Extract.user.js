@@ -7,6 +7,7 @@
 // @match        https://twitter.com/*
 // @match        https://x.com/*
 // @grant        GM_setClipboard
+// @updateurl    https://github.com/jarivizero/jarivizero.github.io/raw/refs/heads/main/XTwitter_MP4_Extract.user.js
 // @run-at       document-idle
 // ==/UserScript==
 
