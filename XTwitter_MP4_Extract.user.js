@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name         Twitter MP4 Extractor / Video Downloader
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  Adds purple download button next to Share button on Twitter to extract MP4 from TweetDetail API
 // @author       jarivizero
 // @match        https://twitter.com/*
 // @match        https://x.com/*
 // @grant        GM_setClipboard
-// @updateurl    https://github.com/jarivizero/jarivizero.github.io/raw/refs/heads/main/XTwitter_MP4_Extract.user.js
+// @updateurl    https://jarivizero.github.io/XTwitter_MP4_Extract.user.js
 // @run-at       document-idle
 // ==/UserScript==
 
