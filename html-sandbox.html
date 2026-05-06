@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HTML Blob Saver</title>
+
+<style>
+    body {
+        font-family: Arial;
+        margin: 0;
+        background: #111;
+        color: #eee;
+    }
+
+    header {
+        padding: 10px;
+        background: #1a1a1a;
+        display: flex;
+        gap: 10px;
+    }
+
+    button {
+        padding: 6px 10px;
+        cursor: pointer;
+    }
+
+    #previewFrame {
+        width: 100%;
+        height: 300px;
+        border: none;
+        background: white;
+    }
+
+    #grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 10px;
+        padding: 10px;
+    }
+
+    .card {
+        background: #1e1e1e;
+        border-radius: 8px;
+        overflow: hidden;
+        position: relative;
+    }
+
+    .thumb {
+        width: 100%;
+        height: 120px;
+        background: #333;
+        object-fit: cover;
+    }
+
+    .meta {
+        padding: 6px;
+        font-size: 12px;
+    }
+
+    .title {
+        width: 100%;
+        background: transparent;
+        border: none;
+        color: #fff;
+        font-size: 14px;
+        outline: none;
+    }
+
+    .actions {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        opacity: 0;
+        transition: 0.2s;
+    }
+
+    .card:hover .actions {
+        opacity: 1;
+    }
+</style>
+</head>
+
+<body>
+
+<header>
+    <input type="file" id="fileInput" accept=".html,.htm">
+    <button onclick="saveCurrent()">Save Current</button>
+</header>
+
+<iframe id="previewFrame"></iframe>
+
+<div id="grid"></div>
+
+<script>
+const STORAGE_KEY = "html_blob_store_v1";
+let currentHTML = "";
+
+/* ---------------------------
+   LOAD FILE → PREVIEW
+---------------------------- */
+document.getElementById("fileInput").addEventListener("change", e => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+        currentHTML = reader.result;
+        renderPreview(currentHTML);
+    };
+    reader.readAsText(file);
+});
+
+function renderPreview(html) {
+    const blob = new Blob([html], { type: "text/html" });
+    const url = URL.createObjectURL(blob);
+    document.getElementById("previewFrame").src = url;
+}
+
+/* ---------------------------
+   STORAGE UTIL
+---------------------------- */
+function loadStore() {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+}
+
+function saveStore(data) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+/* ---------------------------
+   SAVE CURRENT HTML
+---------------------------- */
+async function saveCurrent() {
+    if (!currentHTML) return alert("No HTML loaded");
+
+    const thumb = await generateThumbnail(currentHTML);
+
+    const store = loadStore();
+    store.push({
+        id: Date.now(),
+        title: "Untitled",
+        html: currentHTML,
+        thumb,
+        modified: new Date().toISOString()
+    });
+
+    saveStore(store);
+    renderGrid();
+}
+
+/* ---------------------------
+   THUMBNAIL GENERATION
+---------------------------- */
+function generateThumbnail(html) {
+    return new Promise(resolve => {
+        const iframe = document.createElement("iframe");
+        iframe.style.position = "fixed";
+        iframe.style.left = "-9999px";
+        iframe.width = 800;
+        iframe.height = 600;
+        document.body.appendChild(iframe);
+
+        iframe.srcdoc = html;
+
+        iframe.onload = () => {
+            try {
+                const canvas = document.createElement("canvas");
+                canvas.width = 200;
+                canvas.height = 120;
+                const ctx = canvas.getContext("2d");
+
+                ctx.drawImage(iframe.contentWindow.document.body, 0, 0, 200, 120);
+
+                const data = canvas.toDataURL();
+                document.body.removeChild(iframe);
+                resolve(data);
+            } catch {
+                document.body.removeChild(iframe);
+                resolve(""); // fallback
+            }
+        };
+    });
+}
+
+/* ---------------------------
+   GRID RENDER
+---------------------------- */
+function renderGrid() {
+    const grid = document.getElementById("grid");
+    grid.innerHTML = "";
+
+    const store = loadStore();
+
+    store.forEach(item => {
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const img = document.createElement("img");
+        img.className = "thumb";
+        img.src = item.thumb || "";
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+
+        const title = document.createElement("input");
+        title.className = "title";
+        title.value = item.title;
+
+        title.onchange = () => {
+            item.title = title.value;
+            item.modified = new Date().toISOString();
+            saveStore(store);
+        };
+
+        const date = document.createElement("div");
+        date.textContent = new Date(item.modified).toLocaleString();
+
+        meta.appendChild(title);
+        meta.appendChild(date);
+
+        const actions = document.createElement("div");
+        actions.className = "actions";
+
+        const openBtn = document.createElement("button");
+        openBtn.textContent = "Open";
+        openBtn.onclick = () => {
+            currentHTML = item.html;
+            renderPreview(item.html);
+        };
+
+        const delBtn = document.createElement("button");
+        delBtn.textContent = "Delete";
+        delBtn.onclick = () => {
+            const updated = store.filter(x => x.id !== item.id);
+            saveStore(updated);
+            renderGrid();
+        };
+
+        actions.appendChild(openBtn);
+        actions.appendChild(delBtn);
+
+        card.appendChild(img);
+        card.appendChild(meta);
+        card.appendChild(actions);
+
+        grid.appendChild(card);
+    });
+}
+
+/* ---------------------------
+   INIT
+---------------------------- */
+renderGrid();
+</script>
+
+</body>
+</html>
