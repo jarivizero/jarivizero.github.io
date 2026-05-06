@@ -2,88 +2,89 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>HTML Blob Saver</title>
+<title>HTML Blob Manager</title>
 
 <style>
-    body {
-        font-family: Arial;
-        margin: 0;
-        background: #111;
-        color: #eee;
-    }
+body {
+    margin:0;
+    font-family:Arial;
+    background:#0f0f0f;
+    color:#eee;
+}
 
-    header {
-        padding: 10px;
-        background: #1a1a1a;
-        display: flex;
-        gap: 10px;
-    }
+/* Top bar */
+header {
+    display:flex;
+    gap:8px;
+    padding:10px;
+    background:#1a1a1a;
+}
 
-    button {
-        padding: 6px 10px;
-        cursor: pointer;
-    }
+textarea {
+    width:100%;
+    height:200px;
+    background:#111;
+    color:#0f0;
+    border:none;
+    padding:10px;
+    font-family:monospace;
+    resize:vertical;
+}
 
-    #previewFrame {
-        width: 100%;
-        height: 300px;
-        border: none;
-        background: white;
-    }
+/* Grid */
+#grid {
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+    gap:10px;
+    padding:10px;
+}
 
-    #grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-        gap: 10px;
-        padding: 10px;
-    }
+.card {
+    background:#1c1c1c;
+    border-radius:8px;
+    overflow:hidden;
+    position:relative;
+}
 
-    .card {
-        background: #1e1e1e;
-        border-radius: 8px;
-        overflow: hidden;
-        position: relative;
-    }
+.thumb {
+    width:100%;
+    height:130px;
+    border:none;
+    background:#fff;
+}
 
-    .thumb {
-        width: 100%;
-        height: 120px;
-        background: #333;
-        object-fit: cover;
-    }
+.meta {
+    padding:6px;
+    font-size:12px;
+}
 
-    .meta {
-        padding: 6px;
-        font-size: 12px;
-    }
+.title {
+    width:100%;
+    background:transparent;
+    border:none;
+    color:#fff;
+}
 
-    .title {
-        width: 100%;
-        background: transparent;
-        border: none;
-        color: #fff;
-        font-size: 14px;
-        outline: none;
-    }
+/* Hover actions */
+.actions {
+    position:absolute;
+    inset:0;
+    background:rgba(0,0,0,0.75);
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    gap:8px;
+    opacity:0;
+    transition:.2s;
+}
 
-    .actions {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(0,0,0,0.7);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 10px;
-        opacity: 0;
-        transition: 0.2s;
-    }
+.card:hover .actions {
+    opacity:1;
+}
 
-    .card:hover .actions {
-        opacity: 1;
-    }
+button {
+    cursor:pointer;
+}
 </style>
 </head>
 
@@ -91,120 +92,94 @@
 
 <header>
     <input type="file" id="fileInput" accept=".html,.htm">
-    <button onclick="saveCurrent()">Save Current</button>
+    <button onclick="loadFromFile()">Load File</button>
+    <button onclick="saveHTML()">Save</button>
+    <button onclick="openPreview()">Open Preview (New Tab)</button>
 </header>
 
-<iframe id="previewFrame"></iframe>
+<textarea id="editor" placeholder="Paste or edit HTML here..."></textarea>
 
 <div id="grid"></div>
 
 <script>
-const STORAGE_KEY = "html_blob_store_v1";
-let currentHTML = "";
+const KEY = "html_store_v2";
 
-/* ---------------------------
-   LOAD FILE → PREVIEW
----------------------------- */
-document.getElementById("fileInput").addEventListener("change", e => {
-    const file = e.target.files[0];
-    if (!file) return;
+/* -------------------------
+   STORAGE
+------------------------- */
+function getStore(){
+    return JSON.parse(localStorage.getItem(KEY) || "[]");
+}
+
+function setStore(data){
+    localStorage.setItem(KEY, JSON.stringify(data));
+}
+
+/* -------------------------
+   FILE LOAD
+------------------------- */
+function loadFromFile(){
+    const input = document.getElementById("fileInput");
+    if(!input.files.length) return;
 
     const reader = new FileReader();
     reader.onload = () => {
-        currentHTML = reader.result;
-        renderPreview(currentHTML);
+        document.getElementById("editor").value = reader.result;
     };
-    reader.readAsText(file);
-});
-
-function renderPreview(html) {
-    const blob = new Blob([html], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    document.getElementById("previewFrame").src = url;
+    reader.readAsText(input.files[0]);
 }
 
-/* ---------------------------
-   STORAGE UTIL
----------------------------- */
-function loadStore() {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-}
+/* -------------------------
+   SAVE HTML
+------------------------- */
+function saveHTML(){
+    const html = document.getElementById("editor").value;
+    if(!html.trim()) return alert("Empty HTML");
 
-function saveStore(data) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
+    const store = getStore();
 
-/* ---------------------------
-   SAVE CURRENT HTML
----------------------------- */
-async function saveCurrent() {
-    if (!currentHTML) return alert("No HTML loaded");
-
-    const thumb = await generateThumbnail(currentHTML);
-
-    const store = loadStore();
     store.push({
         id: Date.now(),
         title: "Untitled",
-        html: currentHTML,
-        thumb,
+        html,
         modified: new Date().toISOString()
     });
 
-    saveStore(store);
+    setStore(store);
     renderGrid();
 }
 
-/* ---------------------------
-   THUMBNAIL GENERATION
----------------------------- */
-function generateThumbnail(html) {
-    return new Promise(resolve => {
-        const iframe = document.createElement("iframe");
-        iframe.style.position = "fixed";
-        iframe.style.left = "-9999px";
-        iframe.width = 800;
-        iframe.height = 600;
-        document.body.appendChild(iframe);
+/* -------------------------
+   OPEN IN NEW TAB (BLOB)
+------------------------- */
+function openPreview(html=null){
+    const content = html || document.getElementById("editor").value;
+    if(!content.trim()) return;
 
-        iframe.srcdoc = html;
+    const blob = new Blob([content], {type:"text/html"});
+    const url = URL.createObjectURL(blob);
 
-        iframe.onload = () => {
-            try {
-                const canvas = document.createElement("canvas");
-                canvas.width = 200;
-                canvas.height = 120;
-                const ctx = canvas.getContext("2d");
-
-                ctx.drawImage(iframe.contentWindow.document.body, 0, 0, 200, 120);
-
-                const data = canvas.toDataURL();
-                document.body.removeChild(iframe);
-                resolve(data);
-            } catch {
-                document.body.removeChild(iframe);
-                resolve(""); // fallback
-            }
-        };
-    });
+    window.open(url, "_blank");
 }
 
-/* ---------------------------
+/* -------------------------
    GRID RENDER
----------------------------- */
-function renderGrid() {
+------------------------- */
+function renderGrid(){
     const grid = document.getElementById("grid");
     grid.innerHTML = "";
 
-    const store = loadStore();
+    const store = getStore();
 
-    store.forEach(item => {
+    store.forEach(item=>{
         const card = document.createElement("div");
         card.className = "card";
 
-        const img = document.createElement("img");
-        img.className = "thumb";
-        img.src = item.thumb || "";
+        /* SAFE THUMBNAIL (sandbox iframe) */
+        const iframe = document.createElement("iframe");
+        iframe.className = "thumb";
+        iframe.sandbox = "";
+        iframe.srcdoc = item.html;
 
         const meta = document.createElement("div");
         meta.className = "meta";
@@ -213,10 +188,10 @@ function renderGrid() {
         title.className = "title";
         title.value = item.title;
 
-        title.onchange = () => {
+        title.onchange = ()=>{
             item.title = title.value;
             item.modified = new Date().toISOString();
-            saveStore(store);
+            setStore(store);
         };
 
         const date = document.createElement("div");
@@ -225,28 +200,33 @@ function renderGrid() {
         meta.appendChild(title);
         meta.appendChild(date);
 
+        /* ACTIONS */
         const actions = document.createElement("div");
         actions.className = "actions";
 
         const openBtn = document.createElement("button");
         openBtn.textContent = "Open";
-        openBtn.onclick = () => {
-            currentHTML = item.html;
-            renderPreview(item.html);
+        openBtn.onclick = ()=>openPreview(item.html);
+
+        const editBtn = document.createElement("button");
+        editBtn.textContent = "Edit";
+        editBtn.onclick = ()=>{
+            document.getElementById("editor").value = item.html;
         };
 
         const delBtn = document.createElement("button");
         delBtn.textContent = "Delete";
-        delBtn.onclick = () => {
-            const updated = store.filter(x => x.id !== item.id);
-            saveStore(updated);
+        delBtn.onclick = ()=>{
+            const updated = store.filter(x=>x.id!==item.id);
+            setStore(updated);
             renderGrid();
         };
 
         actions.appendChild(openBtn);
+        actions.appendChild(editBtn);
         actions.appendChild(delBtn);
 
-        card.appendChild(img);
+        card.appendChild(iframe);
         card.appendChild(meta);
         card.appendChild(actions);
 
@@ -254,9 +234,9 @@ function renderGrid() {
     });
 }
 
-/* ---------------------------
+/* -------------------------
    INIT
----------------------------- */
+------------------------- */
 renderGrid();
 </script>
 
