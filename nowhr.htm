@@ -55,34 +55,423 @@
   </div>
 <script>
 const $ = s => document.querySelector(s);
-const out = $('#out'), statusEl = $('#status'), media = $('#media'), sentinel = $('#sentinel');
-let plainText = '', loaded = 0, currentText = '';
-function setStatus(t){statusEl.textContent = t}
-function isBase64(s){return /^[A-Za-z0-9+/=\n\r_-]+$/.test(s) && s.length % 4 !== 1}
-function b64ToBytes(b64){const s=atob(b64.replace(/-/g,'+').replace(/_/g,'/'));const a=new Uint8Array(s.length);for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a}
-function bytesToText(bytes){return new TextDecoder().decode(bytes)}
-function parseHash(h){h=(h||location.hash||'').replace(/^#/,'');if(!h)return null;const parts=h.split(':');if(parts.length>=4&&/\.\w+$/.test(parts[3])) return {file:parts[0],range:parts[1],key:parts[2]||'githubjarivizero',saveas:parts.slice(3).join(':')}; if(parts.length>=3&&/\d+-\d+/.test(parts[1])) return {file:parts[0],range:parts[1],key:parts[2]||'githubjarivizero',saveas:''}; return {raw:h}} 
-async function fetchRange(url,start,end){const r=await fetch(url,{headers:{Range:`bytes=${start}-${end}`}});return new Uint8Array(await r.arrayBuffer())}
-async function decryptBytes(bytes,key){const k=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(key));const iv=new Uint8Array(16);const data=bytes.slice(16);const ivsrc=bytes.slice(0,16);iv.set(ivsrc);const cryptoKey=await crypto.subtle.importKey('raw',k,{name:'AES-CBC'},false,['decrypt']);return new Uint8Array(await crypto.subtle.decrypt({name:'AES-CBC',iv},cryptoKey,data))}
-function renderMedia(blob,name){media.innerHTML='';const url=URL.createObjectURL(blob); if(/\.mp3$/i.test(name)){const a=document.createElement('audio');a.controls=true;a.src=url;media.appendChild(a)} else if(/\.mp4$/i.test(name)){const v=document.createElement('video');v.controls=true;v.src=url;media.appendChild(v)} else {const a=document.createElement('a');a.href=url;a.download=name||'download.bin';a.textContent='Download decrypted file';a.style.color='var(--accent)';a.style.display='inline-block';a.style.marginTop='10px';media.appendChild(a)}}
-function appendText(t){currentText += t;out.textContent = currentText}
-async function loadTextLazy(text){currentText='';out.textContent='';let i=0;const chunk=5000;function step(){const next=text.slice(i,i+chunk); appendText(next); i+=chunk; if(i<text.length) requestAnimationFrame(step)} step()}
-async function load(){const raw=$('#src').value.trim()||location.hash; if(!raw){setStatus('Enter a hash or paste a base64/plaintext value.');return}
-let parsed=parseHash(raw); if(!parsed){setStatus('Nothing to load.');return}
-if(parsed.raw){const v=parsed.raw; if(isBase64(v)){try{const txt=bytesToText(b64ToBytes(v)); out.textContent=txt; setStatus('Base64 decoded as text.'); return}catch(e){out.textContent=v; setStatus('Not valid text; showing raw input.'); return}} out.textContent=v; setStatus('Plaintext shown.'); return}
-const mainurl=$('#mainurl').value.replace(/\/$/,'')+'/'
-const url=new URL(parsed.file,mainurl).toString()
-const [s,e]=parsed.range.split('-').map(n=>parseInt(n,10))
-setStatus('Fetching bytes...')
-let bytes=await fetchRange(url,s||0,e||499)
-if(parsed.key){setStatus('Decrypting...'); try{bytes=await decryptBytes(bytes,parsed.key||'githubjarivizero')}catch(e){setStatus('Decrypt failed; showing bytes.')}}
-const saveas=parsed.saveas||''
-const text=bytesToText(bytes)
-const likelyText=saveas.toLowerCase().startsWith('text/') || /\.(txt|md|json|js|css|html|svg|xml|csv|log|yml|yaml)$/i.test(saveas)
-if(saveas && !likelyText){const blob=new Blob([bytes]); renderMedia(blob,saveas); out.textContent=text.slice(0,500); setStatus('Binary file loaded; previewing first 500 chars and offering download.'); return}
-if(text.length > 500000){setStatus('Large text detected; lazy loading on scroll.'); plainText=text; loaded=0; currentText=''; out.textContent=''; const obs=new IntersectionObserver((entries)=>{if(entries.some(e=>e.isIntersecting)&&loaded<plainText.length){const next=plainText.slice(loaded, loaded+50000); loaded += next.length; appendText(next); if(loaded>=plainText.length) obs.disconnect()}},{root:null,threshold:0.1}); obs.observe(sentinel); requestAnimationFrame(()=>sentinel.scrollIntoView({block:'end'})); return}
-out.textContent=text; setStatus('Done.'); }
-$('#go').addEventListener('click',load); window.addEventListener('hashchange',load); window.addEventListener('load',()=>{if(location.hash) load()});
+
+const out = $('#out');
+const statusEl = $('#status');
+const media = $('#media');
+const sentinel = $('#sentinel');
+
+let plainText = '';
+let loaded = 0;
+let currentText = '';
+
+function setStatus(t){
+    statusEl.textContent = t;
+}
+
+function isBase64(s){
+    s = (s || '').trim();
+
+    if(!s || s.length < 8) return false;
+
+    s = s.replace(/\s+/g, '');
+
+    return (
+        /^[A-Za-z0-9+/=_-]+$/.test(s) &&
+        s.length % 4 !== 1
+    );
+}
+
+function normalizeBase64(b64){
+    return b64
+        .replace(/\s+/g, '')
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+}
+
+function b64ToBytes(b64){
+    const s = atob(normalizeBase64(b64));
+
+    const a = new Uint8Array(s.length);
+
+    for(let i = 0; i < s.length; i++){
+        a[i] = s.charCodeAt(i);
+    }
+
+    return a;
+}
+
+function bytesToText(bytes){
+    return new TextDecoder().decode(bytes);
+}
+
+function tryParseJSON(text){
+    try{
+        return JSON.parse(text);
+    }catch{
+        return null;
+    }
+}
+
+function parseHash(h){
+    h = (h || location.hash || '').replace(/^#/, '');
+
+    if(!h) return null;
+
+    const parts = h.split(':');
+
+    if(parts.length >= 4 && /\.\w+$/.test(parts[3])){
+        return {
+            file: parts[0],
+            range: parts[1],
+            key: parts[2] || 'githubjarivizero',
+            saveas: parts.slice(3).join(':')
+        };
+    }
+
+    if(parts.length >= 3 && /\d+-\d+/.test(parts[1])){
+        return {
+            file: parts[0],
+            range: parts[1],
+            key: parts[2] || 'githubjarivizero',
+            saveas: ''
+        };
+    }
+
+    return { raw: h };
+}
+
+async function fetchRange(url, start, end){
+    const r = await fetch(url, {
+        headers: {
+            Range: `bytes=${start}-${end}`
+        }
+    });
+
+    return new Uint8Array(await r.arrayBuffer());
+}
+
+async function decryptBytes(bytes, key){
+    const k = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(key)
+    );
+
+    const iv = new Uint8Array(16);
+
+    const data = bytes.slice(16);
+    const ivsrc = bytes.slice(0, 16);
+
+    iv.set(ivsrc);
+
+    const cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        k,
+        { name: 'AES-CBC' },
+        false,
+        ['decrypt']
+    );
+
+    return new Uint8Array(
+        await crypto.subtle.decrypt(
+            { name: 'AES-CBC', iv },
+            cryptoKey,
+            data
+        )
+    );
+}
+
+function renderMedia(blob, name){
+    media.innerHTML = '';
+
+    const url = URL.createObjectURL(blob);
+
+    if(/\.mp3$/i.test(name)){
+        const a = document.createElement('audio');
+
+        a.controls = true;
+        a.src = url;
+
+        media.appendChild(a);
+    }
+    else if(/\.mp4$/i.test(name)){
+        const v = document.createElement('video');
+
+        v.controls = true;
+        v.src = url;
+
+        media.appendChild(v);
+    }
+    else{
+        const a = document.createElement('a');
+
+        a.href = url;
+        a.download = name || 'download.bin';
+        a.textContent = 'Download decrypted file';
+
+        a.style.color = 'var(--accent)';
+        a.style.display = 'inline-block';
+        a.style.marginTop = '10px';
+
+        media.appendChild(a);
+    }
+}
+
+function appendText(t){
+    currentText += t;
+    out.textContent = currentText;
+}
+
+async function loadTextLazy(text){
+    currentText = '';
+    out.textContent = '';
+
+    let i = 0;
+
+    const chunk = 5000;
+
+    function step(){
+        const next = text.slice(i, i + chunk);
+
+        appendText(next);
+
+        i += chunk;
+
+        if(i < text.length){
+            requestAnimationFrame(step);
+        }
+    }
+
+    step();
+}
+
+async function tryLoadBase64AsHash(base64Text){
+    try{
+        const decoded = bytesToText(b64ToBytes(base64Text)).trim();
+
+        if(!decoded){
+            return false;
+        }
+
+        const parsed = parseHash(decoded);
+
+        if(parsed && !parsed.raw){
+            $('#src').value = decoded;
+
+            setStatus('Base64 decoded into loader hash. Fetching file...');
+
+            await load();
+
+            return true;
+        }
+
+        const json = tryParseJSON(decoded);
+
+        if(json){
+            if(typeof json === 'string'){
+                $('#src').value = json;
+
+                setStatus('Base64 decoded into nested value. Retrying...');
+
+                await load();
+
+                return true;
+            }
+
+            if(json.file && json.range){
+                const reconstructed =
+                    `${json.file}:${json.range}:${json.key || ''}:${json.saveas || ''}`;
+
+                $('#src').value = reconstructed;
+
+                setStatus('Base64 decoded into JSON loader config. Fetching...');
+
+                await load();
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+    catch{
+        return false;
+    }
+}
+
+async function load(){
+    const raw = $('#src').value.trim() || location.hash;
+
+    if(!raw){
+        setStatus('Enter a hash or paste a base64/plaintext value.');
+        return;
+    }
+
+    let parsed = parseHash(raw);
+
+    if(!parsed){
+        setStatus('Nothing to load.');
+        return;
+    }
+
+    if(parsed.raw){
+
+        const v = parsed.raw.trim();
+
+        if(isBase64(v)){
+
+            const nestedLoaded = await tryLoadBase64AsHash(v);
+
+            if(nestedLoaded){
+                return;
+            }
+
+            try{
+                const bytes = b64ToBytes(v);
+
+                const txt = bytesToText(bytes);
+
+                out.textContent = txt;
+
+                setStatus('Base64 decoded as text.');
+
+                return;
+            }
+            catch(e){
+                out.textContent = v;
+
+                setStatus('Invalid base64; showing raw input.');
+
+                return;
+            }
+        }
+
+        out.textContent = v;
+
+        setStatus('Plaintext shown.');
+
+        return;
+    }
+
+    const mainurl = $('#mainurl')
+        .value
+        .replace(/\/$/, '') + '/';
+
+    const url = new URL(parsed.file, mainurl).toString();
+
+    const [s, e] = parsed.range
+        .split('-')
+        .map(n => parseInt(n, 10));
+
+    setStatus('Fetching bytes...');
+
+    let bytes = await fetchRange(
+        url,
+        s || 0,
+        e || 499
+    );
+
+    if(parsed.key){
+
+        setStatus('Decrypting...');
+
+        try{
+            bytes = await decryptBytes(
+                bytes,
+                parsed.key || 'githubjarivizero'
+            );
+        }
+        catch(e){
+            setStatus('Decrypt failed; showing bytes.');
+        }
+    }
+
+    const saveas = parsed.saveas || '';
+
+    const text = bytesToText(bytes);
+
+    const likelyText =
+        saveas.toLowerCase().startsWith('text/') ||
+        /\.(txt|md|json|js|css|html|svg|xml|csv|log|yml|yaml)$/i.test(saveas);
+
+    if(saveas && !likelyText){
+
+        const blob = new Blob([bytes]);
+
+        renderMedia(blob, saveas);
+
+        out.textContent = text.slice(0, 500);
+
+        setStatus(
+            'Binary file loaded; previewing first 500 chars and offering download.'
+        );
+
+        return;
+    }
+
+    if(text.length > 500000){
+
+        setStatus('Large text detected; lazy loading on scroll.');
+
+        plainText = text;
+
+        loaded = 0;
+
+        currentText = '';
+
+        out.textContent = '';
+
+        const obs = new IntersectionObserver(
+            (entries) => {
+
+                if(
+                    entries.some(e => e.isIntersecting) &&
+                    loaded < plainText.length
+                ){
+
+                    const next = plainText.slice(
+                        loaded,
+                        loaded + 50000
+                    );
+
+                    loaded += next.length;
+
+                    appendText(next);
+
+                    if(loaded >= plainText.length){
+                        obs.disconnect();
+                    }
+                }
+            },
+            {
+                root: null,
+                threshold: 0.1
+            }
+        );
+
+        obs.observe(sentinel);
+
+        requestAnimationFrame(() => {
+            sentinel.scrollIntoView({ block: 'end' });
+        });
+
+        return;
+    }
+
+    out.textContent = text;
+
+    setStatus('Done.');
+}
+
+$('#go').addEventListener('click', load);
+
+window.addEventListener('hashchange', load);
+
+window.addEventListener('load', () => {
+    if(location.hash){
+        load();
+    }
+});
 </script>
 </body>
 </html>
