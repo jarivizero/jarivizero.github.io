@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Twitter PNG Codec</title>
+<style>
+  :root {
+    --bg: #0e0e10;
+    --bg2: #18181b;
+    --bg3: #27272a;
+    --border: #3f3f46;
+    --text: #fafafa;
+    --muted: #a1a1aa;
+    --accent: #22d3ee;
+    --accent2: #818cf8;
+    --danger: #f87171;
+    --success: #4ade80;
+    --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+  .header {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 1.25rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+  .header h1 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .header h1 span { color: var(--accent); }
+  .badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    padding: 0 2rem;
+  }
+  .tab {
+    padding: 0.75rem 1.5rem;
+    cursor: pointer;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-weight: 500;
+    font-size: 13px;
+    transition: color 0.15s, border-color 0.15s;
+    letter-spacing: 0.02em;
+    user-select: none;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-color: var(--accent); }
+
+  .panel { display: none; padding: 2rem; max-width: 900px; margin: 0 auto; }
+  .panel.active { display: block; }
+
+  .section-label {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.6rem;
+    font-weight: 500;
+  }
+
+  .dropzone {
+    border: 1.5px dashed var(--border);
+    border-radius: 10px;
+    padding: 2.5rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    background: var(--bg2);
+    position: relative;
+  }
+  .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: rgba(34,211,238,0.04); }
+  .dropzone i { font-size: 2rem; color: var(--muted); display: block; margin-bottom: 0.5rem; }
+  .dropzone p { color: var(--muted); font-size: 13px; }
+  .dropzone p span { color: var(--accent); }
+  .dropzone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+
+  .divider-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 1.5rem 0;
+  }
+  .divider-line { flex: 1; height: 1px; background: var(--border); }
+  .divider-text { color: var(--muted); font-size: 12px; }
+
+  textarea {
+    width: 100%;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 0.75rem 1rem;
+    resize: vertical;
+    min-height: 120px;
+    line-height: 1.6;
+    transition: border-color 0.15s;
+    outline: none;
+  }
+  textarea:focus { border-color: var(--accent); }
+  textarea::placeholder { color: var(--muted); }
+
+  input[type=text] {
+    width: 100%;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 0.75rem 1rem;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input[type=text]:focus { border-color: var(--accent); }
+  input[type=text]::placeholder { color: var(--muted); }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.55rem 1.25rem;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--bg3);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+    user-select: none;
+  }
+  .btn:hover { background: var(--border); }
+  .btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #000;
+    font-weight: 700;
+  }
+  .btn.primary:hover { background: #67e8f9; }
+  .btn.danger { border-color: var(--danger); color: var(--danger); }
+  .btn.danger:hover { background: rgba(248,113,113,0.1); }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0.65rem 1rem;
+    border-radius: 7px;
+    font-size: 13px;
+    margin-top: 1rem;
+    border: 1px solid transparent;
+  }
+  .status.info { background: rgba(34,211,238,0.08); border-color: rgba(34,211,238,0.25); color: var(--accent); }
+  .status.success { background: rgba(74,222,128,0.08); border-color: rgba(74,222,128,0.25); color: var(--success); }
+  .status.error { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.25); color: var(--danger); }
+  .status.warn { background: rgba(251,191,36,0.08); border-color: rgba(251,191,36,0.25); color: var(--warn); }
+
+  .stats-row {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 1rem;
+    font-size: 12px;
+  }
+  .stat .val { color: var(--accent); font-weight: 700; font-size: 15px; display: block; }
+  .stat .lbl { color: var(--muted); }
+
+  .preview-canvas-wrap {
+    margin-top: 1.5rem;
+    background: repeating-conic-gradient(#2a2a2e 0% 25%, #1a1a1e 0% 50%) 0 0 / 16px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+  }
+  canvas { display: block; max-width: 100%; image-rendering: pixelated; }
+
+  .action-row { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; align-items: center; }
+
+  .decode-result {
+    margin-top: 1.5rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .decode-result-header {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .decode-result-body { padding: 1rem; }
+  .mime-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(129,140,248,0.15);
+    border: 1px solid rgba(129,140,248,0.3);
+    color: var(--accent2);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .size-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  .decode-media { max-width: 100%; border-radius: 6px; display: block; }
+  video.decode-media, audio.decode-media { width: 100%; }
+  .decode-text-pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 400px;
+    overflow-y: auto;
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  .progress-bar-wrap {
+    background: var(--bg3);
+    border-radius: 4px;
+    height: 4px;
+    margin-top: 0.5rem;
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 4px;
+    transition: width 0.1s;
+    width: 0%;
+  }
+
+  /* ── How it works ── */
+  .how-it-works {
+    background: var(--bg2);
+    border-top: 1px solid var(--border);
+    padding: 3rem 2rem 2.5rem;
+  }
+  .how-it-works-inner {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+  .how-it-works h2 {
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    margin-bottom: 1.5rem;
+  }
+  .how-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .how-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.1rem 1rem;
+    transition: border-color 0.2s;
+  }
+  .how-card:hover { border-color: var(--accent); }
+  .how-card-icon {
+    font-size: 1.5rem;
+    margin-bottom: 0.6rem;
+    display: block;
+  }
+  .how-card-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+  .how-card-body {
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.65;
+  }
+  .how-card-body strong { color: var(--text); font-weight: 600; }
+
+  .how-tagline {
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.7;
+    border-left: 2px solid var(--border);
+    padding-left: 1rem;
+    margin-bottom: 2rem;
+  }
+  .how-tagline strong { color: var(--text); }
+
+  /* ── Footer social links ── */
+  .footer {
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding: 1.25rem 2rem;
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+  }
+  .social-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0.5rem 1.1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 500;
+    text-decoration: none;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    transition: color 0.18s, border-color 0.18s, background 0.18s, transform 0.18s, box-shadow 0.18s;
+    position: relative;
+    overflow: hidden;
+  }
+  .social-btn::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.18s;
+    border-radius: inherit;
+  }
+  .social-btn:hover {
+    transform: translateY(-2px);
+  }
+  .social-btn.github:hover {
+    color: #fff;
+    border-color: #6e7681;
+    background: #21262d;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  }
+  .social-btn.twitter:hover {
+    color: #000;
+    border-color: #22d3ee;
+    background: #22d3ee;
+    box-shadow: 0 4px 16px rgba(34,211,238,0.25);
+  }
+  .social-btn svg {
+    flex-shrink: 0;
+    transition: transform 0.18s;
+  }
+  .social-btn:hover svg { transform: scale(1.15); }
+  .social-btn:active { transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Twitter <span>PNG</span> Codec</h1>
+  <span class="badge">encode</span>
+  <span class="badge">decode</span>
+  <span class="badge" style="color:var(--accent);border-color:var(--accent)">899×898</span>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('encode')">Encode → PNG</div>
+  <div class="tab" onclick="switchTab('decode')">Decode ← PNG</div>
+</div>
+
+<div id="tab-encode" class="panel active">
+  <p class="section-label">Input — file or text</p>
+  <div class="dropzone" id="enc-dropzone">
+    <input type="file" id="enc-file-input" onchange="handleEncodeFile(this)">
+    <i>📁</i>
+    <p>Drop any file here or <span>click to browse</span></p>
+  </div>
+
+  <div class="divider-row">
+    <div class="divider-line"></div>
+    <div class="divider-text">or type text (live preview)</div>
+    <div class="divider-line"></div>
+  </div>
+
+  <textarea id="enc-text" placeholder="Type anything here — the PNG updates in real-time…" oninput="handleEncodeText()"></textarea>
+
+  <div id="enc-status" class="status info" style="display:none"></div>
+
+  <div class="stats-row" id="enc-stats" style="display:none">
+    <div class="stat"><span class="val" id="stat-bytes">0</span><span class="lbl">bytes</span></div>
+    <div class="stat"><span class="val" id="stat-pixels">0</span><span class="lbl">data pixels</span></div>
+    <div class="stat"><span class="val" id="stat-used">0%</span><span class="lbl">canvas used</span></div>
+    <div class="stat"><span class="val" id="stat-remaining">0</span><span class="lbl">transparent padding</span></div>
+  </div>
+
+  <div id="enc-preview-wrap" style="display:none; margin-top:1.5rem;">
+    <p class="section-label">Preview — 899×898</p>
+    <div class="preview-canvas-wrap">
+      <canvas id="enc-canvas" width="899" height="898"></canvas>
+    </div>
+    <div class="action-row">
+      <button class="btn primary" onclick="downloadEncoded()">⬇ Download PNG</button>
+      <button class="btn" onclick="clearEncode()">✕ Clear</button>
+    </div>
+  </div>
+</div>
+
+<div id="tab-decode" class="panel">
+  <p class="section-label">Load encoded PNG</p>
+  <div class="dropzone" id="dec-dropzone">
+    <input type="file" id="dec-file-input" accept="image/png" onchange="handleDecodeFile(this)">
+    <i>🖼️</i>
+    <p>Drop an encoded PNG or <span>click to browse</span></p>
+  </div>
+
+  <div class="divider-row">
+    <div class="divider-line"></div>
+    <div class="divider-text">or paste Twitter URL / media ID</div>
+    <div class="divider-line"></div>
+  </div>
+
+  <div style="display:flex;gap:0.75rem;align-items:stretch">
+    <input type="text" id="dec-url" placeholder="https://pbs.twimg.com/media/HIAXGy_XAAAPSen  or just  HIAXGy_XAAAPSen">
+    <button class="btn primary" onclick="handleDecodeUrl()" style="white-space:nowrap">Fetch & Decode</button>
+  </div>
+
+  <div id="dec-status" class="status info" style="display:none"></div>
+  <div class="progress-bar-wrap" id="dec-progress-wrap" style="display:none">
+    <div class="progress-bar" id="dec-progress"></div>
+  </div>
+
+  <div id="dec-result" class="decode-result" style="display:none">
+    <div class="decode-result-header">
+      <span id="dec-mime" class="mime-badge"></span>
+      <span id="dec-size" class="size-badge"></span>
+      <span id="dec-filename" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div class="decode-result-body" id="dec-body"></div>
+  </div>
+  <div class="action-row" id="dec-actions" style="display:none">
+    <button class="btn primary" id="dec-download-btn" onclick="downloadDecoded()">⬇ Download File</button>
+    <button class="btn" onclick="clearDecode()">✕ Clear</button>
+  </div>
+</div>
+
+<!-- ── How It Works ── -->
+<div class="how-it-works">
+  <div class="how-it-works-inner">
+    <h2>How it works</h2>
+
+    <div class="how-tagline">
+      Every PNG pixel has four channels — <strong>Red, Green, Blue, and Alpha</strong> (opacity). This tool exploits all four to smuggle raw bytes into a lossless image that survives upload to Twitter/X without compression.
+    </div>
+
+    <div class="how-cards">
+      <div class="how-card">
+        <span class="how-card-icon">🎨</span>
+        <div class="how-card-title">Full color palette</div>
+        <div class="how-card-body">
+          Each pixel's <strong>RGB channels</strong> carry three bytes of your payload — any color is fair game. The entire 16-million-color space is used as a data bus.
+        </div>
+      </div>
+      <div class="how-card">
+        <span class="how-card-icon">👁️</span>
+        <div class="how-card-title">Opacity as data</div>
+        <div class="how-card-body">
+          The <strong>alpha channel</strong> encodes how many bytes live in a boundary pixel — <code style="color:var(--accent);font-size:11px">255</code> = 3 bytes full, <code style="color:var(--accent);font-size:11px">170</code> = 2 bytes, <code style="color:var(--accent);font-size:11px">85</code> = 1 byte. Fully transparent pixels signal end-of-data.
+        </div>
+      </div>
+      <div class="how-card">
+        <span class="how-card-icon">📐</span>
+        <div class="how-card-title">899 × 898 resolution</div>
+        <div class="how-card-body">
+          Twitter recompresses images above a certain pixel count. <strong>899×898</strong> sits just under that threshold — large enough to hold ~3 MB of data, small enough to pass through untouched.
+        </div>
+      </div>
+      <div class="how-card">
+        <span class="how-card-icon">🔒</span>
+        <div class="how-card-title">Up to 3 MB hidden</div>
+        <div class="how-card-body">
+          With 807,102 pixels × 3 bytes each you can encode <strong>files, text, encrypted messages, archives</strong> — anything that fits in ~2.4 MB of raw data, right inside a public tweet image.
+        </div>
+      </div>
+      <div class="how-card">
+        <span class="how-card-icon">🌐</span>
+        <div class="how-card-title">Decode from URL</div>
+        <div class="how-card-body">
+          Paste any <strong>Twitter/X image URL</strong> or bare media ID directly — the tool fetches the PNG from <code style="color:var(--accent);font-size:11px">pbs.twimg.com</code> and decodes it client-side, nothing leaves your browser.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Footer ── -->
+<div class="footer">
+  <a class="social-btn github" href="https://github.com/jarivizero/jarivizero.github.io" target="_blank" rel="noopener">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+    </svg>
+    GitHub
+  </a>
+  <a class="social-btn twitter" href="https://x.com/jarivizero" target="_blank" rel="noopener">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.748l7.73-8.835L1.254 2.25H8.08l4.259 5.63 5.905-5.63Zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+    </svg>
+    @jarivizero
+  </a>
+</div>
+
+<script>
+const W = 899, H = 898;
+const TOTAL_PIXELS = W * H;
+
+let encodedBlob = null;
+let decodedBytes = null;
+let decodedMime = null;
+let encodeTimeout = null;
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['encode','decode'][i] === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+// ─── ENCODE ───────────────────────────────────────────────────────────────────
+
+function setEncStatus(msg, type='info') {
+  const el = document.getElementById('enc-status');
+  el.style.display = msg ? 'flex' : 'none';
+  el.className = 'status ' + type;
+  el.textContent = msg;
+}
+
+function handleEncodeFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  document.getElementById('enc-text').value = '';
+  setEncStatus('Reading file…', 'info');
+  const reader = new FileReader();
+  reader.onload = e => {
+    const bytes = new Uint8Array(e.target.result);
+    encodeBytesToCanvas(bytes, file.name);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function handleEncodeText() {
+  clearTimeout(encodeTimeout);
+  const txt = document.getElementById('enc-text').value;
+  if (!txt) { clearEncode(); return; }
+  encodeTimeout = setTimeout(() => {
+    const bytes = new TextEncoder().encode(txt);
+    encodeBytesToCanvas(bytes, 'text.txt');
+  }, 60);
+}
+
+function encodeBytesToCanvas(bytes, name) {
+  const n = bytes.length;
+  const maxBytes = TOTAL_PIXELS * 4; // RGBA but we use 4 channels
+
+  if (n > maxBytes) {
+    setEncStatus(`File too large: ${fmtBytes(n)} — max ${fmtBytes(maxBytes)}`, 'error');
+    return;
+  }
+
+  setEncStatus('Encoding…', 'info');
+
+  const canvas = document.getElementById('enc-canvas');
+  const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(W, H);
+  const d = imgData.data;
+
+  // Pack: we use RGBA. Each pixel encodes 4 bytes of payload.
+  // But the trick: to use transparency range efficiently, we store all 4 bytes
+  // per pixel using full RGBA. Data pixels are non-transparent (alpha > 0).
+  // We store 3 bytes of payload in RGB and use alpha as a continuation flag.
+  // Actually simplest: store 4 bytes per pixel with alpha derived from the byte value
+  // to create the "range of transparency" effect described.
+  //
+  // Encoding scheme:
+  //  - Pixel index i stores bytes at offset i*3 (R, G, B)
+  //  - Alpha encodes how many of the 3 bytes are "real" (255=full, 128=partial, etc)
+  //  Actually let's do a cleaner approach:
+  //  - Store raw bytes in R, G, B channels (3 bytes per pixel)
+  //  - Alpha = 255 for full pixels, scaled for last pixel if partial
+  //  - Remaining pixels are RGBA 0,0,0,0 (transparent)
+  //
+  // For "range of transparency with all color palette": 
+  // We pack the byte index into RGB freely, and use alpha to represent
+  // a partial-byte pixel at the boundary. This creates the visual spread.
+
+  const BYTES_PER_PX = 3;
+  const numDataPixels = Math.ceil(n / BYTES_PER_PX);
+
+  for (let px = 0; px < TOTAL_PIXELS; px++) {
+    const base = px * 4; // index into imgData.data
+    const byteOff = px * BYTES_PER_PX;
+
+    if (byteOff >= n) {
+      // Transparent padding
+      d[base] = 0; d[base+1] = 0; d[base+2] = 0; d[base+3] = 0;
+    } else {
+      const r = bytes[byteOff] ?? 0;
+      const g = byteOff+1 < n ? bytes[byteOff+1] : 0;
+      const b = byteOff+2 < n ? bytes[byteOff+2] : 0;
+
+      // How many bytes are real in this pixel?
+      const real = Math.min(3, n - byteOff);
+      // Alpha encodes completeness: 255 = 3 bytes full, 170 = 2 bytes, 85 = 1 byte
+      // This creates the transparency range effect across the color palette
+      const alpha = real === 3 ? 255 : real === 2 ? 170 : 85;
+
+      d[base]   = r;
+      d[base+1] = g;
+      d[base+2] = b;
+      d[base+3] = alpha;
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+
+  // Build downloadable blob
+  canvas.toBlob(blob => {
+    encodedBlob = blob;
+    const pad = TOTAL_PIXELS - numDataPixels;
+    document.getElementById('stat-bytes').textContent = fmtBytes(n);
+    document.getElementById('stat-pixels').textContent = numDataPixels.toLocaleString();
+    document.getElementById('stat-used').textContent = ((numDataPixels / TOTAL_PIXELS) * 100).toFixed(2) + '%';
+    document.getElementById('stat-remaining').textContent = pad.toLocaleString();
+    document.getElementById('enc-stats').style.display = 'flex';
+    document.getElementById('enc-preview-wrap').style.display = 'block';
+    setEncStatus(`Encoded ${fmtBytes(n)} → ${numDataPixels.toLocaleString()} pixels`, 'success');
+  }, 'image/png');
+}
+
+function downloadEncoded() {
+  if (!encodedBlob) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(encodedBlob);
+  a.download = 'encoded.png';
+  a.click();
+}
+
+function clearEncode() {
+  const canvas = document.getElementById('enc-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+  document.getElementById('enc-stats').style.display = 'none';
+  document.getElementById('enc-preview-wrap').style.display = 'none';
+  document.getElementById('enc-file-input').value = '';
+  document.getElementById('enc-text').value = '';
+  setEncStatus('', 'info');
+  encodedBlob = null;
+}
+
+// Drag and drop for encode
+const encDz = document.getElementById('enc-dropzone');
+encDz.addEventListener('dragover', e => { e.preventDefault(); encDz.classList.add('drag'); });
+encDz.addEventListener('dragleave', () => encDz.classList.remove('drag'));
+encDz.addEventListener('drop', e => {
+  e.preventDefault();
+  encDz.classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  document.getElementById('enc-text').value = '';
+  const reader = new FileReader();
+  reader.onload = ev => encodeBytesToCanvas(new Uint8Array(ev.target.result), file.name);
+  reader.readAsArrayBuffer(file);
+});
+
+// ─── DECODE ───────────────────────────────────────────────────────────────────
+
+function setDecStatus(msg, type='info') {
+  const el = document.getElementById('dec-status');
+  el.style.display = msg ? 'flex' : 'none';
+  el.className = 'status ' + type;
+  el.textContent = msg;
+}
+
+function setDecProgress(pct) {
+  const wrap = document.getElementById('dec-progress-wrap');
+  wrap.style.display = pct >= 0 && pct < 100 ? 'block' : 'none';
+  document.getElementById('dec-progress').style.width = pct + '%';
+}
+
+function parseMediaId(raw) {
+  raw = raw.trim();
+  // Strip query params, trailing stuff
+  // Accept: full URL, pbs.twimg.com/media/ID, just ID
+  let id = null;
+  const urlMatch = raw.match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_\-]+)/);
+  if (urlMatch) {
+    id = urlMatch[1];
+  } else if (/^[A-Za-z0-9_\-]{10,}$/.test(raw)) {
+    id = raw;
+  }
+  if (!id) return null;
+  return `https://pbs.twimg.com/media/${id}.png`;
+}
+
+async function handleDecodeUrl() {
+  const raw = document.getElementById('dec-url').value;
+  const url = parseMediaId(raw);
+  if (!url) {
+    setDecStatus('Could not parse URL or media ID. Try: HIAXGy_XAAAPSen or full pbs.twimg.com URL', 'error');
+    return;
+  }
+  setDecStatus(`Fetching ${url} …`, 'info');
+  setDecProgress(10);
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    setDecProgress(60);
+    const ab = await res.arrayBuffer();
+    setDecProgress(90);
+    const png = new Blob([ab], {type: 'image/png'});
+    await decodePngBlob(png);
+    setDecProgress(100);
+  } catch(e) {
+    setDecStatus('Fetch failed: ' + e.message, 'error');
+    setDecProgress(-1);
+  }
+}
+
+function handleDecodeFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  setDecStatus('Reading PNG…', 'info');
+  decodePngBlob(file);
+}
+
+async function decodePngBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      try {
+        const offscreen = document.createElement('canvas');
+        offscreen.width = img.naturalWidth;
+        offscreen.height = img.naturalHeight;
+        const ctx = offscreen.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const imgData = ctx.getImageData(0, 0, offscreen.width, offscreen.height);
+        URL.revokeObjectURL(url);
+
+        const d = imgData.data;
+        const totalPx = offscreen.width * offscreen.height;
+        const out = [];
+
+        for (let px = 0; px < totalPx; px++) {
+          const base = px * 4;
+          const alpha = d[base + 3];
+          if (alpha === 0) break; // transparent = end of data
+          if (alpha === 255) {
+            out.push(d[base], d[base+1], d[base+2]);
+          } else if (alpha === 170) {
+            out.push(d[base], d[base+1]);
+          } else if (alpha === 85) {
+            out.push(d[base]);
+          }
+        }
+
+        decodedBytes = new Uint8Array(out);
+        decodedMime = guessMime(decodedBytes);
+        showDecodedResult();
+        setDecStatus(`Decoded ${fmtBytes(decodedBytes.length)} — ${decodedMime}`, 'success');
+        resolve();
+      } catch(e) {
+        setDecStatus('Decode error: ' + e.message, 'error');
+        reject(e);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setDecStatus('Failed to load image. Is it a valid PNG?', 'error');
+      reject(new Error('img load failed'));
+    };
+    img.src = url;
+  });
+}
+
+function guessMime(bytes) {
+  const h = bytes;
+  const sig = (off, ...vals) => vals.every((v, i) => h[off + i] === v);
+
+  if (sig(0, 0xFF, 0xD8, 0xFF)) return 'image/jpeg';
+  if (sig(0, 0x89, 0x50, 0x4E, 0x47)) return 'image/png';
+  if (sig(0, 0x47, 0x49, 0x46)) return 'image/gif';
+  if (sig(0, 0x52, 0x49, 0x46, 0x46) && sig(8, 0x57, 0x45, 0x42, 0x50)) return 'image/webp';
+  if (sig(0, 0x42, 0x4D)) return 'image/bmp';
+  if (sig(0, 0x00, 0x00, 0x00) && (sig(4, 0x66, 0x74, 0x79, 0x70) || (bytes.length > 8 && sig(4, 0x66, 0x74, 0x79, 0x70)))) return 'video/mp4';
+  // check ftyp at byte 4 for mp4
+  if (bytes.length > 8 && sig(4, 0x66, 0x74, 0x79, 0x70)) return 'video/mp4';
+  if (sig(0, 0x1A, 0x45, 0xDF, 0xA3)) return 'video/webm';
+  if (sig(0, 0x4F, 0x67, 0x67, 0x53)) return 'audio/ogg';
+  if (sig(0, 0x49, 0x44, 0x33) || sig(0, 0xFF, 0xFB) || sig(0, 0xFF, 0xF3) || sig(0, 0xFF, 0xF2)) return 'audio/mpeg';
+  if (sig(0, 0x66, 0x4C, 0x61, 0x43)) return 'audio/flac';
+  if (sig(0, 0x52, 0x49, 0x46, 0x46) && sig(8, 0x57, 0x41, 0x56, 0x45)) return 'audio/wav';
+  if (sig(0, 0x50, 0x4B, 0x03, 0x04)) return 'application/zip';
+  if (sig(0, 0x1F, 0x8B)) return 'application/gzip';
+  if (sig(0, 0x42, 0x5A, 0x68)) return 'application/x-bzip2';
+  if (sig(0, 0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C)) return 'application/x-7z-compressed';
+  if (sig(0, 0x52, 0x61, 0x72, 0x21)) return 'application/x-rar-compressed';
+  if (sig(0, 0x25, 0x50, 0x44, 0x46)) return 'application/pdf';
+  if (sig(0, 0xD0, 0xCF, 0x11, 0xE0)) return 'application/msword';
+  if (sig(0, 0x7F, 0x45, 0x4C, 0x46)) return 'application/x-elf';
+  if (sig(0, 0x4D, 0x5A)) return 'application/x-msdownload';
+  // Try text
+  const sample = bytes.slice(0, 512);
+  const allPrint = [...sample].every(b => b === 9 || b === 10 || b === 13 || (b >= 32 && b <= 126));
+  if (allPrint) {
+    const str = new TextDecoder().decode(sample).trimStart();
+    if (str.startsWith('<?xml') || str.startsWith('<html') || str.startsWith('<!DOCTYPE')) return 'text/html';
+    if (str.startsWith('{') || str.startsWith('[')) return 'application/json';
+    if (str.startsWith('#!/')) return 'text/x-shellscript';
+    return 'text/plain';
+  }
+  return 'application/octet-stream';
+}
+
+function mimeExt(mime) {
+  const map = {
+    'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
+    'image/bmp': 'bmp', 'video/mp4': 'mp4', 'video/webm': 'webm',
+    'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/flac': 'flac', 'audio/wav': 'wav',
+    'application/zip': 'zip', 'application/gzip': 'gz', 'application/x-bzip2': 'bz2',
+    'application/x-7z-compressed': '7z', 'application/x-rar-compressed': 'rar',
+    'application/pdf': 'pdf', 'text/html': 'html', 'application/json': 'json',
+    'text/plain': 'txt', 'text/x-shellscript': 'sh',
+    'application/msword': 'doc', 'application/x-msdownload': 'exe',
+    'application/octet-stream': 'bin',
+  };
+  return map[mime] || 'bin';
+}
+
+function showDecodedResult() {
+  const mime = decodedMime;
+  const bytes = decodedBytes;
+  const blob = new Blob([bytes], {type: mime});
+  const url = URL.createObjectURL(blob);
+
+  document.getElementById('dec-mime').textContent = mime;
+  document.getElementById('dec-size').textContent = fmtBytes(bytes.length);
+  document.getElementById('dec-filename').textContent = `decoded.${mimeExt(mime)}`;
+
+  const body = document.getElementById('dec-body');
+  body.innerHTML = '';
+
+  if (mime.startsWith('image/')) {
+    const img = document.createElement('img');
+    img.src = url;
+    img.className = 'decode-media';
+    img.alt = 'decoded image';
+    body.appendChild(img);
+  } else if (mime.startsWith('video/')) {
+    const v = document.createElement('video');
+    v.src = url; v.controls = true; v.className = 'decode-media';
+    body.appendChild(v);
+  } else if (mime.startsWith('audio/')) {
+    const a = document.createElement('audio');
+    a.src = url; a.controls = true; a.className = 'decode-media';
+    body.appendChild(a);
+  } else if (mime.startsWith('text/') || mime === 'application/json') {
+    const text = new TextDecoder().decode(bytes);
+    const pre = document.createElement('pre');
+    pre.className = 'decode-text-pre';
+    pre.textContent = text;
+    body.appendChild(pre);
+  } else if (mime === 'application/pdf') {
+    const embed = document.createElement('embed');
+    embed.src = url; embed.type = 'application/pdf';
+    embed.style.cssText = 'width:100%;height:500px;border-radius:6px;';
+    body.appendChild(embed);
+  } else {
+    const p = document.createElement('p');
+    p.style.color = 'var(--muted)';
+    p.style.fontSize = '13px';
+    p.textContent = `Binary file (${mime}) — use the download button below.`;
+    body.appendChild(p);
+  }
+
+  document.getElementById('dec-result').style.display = 'block';
+  document.getElementById('dec-actions').style.display = 'flex';
+}
+
+function downloadDecoded() {
+  if (!decodedBytes) return;
+  const blob = new Blob([decodedBytes], {type: decodedMime});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `decoded.${mimeExt(decodedMime)}`;
+  a.click();
+}
+
+function clearDecode() {
+  decodedBytes = null; decodedMime = null;
+  document.getElementById('dec-result').style.display = 'none';
+  document.getElementById('dec-actions').style.display = 'none';
+  document.getElementById('dec-file-input').value = '';
+  document.getElementById('dec-url').value = '';
+  setDecStatus('', 'info');
+}
+
+// Drag and drop decode
+const decDz = document.getElementById('dec-dropzone');
+decDz.addEventListener('dragover', e => { e.preventDefault(); decDz.classList.add('drag'); });
+decDz.addEventListener('dragleave', () => decDz.classList.remove('drag'));
+decDz.addEventListener('drop', e => {
+  e.preventDefault();
+  decDz.classList.remove('drag');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  setDecStatus('Reading PNG…', 'info');
+  decodePngBlob(file);
+});
+
+function fmtBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+  return (n/1024/1024).toFixed(2) + ' MB';
+}
+</script>
+</body>
+</html>
