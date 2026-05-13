@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:transparent">
+<style>
+*{box-sizing:border-box}
+body{font-family:var(--font-mono,monospace);color:var(--color-text-primary);background:transparent}
+.wrap{max-width:1100px;margin:0 auto;padding:20px}
+h1{text-align:center;color:#ffcc00;font-size:22px;font-weight:500;margin:0 0 4px}
+.sub{text-align:center;color:var(--color-text-secondary);font-size:13px;margin-bottom:20px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.box{background:var(--color-background-secondary);border-radius:12px;padding:15px;border:1px solid var(--color-border-tertiary)}
+label{display:block;margin-bottom:8px;font-weight:500;color:#ffcc00;font-size:14px}
+textarea{width:100%;height:280px;background:var(--color-background-primary);color:var(--color-text-primary);border:1px solid var(--color-border-secondary);border-radius:8px;padding:12px;font-family:var(--font-mono,monospace);font-size:14px;resize:vertical}
+textarea::placeholder{color:var(--color-text-tertiary)}
+.controls{margin-top:10px;display:flex;gap:10px;flex-wrap:wrap}
+button{padding:8px 14px;background:#ffcc00;color:#000;border:none;border-radius:6px;cursor:pointer;font-weight:500;font-size:13px}
+button:hover{background:#ffd633}
+.status{margin-top:6px;font-size:12px;color:var(--color-text-secondary)}
+.info{text-align:center;font-size:12px;color:var(--color-text-tertiary);margin-top:24px;line-height:1.6}
+</style>
+<div class="wrap">
+  <h1>⌨️ Keyspam Encryptor</h1>
+  <p class="sub">Deterministic keyboard-proximity cipher — looks like keyboard smash, encodes everything</p>
+  <div class="grid">
+    <div class="box">
+      <label>🔒 Plaintext</label>
+      <textarea id="inp" placeholder="Type your message here..."></textarea>
+      <div class="controls">
+        <button onclick="copyText('inp','inpSt')">📋 Copy</button>
+      </div>
+      <div class="status" id="inpSt"></div>
+    </div>
+    <div class="box">
+      <label>🔓 Keyspam Output</label>
+      <textarea id="out" placeholder="Keyspam will appear here..."></textarea>
+      <div class="controls">
+        <button onclick="copyText('out','outSt')">📋 Copy</button>
+      </div>
+      <div class="status" id="outSt"></div>
+    </div>
+  </div>
+  <div class="info">
+    Type in either box — it updates live in the other.<br>
+    Uses a weighted keyboard-proximity alphabet: adjacent keys appear more often. Fully reversible.
+  </div>
+</div>
+
+<script>
+// Keyboard rows (left to right)
+const ROW0 = "1234567890";
+const ROW1 = "qwertyuiop";
+const ROW2 = "asdfghjkl;";
+const ROW3 = "zxcvbnm,.";
+const ALL_ROWS = [ROW0, ROW1, ROW2, ROW3];
+
+// Build a weighted alphabet where keys close to the 'q' key (row1 start) appear more
+// Strategy: build alphabet by "spiral" from top-left so nearby keys cluster together
+// For decoding we need a FIXED deterministic ordering → use weighted row-walk
+
+// Our symbol set
+const SYMS = "qwertyuiopasdfghjkl;zxcvbnm,.1234567890";
+
+// Build an encoding alphabet of N symbols where adjacent keys dominate
+// We'll use a base-N encoding where N = len(SYMS)
+// To make it look like keyboard spam we build a weighted sequence table:
+// For each position in the encoded string, pick from SYMS with proximity bias
+// toward the PREVIOUS encoded char. This is deterministic given position+value.
+
+// Approach: Convert bytes to a bignum, then encode in a custom base where
+// each digit is chosen by a seeded walk that stays on nearby keys.
+
+// Keyboard adjacency: given a char, return chars in proximity order (nearest first)
+function buildAdjacency() {
+  const adj = {};
+  for (let r = 0; r < ALL_ROWS.length; r++) {
+    const row = ALL_ROWS[r];
+    for (let c = 0; c < row.length; c++) {
+      const ch = row[c];
+      const neighbors = [];
+      // Same row neighbors (closest)
+      for (let dc = -2; dc <= 2; dc++) {
+        if (dc === 0) continue;
+        const nc = c + dc;
+        if (nc >= 0 && nc < row.length) neighbors.push({ch: row[nc], dist: Math.abs(dc)});
+      }
+      // Adjacent rows (slightly further)
+      for (let dr = -1; dr <= 1; dr++) {
+        if (dr === 0) continue;
+        const nr = r + dr;
+        if (nr < 0 || nr >= ALL_ROWS.length) continue;
+        const nrow = ALL_ROWS[nr];
+        // Stagger: row1 aligns ~0.5 offset from row0 etc
+        for (let dc = -2; dc <= 2; dc++) {
+          const nc = c + dc;
+          if (nc >= 0 && nc < nrow.length) {
+            neighbors.push({ch: nrow[nc], dist: Math.abs(dr) * 1.5 + Math.abs(dc) * 0.8});
+          }
+        }
+      }
+      adj[ch] = neighbors.sort((a,b)=>a.dist-b.dist).map(x=>x.ch);
+    }
+  }
+  return adj;
+}
+
+const ADJ = buildAdjacency();
+
+// Build the full alphabet sorted by keyboard position (row-major)
+// This is our codec alphabet (no repeats)
+const ALPHA = [];
+const _seen = new Set();
+for (const row of ALL_ROWS) {
+  for (const ch of row) {
+    if (!_seen.has(ch)) { ALPHA.push(ch); _seen.add(ch); }
+  }
+}
+const BASE = BigInt(ALPHA.length);
+const charToIdx = new Map(ALPHA.map((c,i) => [c, BigInt(i)]));
+
+// bytes → BigInt
+function bytesToBig(bytes) {
+  let n = 0n;
+  for (const b of bytes) n = (n << 8n) | BigInt(b);
+  return n;
+}
+
+// BigInt → bytes
+function bigToBytes(n) {
+  if (n === 0n) return new Uint8Array([0]);
+  const out = [];
+  while (n > 0n) { out.unshift(Number(n & 0xffn)); n >>= 8n; }
+  return new Uint8Array(out);
+}
+
+// Build a "proximity-weighted" ordering starting from a given char
+// Returns ALPHA reordered: nearby keys first, far keys last
+// This ordering is used to pick which ALPHA[digit] maps to which output char at each position
+function proximityOrder(prevChar) {
+  if (!prevChar || !ADJ[prevChar]) return ALPHA;
+  const nearSet = ADJ[prevChar];
+  const result = [];
+  const used = new Set();
+  // Add nearby first
+  for (const c of nearSet) {
+    if (!used.has(c) && charToIdx.has(c)) { result.push(c); used.add(c); }
+  }
+  // Fill rest
+  for (const c of ALPHA) {
+    if (!used.has(c)) { result.push(c); used.add(c); }
+  }
+  return result;
+}
+
+// Encode bytes → keyspam string
+function encode(bytes) {
+  if (!bytes || bytes.length === 0) return "";
+  // Prefix 0x01 to preserve leading zeros
+  const full = new Uint8Array([1, ...bytes]);
+  let n = bytesToBig(full);
+  if (n === 0n) return ALPHA[0];
+
+  // Collect digits (base-N)
+  const digits = [];
+  while (n > 0n) {
+    digits.unshift(Number(n % BASE));
+    n /= BASE;
+  }
+
+  // Map each digit to a proximity-weighted char
+  const result = [];
+  let prev = 'q'; // start position on keyboard
+  for (const d of digits) {
+    const order = proximityOrder(prev);
+    const ch = order[d];
+    result.push(ch);
+    prev = ch;
+  }
+  return result.join('');
+}
+
+// Decode keyspam string → bytes
+function decode(encoded) {
+  if (!encoded) return new Uint8Array(0);
+
+  // Re-derive digits
+  const chars = [...encoded];
+  const digits = [];
+  let prev = 'q';
+  for (const ch of chars) {
+    const order = proximityOrder(prev);
+    const d = order.indexOf(ch);
+    if (d < 0) throw new Error(`Invalid char: '${ch}'`);
+    digits.push(BigInt(d));
+    prev = ch;
+  }
+
+  // Reconstruct bignum
+  let n = 0n;
+  for (const d of digits) n = n * BASE + d;
+
+  let bytes = bigToBytes(n);
+  if (bytes.length > 0 && bytes[0] === 1) bytes = bytes.slice(1);
+  return bytes;
+}
+
+function bytesToStr(bytes) {
+  try { return new TextDecoder('utf-8',{fatal:true}).decode(bytes); }
+  catch(e) { return `<binary: ${bytes.length} bytes>`; }
+}
+
+// --- Live UI ---
+let busy = false;
+const inp = document.getElementById('inp');
+const out = document.getElementById('out');
+const inpSt = document.getElementById('inpSt');
+const outSt = document.getElementById('outSt');
+
+// Determine if string is "keyspam" (all chars in ALPHA)
+function isKeyspam(s) {
+  for (const c of s) if (!charToIdx.has(c)) return false;
+  return s.length > 0;
+}
+
+inp.addEventListener('input', () => {
+  if (busy) return; busy = true;
+  try {
+    const txt = inp.value;
+    if (!txt.trim()) { out.value=''; inpSt.textContent=''; outSt.textContent=''; busy=false; return; }
+    const bytes = new TextEncoder().encode(txt);
+    const enc = encode(bytes);
+    out.value = enc;
+    inpSt.textContent = `${txt.length} chars`;
+    outSt.textContent = `${enc.length} keyspam chars`;
+  } catch(e) { out.value = '❌ '+e.message; }
+  busy = false;
+});
+
+out.addEventListener('input', () => {
+  if (busy) return; busy = true;
+  try {
+    const txt = out.value.trim();
+    if (!txt) { inp.value=''; inpSt.textContent=''; outSt.textContent=''; busy=false; return; }
+    if (!isKeyspam(txt)) { inp.value='❌ Contains invalid characters'; busy=false; return; }
+    const bytes = decode(txt);
+    inp.value = bytesToStr(bytes);
+    outSt.textContent = `${txt.length} keyspam chars`;
+    inpSt.textContent = `${inp.value.length} chars decoded`;
+  } catch(e) { inp.value = '❌ '+e.message; }
+  busy = false;
+});
+
+function copyText(id, stId) {
+  const el = document.getElementById(id);
+  navigator.clipboard.writeText(el.value);
+  const orig = document.getElementById(stId).textContent;
+  document.getElementById(stId).textContent = '✅ Copied!';
+  setTimeout(() => document.getElementById(stId).textContent = orig, 1500);
+}
+
+// Seed with example
+setTimeout(() => {
+  inp.value = "hello world";
+  inp.dispatchEvent(new Event('input'));
+}, 200);
+</script>
+</body></html>
