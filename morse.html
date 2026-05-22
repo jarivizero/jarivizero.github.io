@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Optical Morse Communicator</title>
+
+<style>
+    * {
+        box-sizing: border-box;
+        font-family: Arial, sans-serif;
+    }
+
+    body {
+        margin: 0;
+        background: #111;
+        color: white;
+        overflow-x: hidden;
+    }
+
+    .topbar {
+        display: flex;
+        gap: 10px;
+        padding: 10px;
+        background: #1b1b1b;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+
+    button, input, textarea {
+        background: #222;
+        color: white;
+        border: 1px solid #555;
+        padding: 8px;
+    }
+
+    textarea {
+        width: 100%;
+        min-height: 100px;
+    }
+
+    .main {
+        display: flex;
+        flex-wrap: wrap;
+    }
+
+    .left, .right {
+        padding: 10px;
+    }
+
+    .left {
+        flex: 1;
+        min-width: 420px;
+    }
+
+    .right {
+        width: 380px;
+        background: #181818;
+    }
+
+    #videoWrap {
+        position: relative;
+        display: inline-block;
+    }
+
+    #video {
+        width: 100%;
+        max-width: 900px;
+        border: 2px solid #444;
+        background: black;
+    }
+
+    #selector {
+        position: absolute;
+        width: 50px;
+        height: 50px;
+        border: 2px solid red;
+        cursor: move;
+        pointer-events: auto;
+    }
+
+    #canvas {
+        display: none;
+    }
+
+    .thumbs {
+        display: flex;
+        gap: 10px;
+        margin-top: 10px;
+    }
+
+    .thumb {
+        border: 1px solid #666;
+        width: 100px;
+        height: 100px;
+        image-rendering: pixelated;
+    }
+
+    #decoded {
+        background: black;
+        border: 1px solid #555;
+        padding: 10px;
+        min-height: 120px;
+        white-space: pre-wrap;
+        font-size: 20px;
+    }
+
+    #transmitScreen {
+        position: fixed;
+        inset: 0;
+        background: black;
+        z-index: 9999;
+        display: none;
+    }
+
+    .controlsGrid {
+        display: grid;
+        grid-template-columns: repeat(3, 60px);
+        gap: 5px;
+        justify-content: center;
+        margin-top: 10px;
+    }
+
+    .status {
+        padding: 8px;
+        background: #222;
+        margin-top: 10px;
+        border: 1px solid #444;
+    }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+    <button id="readModeBtn">READ MODE</button>
+    <button id="writeModeBtn">WRITE MODE</button>
+
+    <button id="startCameraBtn">Start Camera</button>
+    <button id="calibrateBtn">Calibrate</button>
+
+    <label>
+        Square Size
+        <input id="squareSize" type="number" value="50" min="5" max="300"/>
+    </label>
+
+    <label>
+        FPS Frames Per Symbol
+        <input id="framesPerSymbol" type="number" value="2" min="1" max="30"/>
+    </label>
+</div>
+
+<div class="main">
+
+    <div class="left">
+
+        <div id="videoWrap">
+            <video id="video" autoplay playsinline muted></video>
+            <div id="selector"></div>
+        </div>
+
+        <canvas id="canvas"></canvas>
+
+        <div class="thumbs">
+            <div>
+                <div>FLASH ON</div>
+                <canvas id="onThumb" class="thumb"></canvas>
+            </div>
+
+            <div>
+                <div>FLASH OFF</div>
+                <canvas id="offThumb" class="thumb"></canvas>
+            </div>
+        </div>
+
+        <div class="status" id="status">
+            Idle
+        </div>
+
+        <h3>Decoded Morse</h3>
+        <div id="decoded"></div>
+
+    </div>
+
+    <div class="right">
+
+        <h2>Move Selector</h2>
+
+        <div class="controlsGrid">
+            <div></div>
+            <button onclick="moveBox(0,-5)">↑</button>
+            <div></div>
+
+            <button onclick="moveBox(-5,0)">←</button>
+            <button onclick="centerBox()">•</button>
+            <button onclick="moveBox(5,0)">→</button>
+
+            <div></div>
+            <button onclick="moveBox(0,5)">↓</button>
+            <div></div>
+        </div>
+
+        <hr>
+
+        <h2>WRITE MODE</h2>
+
+        <textarea id="transmitText">HELLO WORLD</textarea>
+
+        <button id="white5sBtn">
+            Turn WHITE for 5s
+        </button>
+
+        <button id="dark5sBtn">
+            Turn DARK for 5s
+        </button>
+
+        <button id="transmitBtn">
+            TRANSMIT
+        </button>
+
+        <div class="status">
+            Morse Timing:
+            <br><br>
+            Dot = 1 unit
+            <br>
+            Dash = 3 units
+            <br>
+            Letter gap = 3 units
+            <br>
+            Word gap = 7 units
+        </div>
+
+    </div>
+
+</div>
+
+<div id="transmitScreen"></div>
+
+<script>
+/*
+====================================================
+OPTICAL MORSE COMMUNICATOR
+====================================================
+
+FEATURES:
+- Camera read mode
+- Automatic light threshold calibration
+- Draggable detection square
+- Morse decode in real time
+- Write/transmit mode
+- Adjustable transmission speed
+- Snapshot previews of ON/OFF states
+
+NOTES:
+- Morse timing accuracy depends heavily on FPS stability.
+- Browser camera FPS may vary.
+- Auto exposure may interfere with detection.
+- Brightness flicker filtering may still need tuning.
+- Exposure lock is not available in most browsers.
+
+====================================================
+*/
+
+const MORSE = {
+    ".-":"A","-...":"B","-.-.":"C","-..":"D",".":"E",
+    "..-.":"F","--.":"G","....":"H","..":"I",".---":"J",
+    "-.-":"K",".-..":"L","--":"M","-.":"N","---":"O",
+    ".--.":"P","--.-":"Q",".-.":"R","...":"S","-":"T",
+    "..-":"U","...-":"V",".--":"W","-..-":"X","-.--":"Y",
+    "--..":"Z",
+
+    "-----":"0",".----":"1","..---":"2","...--":"3",
+    "....-":"4",".....":"5","-....":"6","--...":"7",
+    "---..":"8","----.":"9"
+};
+
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const selector = document.getElementById("selector");
+const statusEl = document.getElementById("status");
+const decodedEl = document.getElementById("decoded");
+
+const onThumb = document.getElementById("onThumb");
+const offThumb = document.getElementById("offThumb");
+
+const onCtx = onThumb.getContext("2d");
+const offCtx = offThumb.getContext("2d");
+
+const transmitScreen = document.getElementById("transmitScreen");
+
+let stream;
+
+let selectorX = 100;
+let selectorY = 100;
+
+let squareSize = 50;
+
+let flashOnBrightness = 200;
+let flashOffBrightness = 10;
+let threshold = 100;
+
+let calibrated = false;
+
+let reading = false;
+
+let lastState = false;
+let lastStateTime = 0;
+
+let morseBuffer = "";
+let outputText = "";
+
+let frameCounter = 0;
+let fpsEstimate = 30;
+
+function updateSelector() {
+    selector.style.left = selectorX + "px";
+    selector.style.top = selectorY + "px";
+
+    squareSize = parseInt(
+        document.getElementById("squareSize").value
+    );
+
+    selector.style.width = squareSize + "px";
+    selector.style.height = squareSize + "px";
+}
+
+updateSelector();
+
+async function startCamera() {
+
+    stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+            facingMode: "environment",
+            frameRate: { ideal: 120, max: 240 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+        },
+        audio: false
+    });
+
+    video.srcObject = stream;
+
+    await video.play();
+
+    status("Camera started");
+
+    detectFPS();
+
+    requestAnimationFrame(readLoop);
+}
+
+function status(msg) {
+    statusEl.textContent = msg;
+}
+
+function detectFPS() {
+
+    let frames = 0;
+    let start = performance.now();
+
+    function count() {
+        frames++;
+
+        let now = performance.now();
+
+        if (now - start >= 1000) {
+            fpsEstimate = frames;
+            status("Detected FPS: " + fpsEstimate);
+
+            frames = 0;
+            start = now;
+        }
+
+        requestAnimationFrame(count);
+    }
+
+    count();
+}
+
+function getRegionBrightness() {
+
+    if (!video.videoWidth) return 0;
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    ctx.drawImage(video,0,0);
+
+    const scaleX = video.videoWidth / video.clientWidth;
+    const scaleY = video.videoHeight / video.clientHeight;
+
+    const x = Math.floor(selectorX * scaleX);
+    const y = Math.floor(selectorY * scaleY);
+
+    const size = Math.floor(squareSize * scaleX);
+
+    const data = ctx.getImageData(
+        x,y,size,size
+    ).data;
+
+    let total = 0;
+
+    for (let i=0;i<data.length;i+=4) {
+        total += (
+            data[i] +
+            data[i+1] +
+            data[i+2]
+        ) / 3;
+    }
+
+    return total / (data.length / 4);
+}
+
+async function calibrate() {
+
+    calibrated = false;
+
+    status("Calibration: TURN FLASH ON");
+
+    let onValue = await waitForLargeBrightnessChange(true);
+
+    flashOnBrightness = onValue;
+
+    captureThumb(onCtx);
+
+    status("Calibration: TURN FLASH OFF");
+
+    let offValue = await waitForLargeBrightnessChange(false);
+
+    flashOffBrightness = offValue;
+
+    captureThumb(offCtx);
+
+    threshold = (
+        flashOnBrightness +
+        flashOffBrightness
+    ) / 2;
+
+    calibrated = true;
+
+    status(
+        "Calibrated. Threshold=" +
+        threshold.toFixed(2)
+    );
+}
+
+function waitForLargeBrightnessChange(expectUp) {
+
+    return new Promise(resolve => {
+
+        let baseline = getRegionBrightness();
+
+        let interval = setInterval(() => {
+
+            let current = getRegionBrightness();
+
+            if (expectUp) {
+
+                if (current > baseline + 40) {
+                    clearInterval(interval);
+                    resolve(current);
+                }
+
+            } else {
+
+                if (current < baseline - 40) {
+                    clearInterval(interval);
+                    resolve(current);
+                }
+            }
+
+        }, 30);
+
+    });
+}
+
+function captureThumb(targetCtx) {
+
+    const scaleX = video.videoWidth / video.clientWidth;
+    const scaleY = video.videoHeight / video.clientHeight;
+
+    const x = Math.floor(selectorX * scaleX);
+    const y = Math.floor(selectorY * scaleY);
+
+    const size = Math.floor(squareSize * scaleX);
+
+    targetCtx.drawImage(
+        video,
+        x,y,size,size,
+        0,0,
+        100,100
+    );
+}
+
+function readLoop(timestamp) {
+
+    if (calibrated) {
+
+        const brightness = getRegionBrightness();
+
+        const state = brightness > threshold;
+
+        processSignal(state, timestamp);
+    }
+
+    requestAnimationFrame(readLoop);
+}
+
+function processSignal(state, timestamp) {
+
+    if (state !== lastState) {
+
+        const duration = timestamp - lastStateTime;
+
+        if (lastState) {
+
+            interpretPulse(duration);
+
+        } else {
+
+            interpretGap(duration);
+        }
+
+        lastState = state;
+        lastStateTime = timestamp;
+    }
+}
+
+function interpretPulse(durationMs) {
+
+    const unit = (
+        1000 / fpsEstimate
+    ) * parseInt(
+        document.getElementById("framesPerSymbol").value
+    );
+
+    if (durationMs < unit * 2.2) {
+
+        morseBuffer += ".";
+
+    } else {
+
+        morseBuffer += "-";
+    }
+
+    status("Receiving: " + morseBuffer);
+}
+
+function interpretGap(durationMs) {
+
+    const unit = (
+        1000 / fpsEstimate
+    ) * parseInt(
+        document.getElementById("framesPerSymbol").value
+    );
+
+    if (durationMs >= unit * 6) {
+
+        flushLetter();
+        outputText += " ";
+
+    } else if (durationMs >= unit * 2.5) {
+
+        flushLetter();
+    }
+}
+
+function flushLetter() {
+
+    if (!morseBuffer.length) return;
+
+    const char = MORSE[morseBuffer] || "?";
+
+    outputText += char;
+
+    decodedEl.textContent = outputText;
+
+    morseBuffer = "";
+}
+
+function moveBox(dx,dy) {
+    selectorX += dx;
+    selectorY += dy;
+    updateSelector();
+}
+
+function centerBox() {
+    selectorX = (
+        video.clientWidth / 2
+    ) - (squareSize/2);
+
+    selectorY = (
+        video.clientHeight / 2
+    ) - (squareSize/2);
+
+    updateSelector();
+}
+
+let dragging = false;
+let dragOffsetX = 0;
+let dragOffsetY = 0;
+
+selector.addEventListener("mousedown", e => {
+    dragging = true;
+
+    dragOffsetX = e.offsetX;
+    dragOffsetY = e.offsetY;
+});
+
+window.addEventListener("mouseup", () => {
+    dragging = false;
+});
+
+window.addEventListener("mousemove", e => {
+
+    if (!dragging) return;
+
+    const rect = video.getBoundingClientRect();
+
+    selectorX = e.clientX - rect.left - dragOffsetX;
+    selectorY = e.clientY - rect.top - dragOffsetY;
+
+    updateSelector();
+});
+
+document.getElementById(
+    "startCameraBtn"
+).onclick = startCamera;
+
+document.getElementById(
+    "calibrateBtn"
+).onclick = calibrate;
+
+function sleep(ms) {
+    return new Promise(r => setTimeout(r,ms));
+}
+
+const TEXT_TO_MORSE = {};
+
+for (const [k,v] of Object.entries(MORSE)) {
+    TEXT_TO_MORSE[v] = k;
+}
+
+async function transmitText(text) {
+
+    const fpsFrames = parseInt(
+        document.getElementById("framesPerSymbol").value
+    );
+
+    const unit = (
+        1000 / fpsEstimate
+    ) * fpsFrames;
+
+    transmitScreen.style.display = "block";
+
+    async function flash(on, duration) {
+
+        transmitScreen.style.background =
+            on ? "white" : "black";
+
+        await sleep(duration);
+    }
+
+    text = text.toUpperCase();
+
+    for (const char of text) {
+
+        if (char === " ") {
+
+            await flash(false, unit * 7);
+            continue;
+        }
+
+        const morse = TEXT_TO_MORSE[char];
+
+        if (!morse) continue;
+
+        for (let i=0;i<morse.length;i++) {
+
+            const symbol = morse[i];
+
+            if (symbol === ".") {
+
+                await flash(true, unit);
+
+            } else {
+
+                await flash(true, unit * 3);
+            }
+
+            await flash(false, unit);
+        }
+
+        await flash(false, unit * 2);
+    }
+
+    transmitScreen.style.display = "none";
+}
+
+document.getElementById(
+    "transmitBtn"
+).onclick = () => {
+
+    transmitText(
+        document.getElementById(
+            "transmitText"
+        ).value
+    );
+};
+
+document.getElementById(
+    "white5sBtn"
+).onclick = async () => {
+
+    transmitScreen.style.display = "block";
+    transmitScreen.style.background = "white";
+
+    await sleep(5000);
+
+    transmitScreen.style.display = "none";
+};
+
+document.getElementById(
+    "dark5sBtn"
+).onclick = async () => {
+
+    transmitScreen.style.display = "block";
+    transmitScreen.style.background = "black";
+
+    await sleep(5000);
+
+    transmitScreen.style.display = "none";
+};
+
+</script>
+
+</body>
+</html>
