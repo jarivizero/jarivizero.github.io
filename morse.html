@@ -2,10 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Optical Morse Communicator</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>Optical Morse Reader / Transmitter</title>
 
 <style>
+    :root {
+        --bg: #0f0f0f;
+        --panel: #1b1b1b;
+        --border: #333;
+        --text: #f0f0f0;
+    }
+
     * {
         box-sizing: border-box;
         font-family: Arial, sans-serif;
@@ -13,18 +20,21 @@
 
     body {
         margin: 0;
-        background: #111;
-        color: white;
-        overflow-x: hidden;
+        background: var(--bg);
+        color: var(--text);
+    }
+
+    h1,h2,h3 {
+        margin: 6px 0;
     }
 
     .topbar {
+        padding: 10px;
+        background: #161616;
+        border-bottom: 1px solid var(--border);
         display: flex;
         gap: 10px;
-        padding: 10px;
-        background: #1b1b1b;
         flex-wrap: wrap;
-        align-items: center;
     }
 
     button, input, textarea {
@@ -39,73 +49,80 @@
         min-height: 100px;
     }
 
-    .main {
-        display: flex;
-        flex-wrap: wrap;
-    }
-
-    .left, .right {
+    .layout {
+        display: grid;
+        grid-template-columns: 1fr 360px;
+        gap: 10px;
         padding: 10px;
     }
 
-    .left {
-        flex: 1;
-        min-width: 420px;
+    .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        padding: 10px;
     }
 
-    .right {
-        width: 380px;
-        background: #181818;
-    }
-
-    #videoWrap {
+    .cameraWrap {
         position: relative;
-        display: inline-block;
-    }
-
-    #video {
         width: 100%;
-        max-width: 900px;
-        border: 2px solid #444;
+        overflow: hidden;
+    }
+
+    video {
+        width: 100%;
         background: black;
+        display: block;
     }
 
-    #selector {
-        position: absolute;
-        width: 50px;
-        height: 50px;
-        border: 2px solid red;
-        cursor: move;
-        pointer-events: auto;
-    }
-
-    #canvas {
+    canvas {
         display: none;
     }
 
-    .thumbs {
+    #selectionBox {
+        position: absolute;
+        width: 60px;
+        height: 60px;
+        border: 2px solid red;
+        cursor: move;
+        left: 100px;
+        top: 100px;
+        touch-action: none;
+    }
+
+    .sampleImages {
         display: flex;
         gap: 10px;
         margin-top: 10px;
     }
 
-    .thumb {
-        border: 1px solid #666;
-        width: 100px;
-        height: 100px;
+    .sampleBox {
+        border: 1px solid #555;
+        padding: 5px;
+        text-align: center;
+    }
+
+    .sampleBox canvas {
+        display: block;
+        border: 1px solid #444;
+        width: 80px;
+        height: 80px;
         image-rendering: pixelated;
     }
 
-    #decoded {
+    .output {
         background: black;
-        border: 1px solid #555;
+        color: #0f0;
+        min-height: 180px;
         padding: 10px;
-        min-height: 120px;
         white-space: pre-wrap;
-        font-size: 20px;
+        overflow-wrap: break-word;
     }
 
-    #transmitScreen {
+    .sliderRow {
+        margin: 10px 0;
+    }
+
+    .fullscreenFlash {
         position: fixed;
         inset: 0;
         background: black;
@@ -113,7 +130,17 @@
         display: none;
     }
 
-    .controlsGrid {
+    .modeButtons {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+
+    .hidden {
+        display: none;
+    }
+
+    .moveGrid {
         display: grid;
         grid-template-columns: repeat(3, 60px);
         gap: 5px;
@@ -121,211 +148,280 @@
         margin-top: 10px;
     }
 
+    .moveGrid button {
+        height: 45px;
+    }
+
     .status {
         padding: 8px;
-        background: #222;
-        margin-top: 10px;
+        background: #111;
         border: 1px solid #444;
+        margin-top: 10px;
     }
 </style>
 </head>
+
 <body>
 
 <div class="topbar">
     <button id="readModeBtn">READ MODE</button>
     <button id="writeModeBtn">WRITE MODE</button>
-
-    <button id="startCameraBtn">Start Camera</button>
-    <button id="calibrateBtn">Calibrate</button>
-
-    <label>
-        Square Size
-        <input id="squareSize" type="number" value="50" min="5" max="300"/>
-    </label>
-
-    <label>
-        FPS Frames Per Symbol
-        <input id="framesPerSymbol" type="number" value="2" min="1" max="30"/>
-    </label>
 </div>
 
-<div class="main">
+<div id="readMode">
 
-    <div class="left">
+    <div class="layout">
 
-        <div id="videoWrap">
-            <video id="video" autoplay playsinline muted></video>
-            <div id="selector"></div>
-        </div>
+        <div class="panel">
 
-        <canvas id="canvas"></canvas>
+            <h2>Camera Feed</h2>
 
-        <div class="thumbs">
-            <div>
-                <div>FLASH ON</div>
-                <canvas id="onThumb" class="thumb"></canvas>
+            <div class="cameraWrap">
+                <video id="video" autoplay playsinline muted></video>
+                <div id="selectionBox"></div>
             </div>
 
-            <div>
-                <div>FLASH OFF</div>
-                <canvas id="offThumb" class="thumb"></canvas>
+            <canvas id="captureCanvas"></canvas>
+
+            <div class="moveGrid">
+                <div></div>
+                <button data-move="up">↑</button>
+                <div></div>
+
+                <button data-move="left">←</button>
+                <button data-move="center">•</button>
+                <button data-move="right">→</button>
+
+                <div></div>
+                <button data-move="down">↓</button>
+                <div></div>
             </div>
+
+            <div style="margin-top:10px;">
+                <button id="calibrateBtn">Auto Calibrate</button>
+                <button id="setOffBtn">This is OFF</button>
+                <button id="setOnBtn">This is ON</button>
+            </div>
+
+            <div class="sliderRow">
+                Threshold:
+                <input type="range" id="thresholdSlider" min="0" max="255" value="40">
+                <span id="thresholdValue">40</span>
+            </div>
+
+            <div class="sliderRow">
+                Speed (frames per symbol):
+                <input type="range" id="speedSlider" min="1" max="20" value="2">
+                <span id="speedValue">2</span>
+            </div>
+
+            <div class="status" id="status">
+                Waiting...
+            </div>
+
         </div>
 
-        <div class="status" id="status">
-            Idle
-        </div>
+        <div class="panel">
 
-        <h3>Decoded Morse</h3>
-        <div id="decoded"></div>
+            <h3>Reference Samples</h3>
 
-    </div>
+            <div class="sampleImages">
 
-    <div class="right">
+                <div class="sampleBox">
+                    <div>ON</div>
+                    <canvas id="onCanvas" width="60" height="60"></canvas>
+                </div>
 
-        <h2>Move Selector</h2>
+                <div class="sampleBox">
+                    <div>OFF</div>
+                    <canvas id="offCanvas" width="60" height="60"></canvas>
+                </div>
 
-        <div class="controlsGrid">
-            <div></div>
-            <button onclick="moveBox(0,-5)">↑</button>
-            <div></div>
+            </div>
 
-            <button onclick="moveBox(-5,0)">←</button>
-            <button onclick="centerBox()">•</button>
-            <button onclick="moveBox(5,0)">→</button>
+            <h3>Decoded Morse</h3>
+            <div class="output" id="decodedOutput"></div>
 
-            <div></div>
-            <button onclick="moveBox(0,5)">↓</button>
-            <div></div>
-        </div>
+            <h3>Live Data</h3>
+            <div id="liveStats"></div>
 
-        <hr>
-
-        <h2>WRITE MODE</h2>
-
-        <textarea id="transmitText">HELLO WORLD</textarea>
-
-        <button id="white5sBtn">
-            Turn WHITE for 5s
-        </button>
-
-        <button id="dark5sBtn">
-            Turn DARK for 5s
-        </button>
-
-        <button id="transmitBtn">
-            TRANSMIT
-        </button>
-
-        <div class="status">
-            Morse Timing:
-            <br><br>
-            Dot = 1 unit
-            <br>
-            Dash = 3 units
-            <br>
-            Letter gap = 3 units
-            <br>
-            Word gap = 7 units
         </div>
 
     </div>
 
 </div>
 
-<div id="transmitScreen"></div>
+<div id="writeMode" class="hidden">
+
+    <div class="layout">
+
+        <div class="panel">
+
+            <h2>Transmit Morse</h2>
+
+            <textarea id="transmitText">HELLO WORLD</textarea>
+
+            <div class="sliderRow">
+                Speed (frames per symbol):
+                <input type="range" id="txSpeedSlider" min="1" max="20" value="2">
+                <span id="txSpeedValue">2</span>
+            </div>
+
+            <div style="margin-top:10px;">
+                <button id="whiteTestBtn">
+                    Turn WHITE for 5s
+                </button>
+
+                <button id="blackTestBtn">
+                    Turn DARK for 5s
+                </button>
+
+                <button id="transmitBtn">
+                    TRANSMIT
+                </button>
+            </div>
+
+            <div class="status" id="txStatus">
+                Idle
+            </div>
+
+        </div>
+
+        <div class="panel">
+            <h3>Notes</h3>
+
+            <ul>
+                <li>Ambient lighting changes can cause false decoding.</li>
+                <li>Phone auto exposure may fluctuate brightness.</li>
+                <li>Very small flash sources reduce reliability.</li>
+                <li>A stabilization delay after calibration may help.</li>
+                <li>Higher FPS improves timing precision.</li>
+                <li>You may want hysteresis thresholds (separate ON/OFF thresholds).</li>
+                <li>Adaptive exposure lock would improve stability.</li>
+                <li>Using luminance averaging over multiple frames improves accuracy.</li>
+            </ul>
+        </div>
+
+    </div>
+
+</div>
+
+<div class="fullscreenFlash" id="fullscreenFlash"></div>
 
 <script>
-/*
-====================================================
-OPTICAL MORSE COMMUNICATOR
-====================================================
+"use strict";
 
-FEATURES:
-- Camera read mode
-- Automatic light threshold calibration
-- Draggable detection square
-- Morse decode in real time
-- Write/transmit mode
-- Adjustable transmission speed
-- Snapshot previews of ON/OFF states
-
-NOTES:
-- Morse timing accuracy depends heavily on FPS stability.
-- Browser camera FPS may vary.
-- Auto exposure may interfere with detection.
-- Brightness flicker filtering may still need tuning.
-- Exposure lock is not available in most browsers.
-
-====================================================
-*/
+/* =========================
+   MORSE TABLE
+========================= */
 
 const MORSE = {
-    ".-":"A","-...":"B","-.-.":"C","-..":"D",".":"E",
-    "..-.":"F","--.":"G","....":"H","..":"I",".---":"J",
-    "-.-":"K",".-..":"L","--":"M","-.":"N","---":"O",
-    ".--.":"P","--.-":"Q",".-.":"R","...":"S","-":"T",
-    "..-":"U","...-":"V",".--":"W","-..-":"X","-.--":"Y",
-    "--..":"Z",
-
-    "-----":"0",".----":"1","..---":"2","...--":"3",
-    "....-":"4",".....":"5","-....":"6","--...":"7",
-    "---..":"8","----.":"9"
+    A: ".-",
+    B: "-...",
+    C: "-.-.",
+    D: "-..",
+    E: ".",
+    F: "..-.",
+    G: "--.",
+    H: "....",
+    I: "..",
+    J: ".---",
+    K: "-.-",
+    L: ".-..",
+    M: "--",
+    N: "-.",
+    O: "---",
+    P: ".--.",
+    Q: "--.-",
+    R: ".-.",
+    S: "...",
+    T: "-",
+    U: "..-",
+    V: "...-",
+    W: ".--",
+    X: "-..-",
+    Y: "-.--",
+    Z: "--..",
+    0: "-----",
+    1: ".----",
+    2: "..---",
+    3: "...--",
+    4: "....-",
+    5: ".....",
+    6: "-....",
+    7: "--...",
+    8: "---..",
+    9: "----.",
+    " ": "/"
 };
 
+const MORSE_REVERSE = {};
+for (const k in MORSE) {
+    MORSE_REVERSE[MORSE[k]] = k;
+}
+
+/* =========================
+   ELEMENTS
+========================= */
+
 const video = document.getElementById("video");
-const canvas = document.getElementById("canvas");
-const ctx = canvas.getContext("2d");
+const captureCanvas = document.getElementById("captureCanvas");
+const ctx = captureCanvas.getContext("2d");
 
-const selector = document.getElementById("selector");
+const selectionBox = document.getElementById("selectionBox");
+
+const onCanvas = document.getElementById("onCanvas");
+const offCanvas = document.getElementById("offCanvas");
+
+const onCtx = onCanvas.getContext("2d");
+const offCtx = offCanvas.getContext("2d");
+
+const decodedOutput = document.getElementById("decodedOutput");
 const statusEl = document.getElementById("status");
-const decodedEl = document.getElementById("decoded");
+const liveStats = document.getElementById("liveStats");
 
-const onThumb = document.getElementById("onThumb");
-const offThumb = document.getElementById("offThumb");
+const thresholdSlider = document.getElementById("thresholdSlider");
+const thresholdValue = document.getElementById("thresholdValue");
 
-const onCtx = onThumb.getContext("2d");
-const offCtx = offThumb.getContext("2d");
+const speedSlider = document.getElementById("speedSlider");
+const speedValue = document.getElementById("speedValue");
 
-const transmitScreen = document.getElementById("transmitScreen");
+const txSpeedSlider = document.getElementById("txSpeedSlider");
+const txSpeedValue = document.getElementById("txSpeedValue");
 
-let stream;
+const fullscreenFlash = document.getElementById("fullscreenFlash");
 
-let selectorX = 100;
-let selectorY = 100;
+const txStatus = document.getElementById("txStatus");
 
-let squareSize = 50;
+/* =========================
+   STATE
+========================= */
 
-let flashOnBrightness = 200;
-let flashOffBrightness = 10;
-let threshold = 100;
+let stream = null;
 
-let calibrated = false;
+let onBrightness = 255;
+let offBrightness = 0;
 
-let reading = false;
+let threshold = 40;
+
+let dragging = false;
+let dragOffsetX = 0;
+let dragOffsetY = 0;
 
 let lastState = false;
-let lastStateTime = 0;
+let frameCounter = 0;
+let signalFrames = 0;
 
 let morseBuffer = "";
 let outputText = "";
 
-let frameCounter = 0;
-let fpsEstimate = 30;
+let symbolFrames = 2;
 
-function updateSelector() {
-    selector.style.left = selectorX + "px";
-    selector.style.top = selectorY + "px";
+let currentBrightness = 0;
 
-    squareSize = parseInt(
-        document.getElementById("squareSize").value
-    );
-
-    selector.style.width = squareSize + "px";
-    selector.style.height = squareSize + "px";
-}
-
-updateSelector();
+/* =========================
+   CAMERA
+========================= */
 
 async function startCamera() {
 
@@ -343,349 +439,315 @@ async function startCamera() {
 
     await video.play();
 
-    status("Camera started");
-
-    detectFPS();
-
-    requestAnimationFrame(readLoop);
+    requestAnimationFrame(processFrame);
 }
 
-function status(msg) {
-    statusEl.textContent = msg;
-}
+/* =========================
+   DRAGGING
+========================= */
 
-function detectFPS() {
+selectionBox.addEventListener("pointerdown", e => {
 
-    let frames = 0;
-    let start = performance.now();
+    dragging = true;
 
-    function count() {
-        frames++;
+    const rect = selectionBox.getBoundingClientRect();
 
-        let now = performance.now();
+    dragOffsetX = e.clientX - rect.left;
+    dragOffsetY = e.clientY - rect.top;
 
-        if (now - start >= 1000) {
-            fpsEstimate = frames;
-            status("Detected FPS: " + fpsEstimate);
+    selectionBox.setPointerCapture(e.pointerId);
+});
 
-            frames = 0;
-            start = now;
+window.addEventListener("pointermove", e => {
+
+    if (!dragging) return;
+
+    const parent = video.getBoundingClientRect();
+
+    let x = e.clientX - parent.left - dragOffsetX;
+    let y = e.clientY - parent.top - dragOffsetY;
+
+    x = Math.max(0, Math.min(parent.width - 60, x));
+    y = Math.max(0, Math.min(parent.height - 60, y));
+
+    selectionBox.style.left = x + "px";
+    selectionBox.style.top = y + "px";
+});
+
+window.addEventListener("pointerup", () => {
+    dragging = false;
+});
+
+/* =========================
+   MOVE BUTTONS
+========================= */
+
+document.querySelectorAll("[data-move]").forEach(btn => {
+
+    btn.onclick = () => {
+
+        const move = btn.dataset.move;
+
+        let x = parseInt(selectionBox.style.left);
+        let y = parseInt(selectionBox.style.top);
+
+        const step = 10;
+
+        if (move === "up") y -= step;
+        if (move === "down") y += step;
+        if (move === "left") x -= step;
+        if (move === "right") x += step;
+        if (move === "center") {
+            x = 100;
+            y = 100;
         }
 
-        requestAnimationFrame(count);
-    }
+        selectionBox.style.left = x + "px";
+        selectionBox.style.top = y + "px";
+    };
+});
 
-    count();
-}
+/* =========================
+   IMAGE CAPTURE
+========================= */
 
-function getRegionBrightness() {
+function getSelectionBrightness() {
 
-    if (!video.videoWidth) return 0;
+    captureCanvas.width = video.videoWidth;
+    captureCanvas.height = video.videoHeight;
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
 
-    ctx.drawImage(video,0,0);
+    const vr = video.getBoundingClientRect();
 
-    const scaleX = video.videoWidth / video.clientWidth;
-    const scaleY = video.videoHeight / video.clientHeight;
+    const scaleX = video.videoWidth / vr.width;
+    const scaleY = video.videoHeight / vr.height;
 
-    const x = Math.floor(selectorX * scaleX);
-    const y = Math.floor(selectorY * scaleY);
+    const x = parseInt(selectionBox.style.left) * scaleX;
+    const y = parseInt(selectionBox.style.top) * scaleY;
 
-    const size = Math.floor(squareSize * scaleX);
+    const size = 60 * scaleX;
 
-    const data = ctx.getImageData(
-        x,y,size,size
-    ).data;
+    const img = ctx.getImageData(x, y, size, size);
 
     let total = 0;
 
-    for (let i=0;i<data.length;i+=4) {
-        total += (
-            data[i] +
-            data[i+1] +
-            data[i+2]
-        ) / 3;
+    for (let i = 0; i < img.data.length; i += 4) {
+
+        const r = img.data[i];
+        const g = img.data[i + 1];
+        const b = img.data[i + 2];
+
+        total += (r + g + b) / 3;
     }
 
-    return total / (data.length / 4);
+    return total / (img.data.length / 4);
 }
 
-async function calibrate() {
+function copySelectionToCanvas(targetCtx) {
 
-    calibrated = false;
+    const vr = video.getBoundingClientRect();
 
-    status("Calibration: TURN FLASH ON");
+    const scaleX = video.videoWidth / vr.width;
+    const scaleY = video.videoHeight / vr.height;
 
-    let onValue = await waitForLargeBrightnessChange(true);
+    const x = parseInt(selectionBox.style.left) * scaleX;
+    const y = parseInt(selectionBox.style.top) * scaleY;
 
-    flashOnBrightness = onValue;
+    const size = 60 * scaleX;
 
-    captureThumb(onCtx);
+    const img = ctx.getImageData(x, y, size, size);
 
-    status("Calibration: TURN FLASH OFF");
-
-    let offValue = await waitForLargeBrightnessChange(false);
-
-    flashOffBrightness = offValue;
-
-    captureThumb(offCtx);
-
-    threshold = (
-        flashOnBrightness +
-        flashOffBrightness
-    ) / 2;
-
-    calibrated = true;
-
-    status(
-        "Calibrated. Threshold=" +
-        threshold.toFixed(2)
-    );
+    targetCtx.putImageData(img, 0, 0);
 }
 
-function waitForLargeBrightnessChange(expectUp) {
+/* =========================
+   MANUAL SET
+========================= */
 
-    return new Promise(resolve => {
+document.getElementById("setOnBtn").onclick = () => {
 
-        let baseline = getRegionBrightness();
+    currentBrightness = getSelectionBrightness();
 
-        let interval = setInterval(() => {
+    onBrightness = currentBrightness;
 
-            let current = getRegionBrightness();
+    copySelectionToCanvas(onCtx);
 
-            if (expectUp) {
+    statusEl.textContent = "ON sample captured";
+};
 
-                if (current > baseline + 40) {
-                    clearInterval(interval);
-                    resolve(current);
-                }
+document.getElementById("setOffBtn").onclick = () => {
 
-            } else {
+    currentBrightness = getSelectionBrightness();
 
-                if (current < baseline - 40) {
-                    clearInterval(interval);
-                    resolve(current);
-                }
-            }
+    offBrightness = currentBrightness;
 
-        }, 30);
+    copySelectionToCanvas(offCtx);
 
-    });
-}
+    statusEl.textContent = "OFF sample captured";
+};
 
-function captureThumb(targetCtx) {
+/* =========================
+   CALIBRATION
+========================= */
 
-    const scaleX = video.videoWidth / video.clientWidth;
-    const scaleY = video.videoHeight / video.clientHeight;
+document.getElementById("calibrateBtn").onclick = async () => {
 
-    const x = Math.floor(selectorX * scaleX);
-    const y = Math.floor(selectorY * scaleY);
+    statusEl.textContent = "Turn flash/light ON";
 
-    const size = Math.floor(squareSize * scaleX);
+    let prev = getSelectionBrightness();
 
-    targetCtx.drawImage(
-        video,
-        x,y,size,size,
-        0,0,
-        100,100
-    );
-}
+    while (true) {
 
-function readLoop(timestamp) {
+        await wait(50);
 
-    if (calibrated) {
+        const now = getSelectionBrightness();
 
-        const brightness = getRegionBrightness();
+        if (now > prev + 40) {
 
-        const state = brightness > threshold;
+            onBrightness = now;
 
-        processSignal(state, timestamp);
-    }
+            copySelectionToCanvas(onCtx);
 
-    requestAnimationFrame(readLoop);
-}
-
-function processSignal(state, timestamp) {
-
-    if (state !== lastState) {
-
-        const duration = timestamp - lastStateTime;
-
-        if (lastState) {
-
-            interpretPulse(duration);
-
-        } else {
-
-            interpretGap(duration);
+            break;
         }
 
-        lastState = state;
-        lastStateTime = timestamp;
+        prev = now;
     }
+
+    statusEl.textContent = "Turn flash/light OFF";
+
+    while (true) {
+
+        await wait(50);
+
+        const now = getSelectionBrightness();
+
+        if (now < onBrightness - 40) {
+
+            offBrightness = now;
+
+            copySelectionToCanvas(offCtx);
+
+            break;
+        }
+    }
+
+    statusEl.textContent = "Calibration complete";
+};
+
+/* =========================
+   PROCESS
+========================= */
+
+function processFrame() {
+
+    currentBrightness = getSelectionBrightness();
+
+    const mid = (onBrightness + offBrightness) / 2;
+
+    const isOn = currentBrightness > (mid + threshold);
+
+    if (isOn === lastState) {
+        signalFrames++;
+    } else {
+
+        processSignal(lastState, signalFrames);
+
+        signalFrames = 0;
+        lastState = isOn;
+    }
+
+    liveStats.innerHTML = `
+        Brightness: ${currentBrightness.toFixed(2)}<br>
+        ON Ref: ${onBrightness.toFixed(2)}<br>
+        OFF Ref: ${offBrightness.toFixed(2)}<br>
+        Threshold: ${threshold}<br>
+        State: ${isOn ? "ON" : "OFF"}
+    `;
+
+    requestAnimationFrame(processFrame);
 }
 
-function interpretPulse(durationMs) {
+/* =========================
+   MORSE PARSER
+========================= */
 
-    const unit = (
-        1000 / fpsEstimate
-    ) * parseInt(
-        document.getElementById("framesPerSymbol").value
-    );
+function processSignal(state, frames) {
 
-    if (durationMs < unit * 2.2) {
+    if (frames <= 0) return;
 
-        morseBuffer += ".";
+    const units = Math.round(frames / symbolFrames);
+
+    if (state) {
+
+        if (units <= 2) {
+            morseBuffer += ".";
+        } else {
+            morseBuffer += "-";
+        }
 
     } else {
 
-        morseBuffer += "-";
-    }
+        if (units >= 6) {
 
-    status("Receiving: " + morseBuffer);
-}
+            finalizeLetter();
 
-function interpretGap(durationMs) {
+            outputText += " ";
+            decodedOutput.textContent = outputText;
 
-    const unit = (
-        1000 / fpsEstimate
-    ) * parseInt(
-        document.getElementById("framesPerSymbol").value
-    );
+        } else if (units >= 3) {
 
-    if (durationMs >= unit * 6) {
-
-        flushLetter();
-        outputText += " ";
-
-    } else if (durationMs >= unit * 2.5) {
-
-        flushLetter();
+            finalizeLetter();
+        }
     }
 }
 
-function flushLetter() {
+function finalizeLetter() {
 
-    if (!morseBuffer.length) return;
+    if (!morseBuffer) return;
 
-    const char = MORSE[morseBuffer] || "?";
+    const char = MORSE_REVERSE[morseBuffer] || "?";
 
     outputText += char;
 
-    decodedEl.textContent = outputText;
+    decodedOutput.textContent = outputText;
 
     morseBuffer = "";
 }
 
-function moveBox(dx,dy) {
-    selectorX += dx;
-    selectorY += dy;
-    updateSelector();
-}
+/* =========================
+   TRANSMIT
+========================= */
 
-function centerBox() {
-    selectorX = (
-        video.clientWidth / 2
-    ) - (squareSize/2);
+async function transmit(text) {
 
-    selectorY = (
-        video.clientHeight / 2
-    ) - (squareSize/2);
+    const speed = Number(txSpeedSlider.value);
 
-    updateSelector();
-}
+    const frameMs = 1000 / 60;
+    const unit = frameMs * speed;
 
-let dragging = false;
-let dragOffsetX = 0;
-let dragOffsetY = 0;
+    txStatus.textContent = "Transmitting...";
 
-selector.addEventListener("mousedown", e => {
-    dragging = true;
+    fullscreenFlash.style.display = "block";
 
-    dragOffsetX = e.offsetX;
-    dragOffsetY = e.offsetY;
-});
+    for (const charRaw of text.toUpperCase()) {
 
-window.addEventListener("mouseup", () => {
-    dragging = false;
-});
+        const code = MORSE[charRaw];
 
-window.addEventListener("mousemove", e => {
+        if (!code) continue;
 
-    if (!dragging) return;
-
-    const rect = video.getBoundingClientRect();
-
-    selectorX = e.clientX - rect.left - dragOffsetX;
-    selectorY = e.clientY - rect.top - dragOffsetY;
-
-    updateSelector();
-});
-
-document.getElementById(
-    "startCameraBtn"
-).onclick = startCamera;
-
-document.getElementById(
-    "calibrateBtn"
-).onclick = calibrate;
-
-function sleep(ms) {
-    return new Promise(r => setTimeout(r,ms));
-}
-
-const TEXT_TO_MORSE = {};
-
-for (const [k,v] of Object.entries(MORSE)) {
-    TEXT_TO_MORSE[v] = k;
-}
-
-async function transmitText(text) {
-
-    const fpsFrames = parseInt(
-        document.getElementById("framesPerSymbol").value
-    );
-
-    const unit = (
-        1000 / fpsEstimate
-    ) * fpsFrames;
-
-    transmitScreen.style.display = "block";
-
-    async function flash(on, duration) {
-
-        transmitScreen.style.background =
-            on ? "white" : "black";
-
-        await sleep(duration);
-    }
-
-    text = text.toUpperCase();
-
-    for (const char of text) {
-
-        if (char === " ") {
+        if (code === "/") {
 
             await flash(false, unit * 7);
             continue;
         }
 
-        const morse = TEXT_TO_MORSE[char];
-
-        if (!morse) continue;
-
-        for (let i=0;i<morse.length;i++) {
-
-            const symbol = morse[i];
+        for (const symbol of code) {
 
             if (symbol === ".") {
-
                 await flash(true, unit);
-
             } else {
-
                 await flash(true, unit * 3);
             }
 
@@ -695,44 +757,105 @@ async function transmitText(text) {
         await flash(false, unit * 2);
     }
 
-    transmitScreen.style.display = "none";
+    fullscreenFlash.style.display = "none";
+
+    txStatus.textContent = "Done";
 }
 
-document.getElementById(
-    "transmitBtn"
-).onclick = () => {
+async function flash(on, duration) {
 
-    transmitText(
-        document.getElementById(
-            "transmitText"
-        ).value
+    fullscreenFlash.style.background = on ? "white" : "black";
+
+    await wait(duration);
+}
+
+/* =========================
+   TEST MODES
+========================= */
+
+document.getElementById("whiteTestBtn").onclick = async () => {
+
+    fullscreenFlash.style.display = "block";
+    fullscreenFlash.style.background = "white";
+
+    await wait(5000);
+
+    fullscreenFlash.style.display = "none";
+};
+
+document.getElementById("blackTestBtn").onclick = async () => {
+
+    fullscreenFlash.style.display = "block";
+    fullscreenFlash.style.background = "black";
+
+    await wait(5000);
+
+    fullscreenFlash.style.display = "none";
+};
+
+document.getElementById("transmitBtn").onclick = () => {
+
+    transmit(document.getElementById("transmitText").value);
+};
+
+/* =========================
+   MODE SWITCH
+========================= */
+
+document.getElementById("readModeBtn").onclick = () => {
+
+    document.getElementById("readMode").classList.remove("hidden");
+    document.getElementById("writeMode").classList.add("hidden");
+};
+
+document.getElementById("writeModeBtn").onclick = () => {
+
+    document.getElementById("writeMode").classList.remove("hidden");
+    document.getElementById("readMode").classList.add("hidden");
+};
+
+/* =========================
+   SLIDERS
+========================= */
+
+thresholdSlider.oninput = () => {
+
+    threshold = Number(thresholdSlider.value);
+
+    thresholdValue.textContent = threshold;
+};
+
+speedSlider.oninput = () => {
+
+    symbolFrames = Number(speedSlider.value);
+
+    speedValue.textContent = symbolFrames;
+};
+
+txSpeedSlider.oninput = () => {
+
+    txSpeedValue.textContent = txSpeedSlider.value;
+};
+
+/* =========================
+   HELPERS
+========================= */
+
+function wait(ms) {
+    return new Promise(r => setTimeout(r, ms));
+}
+
+/* =========================
+   START
+========================= */
+
+startCamera().catch(err => {
+
+    alert(
+        "Camera failed:\n\n" +
+        err.message
     );
-};
-
-document.getElementById(
-    "white5sBtn"
-).onclick = async () => {
-
-    transmitScreen.style.display = "block";
-    transmitScreen.style.background = "white";
-
-    await sleep(5000);
-
-    transmitScreen.style.display = "none";
-};
-
-document.getElementById(
-    "dark5sBtn"
-).onclick = async () => {
-
-    transmitScreen.style.display = "block";
-    transmitScreen.style.background = "black";
-
-    await sleep(5000);
-
-    transmitScreen.style.display = "none";
-};
-
+});
 </script>
 
 </body>
