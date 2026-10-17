@@ -59,6 +59,13 @@
     background: var(--bg2);
     padding: 0 2rem;
   }
+  /* The history selection toolbar + row tick boxes (
+  .hist-tools { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin: 0.4rem 0 0.8rem; }
+  .hist-tools .btn { padding: 4px 10px; font-size: 12.5px; }
+  .hist-check, .hist-tools input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; flex: 0 0 auto; }
+  .hist-sel-label { font-size: 12.5px; color: var(--muted); cursor: pointer; }
+  .hist-count { font-size: 12px; color: var(--muted); margin-right: 0.4rem; }
+  .hist-row .hist-check { margin-right: 0.6rem; }
   .tab {
     padding: 0.75rem 1.5rem;
     cursor: pointer;
@@ -214,6 +221,12 @@
   canvas { display: block; max-width: 100%; image-rendering: pixelated; }
 
   .action-row { display: flex; gap: 0.75rem; margin-top: 1rem; flex-wrap: wrap; align-items: center; }
+  .enc-parts { margin-top: 0.75rem; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .enc-part-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.45rem 0.7rem; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .enc-part-row:last-child { border-bottom: none; }
+  .enc-part-name { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); overflow-wrap: anywhere; }
+  .enc-part-size { color: var(--muted); white-space: nowrap; }
+  .enc-part-row .btn { padding: 0.25rem 0.6rem; font-size: 12px; }
 
   .decode-result {
     margin-top: 1.5rem;
@@ -265,6 +278,33 @@
     color: var(--text);
     line-height: 1.6;
   }
+  .decode-text-code {
+    font: inherit;
+    color: inherit;
+    display: block;
+    white-space: inherit;
+    word-break: inherit;
+  }
+  .hist-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg2);
+    margin-bottom: 0.45rem;
+  }
+  .hist-main { flex: 1; min-width: 0; }
+  .hist-id { font-size: 12.5px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hist-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .hist-thumb { width: 72px; height: 40px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); flex: none; }
+  .zip-note { font-size: 12px; color: var(--accent2); margin-bottom: 0.6rem; }
+  .zip-list { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--bg); max-height: 360px; overflow-y: auto; }
+  .zip-row { display: flex; justify-content: space-between; gap: 1rem; padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .zip-row:last-child { border-bottom: 0; }
+  .zip-name { word-break: break-all; }
+  .zip-size { color: var(--muted); flex: none; }
 
   .progress-bar-wrap {
     background: var(--bg3);
@@ -421,7 +461,7 @@
   <div class="dropzone" id="enc-dropzone">
     <input type="file" id="enc-file-input" onchange="handleEncodeFile(this)">
     <i>📁</i>
-    <p>Drop any file here or <span>click to browse</span></p>
+    <p>Drop any file here (text or binary) or <span>click to browse</span></p>
   </div>
 
   <div class="divider-row">
@@ -450,25 +490,26 @@
       <button class="btn primary" onclick="downloadEncoded()">⬇ Download PNG</button>
       <button class="btn" onclick="clearEncode()">✕ Clear</button>
     </div>
+    <div id="enc-parts" class="enc-parts" style="display:none"></div>
   </div>
 </div>
 
 <div id="tab-decode" class="panel">
-  <p class="section-label">Load encoded PNG</p>
+  <p class="section-label">Load encoded PNG or text file</p>
   <div class="dropzone" id="dec-dropzone">
-    <input type="file" id="dec-file-input" accept="image/png" onchange="handleDecodeFile(this)">
+    <input type="file" id="dec-file-input" accept="image/png,.txt,text/plain,application/octet-stream" onchange="handleDecodeFile(this)">
     <i>🖼️</i>
-    <p>Drop an encoded PNG or <span>click to browse</span></p>
+    <p>Drop an encoded PNG or a <span>.txt</span> file, or <span>click to browse</span></p>
   </div>
 
   <div class="divider-row">
     <div class="divider-line"></div>
-    <div class="divider-text">or paste Twitter URL / media ID</div>
+    <div class="divider-text">or paste any file URL / media ID</div>
     <div class="divider-line"></div>
   </div>
 
   <div style="display:flex;gap:0.75rem;align-items:stretch">
-    <input type="text" id="dec-url" placeholder="https://pbs.twimg.com/media/HIAXGy_XAAAPSen  or just  HIAXGy_XAAAPSen">
+    <input type="text" id="dec-url" placeholder="a bare id, a pbs.twimg.com URL, any .txt URL — or several ids joined with + to stitch (key1+key2)">
     <button class="btn primary" onclick="handleDecodeUrl()" style="white-space:nowrap">Fetch & Decode</button>
   </div>
 
@@ -482,12 +523,23 @@
       <span id="dec-mime" class="mime-badge"></span>
       <span id="dec-size" class="size-badge"></span>
       <span id="dec-filename" style="font-size:12px;color:var(--muted)"></span>
+      <span id="dec-modified" style="font-size:12px;color:var(--muted);display:none"></span>
     </div>
     <div class="decode-result-body" id="dec-body"></div>
   </div>
   <div class="action-row" id="dec-actions" style="display:none">
     <button class="btn primary" id="dec-download-btn" onclick="downloadDecoded()">⬇ Download File</button>
     <button class="btn" onclick="clearDecode()">✕ Clear</button>
+  </div>
+  <div id="cache-info" style="font-size:11.5px;color:var(--muted);margin-top:0.9rem"></div>
+
+  <div id="history-wrap" style="display:none;margin-top:1.4rem">
+    <p class="section-label">History — every link that has been through the decoder</p>
+    <p style="font-size:11.5px;color:var(--muted);margin:-0.35rem 0 0.7rem">
+      Tick rows → <b>ONE master file</b>. <b>Download predecoded</b> is that file as text
+      (<code>.bin2png</code>); <b>Download encoded</b> is the same file as PNG, ready to post.
+    </p>
+    <div id="history-list"></div>
   </div>
 </div>
 
@@ -524,9 +576,9 @@
       </div>
       <div class="how-card">
         <span class="how-card-icon">🔒</span>
-        <div class="how-card-title">Up to 3 MB hidden</div>
+        <div class="how-card-title">Up to 2.31 MiB hidden</div>
         <div class="how-card-body">
-          With 807,102 pixels × 3 bytes each you can encode <strong>files, text, encrypted messages, archives</strong> — anything that fits in ~2.4 MB of raw data, right inside a public tweet image.
+          With 807,302 pixels × 3 bytes each you can encode <strong>files, text, encrypted messages, archives</strong> — anything that fits in 2.31 MiB of raw data, right inside a public tweet image.
         </div>
       </div>
       <div class="how-card">
@@ -560,16 +612,246 @@
 const W = 899, H = 898;
 const TOTAL_PIXELS = W * H;
 
-let encodedBlob = null;
+let encodedParts = [];
 let decodedBytes = null;
 let decodedMime = null;
 let encodeTimeout = null;
+let decZipNote = null;    // e.g. 'ZIP > TXT' when a single-file zip was unwrapped
+let decInnerName = null;  // the member name inside that zip
+let decZipEntries = null; // entries when the payload is a multi-member zip
+let decManifest = null;   // files+parts when the payload is a .bin2png master file (x-draft.py)
 
-function switchTab(name) {
+// ─── FAVICON — animated, and it reflects what the page is DOING ──────────────
+// Two states drawn onto a 64×64 offscreen canvas and pushed into <link rel="icon">:
+// a slow-breathing dot while idle, a spinning arc while a download is in flight.
+// `setFaviconMode('downloading'|'idle')` is called around every fetch; the loop runs
+// on requestAnimationFrame (which the browser parks on a hidden tab — fine, a hidden
+// tab shows no favicon anyway).
+const faviconCanvas = document.createElement('canvas');
+faviconCanvas.width = faviconCanvas.height = 64;
+const fctx = faviconCanvas.getContext('2d');
+const faviconLink = document.createElement('link');
+faviconLink.rel = 'icon';
+faviconLink.type = 'image/png';
+document.head.appendChild(faviconLink);
+let faviconMode = 'idle';
+
+function drawFavicon(now) {
+  const s = 64, c = s / 2;
+  fctx.clearRect(0, 0, s, s);
+  if (faviconMode === 'downloading') {
+    // a spinning arc — the "working" tell
+    fctx.strokeStyle = '#22d3ee';
+    fctx.lineWidth = 8;
+    fctx.lineCap = 'round';
+    const start = (now / 140) % (Math.PI * 2);
+    fctx.beginPath();
+    fctx.arc(c, c, s * 0.33, start, start + Math.PI * 1.35);
+    fctx.stroke();
+  } else {
+    // a slow-breathing dot — the "idle" tell
+    const p = 0.5 + 0.5 * Math.sin(now / 500);
+    fctx.fillStyle = '#3f3f46';
+    fctx.beginPath(); fctx.arc(c, c, s * 0.30, 0, Math.PI * 2); fctx.fill();
+    fctx.fillStyle = '#22d3ee';
+    fctx.beginPath(); fctx.arc(c, c, s * (0.09 + 0.11 * p), 0, Math.PI * 2); fctx.fill();
+  }
+  faviconLink.href = faviconCanvas.toDataURL('image/png');
+}
+function faviconLoop(now) { drawFavicon(now); requestAnimationFrame(faviconLoop); }
+requestAnimationFrame(faviconLoop);
+function setFaviconMode(mode) { faviconMode = mode === 'downloading' ? 'downloading' : 'idle'; }
+
+// ─── FILE CACHE — IndexedDB, 50 MB budget ────────────────────────────────────
+// LocalStorage is capped near 5 MB per origin, so a 50 MB budget is only reachable
+// with IndexedDB. Every file fetched from a URL is stored WHOLE, keyed by that URL
+// in its COMPLETE form (exactly the string parseMediaId produced), alongside the
+// bytes, the URL, downloadedAt and accessedAt. A later fetch of the same URL reads
+// the cache instead of the network and only bumps accessedAt. A file larger than
+// CACHE_MAX_FILE is never cached; when a write would pass CACHE_MAX_BYTES, the
+// least-recently-accessed entries are evicted until it fits.
+const CACHE_DB = 'bin2png-cache';
+const CACHE_STORE = 'files';     // url -> { url, bytes }
+const CACHE_META  = 'meta';      // url -> { url, size, downloadedAt, accessedAt, lastModified }
+const CACHE_HISTORY = 'history'; // url -> { url, mediaId, size, fetchedAt, lastModified, … }
+const CACHE_MAX_BYTES = 50 * 1024 * 1024;   // total storage budget
+const CACHE_MAX_FILE  = 1.1 * 1024 * 1024;  // per-file cap: anything larger is not cached
+
+function cacheOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(CACHE_DB, 2);   // v2 adds the history store
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(CACHE_STORE)) db.createObjectStore(CACHE_STORE, { keyPath: 'url' });
+      if (!db.objectStoreNames.contains(CACHE_META)) {
+        const m = db.createObjectStore(CACHE_META, { keyPath: 'url' });
+        m.createIndex('accessedAt', 'accessedAt');
+      }
+      if (!db.objectStoreNames.contains(CACHE_HISTORY)) db.createObjectStore(CACHE_HISTORY, { keyPath: 'url' });
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+let _cacheDBP = null;
+function cacheDB() {
+  if (!_cacheDBP) _cacheDBP = cacheOpen();
+  return _cacheDBP;
+}
+
+function idbReq(db, store, mode, op) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, mode);
+    const req = op(tx.objectStore(store));
+    tx.oncomplete = () => resolve(req.result);
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('transaction aborted'));
+  });
+}
+function idbGet(db, store, key)   { return idbReq(db, store, 'readonly',  s => s.get(key)); }
+function idbGetAll(db, store)     { return idbReq(db, store, 'readonly',  s => s.getAll()); }
+function idbPut(db, store, value) { return idbReq(db, store, 'readwrite', s => s.put(value)); }
+function idbDel(db, store, key)   { return idbReq(db, store, 'readwrite', s => s.delete(key)); }
+
+// ─── HISTORY — every URL that has been through the decoder ───────────────────
+// Its own store, so the list survives a reload. A record keeps the METADATA even when the
+// file itself was too big to cache: the bytes are dropped, the fact that it went through is not.
+async function historyAll() {
+  try { const db = await cacheDB(); return await idbGetAll(db, CACHE_HISTORY); }
+  catch (e) { return []; }
+}
+async function historyAdd(rec) {
+  try { const db = await cacheDB(); await idbPut(db, CACHE_HISTORY, rec); }
+  catch (e) { /* no IndexedDB -> history is simply off */ }
+}
+
+// Pure: which cached URLs must go so an `addBytes`-sized entry fits in `maxBytes`.
+// Least-recently-ACCESSED first; ties broken by oldest download. Kept a plain
+// function over plain objects so the test can run it without a browser.
+function pickEvictions(entries, addBytes, maxBytes) {
+  let total = entries.reduce((s, e) => s + e.size, 0);
+  if (total + addBytes <= maxBytes) return [];
+  const victims = [...entries].sort((a, b) =>
+    (a.accessedAt - b.accessedAt) || (a.downloadedAt - b.downloadedAt));
+  const out = [];
+  for (const e of victims) {
+    if (total + addBytes <= maxBytes) break;
+    out.push(e.url);
+    total -= e.size;
+  }
+  return out;
+}
+
+function asU8(v) { return v instanceof Uint8Array ? v : new Uint8Array(v); }
+
+// Read-through: bytes from cache (bumping accessedAt), or null on a miss.
+async function cacheGet(url) {
+  try {
+    const db = await cacheDB();
+    const meta = await idbGet(db, CACHE_META, url);
+    if (!meta) return null;
+    const file = await idbGet(db, CACHE_STORE, url);
+    if (!file) { await idbDel(db, CACHE_META, url); return null; }
+    meta.accessedAt = Date.now();
+    await idbPut(db, CACHE_META, meta);
+    // lastModified rides along, so a cache hit still shows the source age with no network.
+    return { bytes: asU8(file.bytes), lastModified: meta.lastModified ?? null };
+  } catch (e) { return null; }   // no IndexedDB (private mode?) — cache is simply off
+}
+
+// Store: 'too-large' if over the per-file cap, 'stored' otherwise.
+async function cachePut(url, bytes, lastModified) {
+  if (bytes.length > CACHE_MAX_FILE) return 'too-large';
+  try {
+    const db = await cacheDB();
+    const metas = await idbGetAll(db, CACHE_META);
+    const victims = pickEvictions(metas, bytes.length, CACHE_MAX_BYTES);
+    for (const u of victims) { await idbDel(db, CACHE_STORE, u); await idbDel(db, CACHE_META, u); }
+    await idbPut(db, CACHE_STORE, { url, bytes });
+    await idbPut(db, CACHE_META, { url, size: bytes.length, downloadedAt: Date.now(), accessedAt: Date.now(), lastModified: lastModified ?? null });
+    return 'stored';
+  } catch (e) { return 'error'; }
+}
+
+async function renderCacheInfo() {
+  const el = document.getElementById('cache-info');
+  if (!el) return;
+  try {
+    const db = await cacheDB();
+    const metas = await idbGetAll(db, CACHE_META);
+    const total = metas.reduce((s, m) => s + m.size, 0);
+    el.textContent = `Cache: ${metas.length} file${metas.length === 1 ? '' : 's'}, ` +
+      `${fmtBytes(total)} / ${fmtBytes(CACHE_MAX_BYTES)} used`;
+  } catch (e) {
+    el.textContent = 'Cache: unavailable in this browser';
+  }
+}
+
+// Which page you were on survives a reload (
+// page it is on … the encode or decode"). Only a real TAB CLICK is remembered: a share link or a
+// history "Fetch now" forces the decode tab for that load but must not overwrite the preference,
+// and a hash still wins over the stored tab (an opened link has to decode).
+const TAB_KEY = 'bin2png.tab.v1';
+function savedTab() {
+  try {
+    const v = localStorage.getItem(TAB_KEY);
+    return v === 'encode' || v === 'decode' ? v : null;
+  } catch { return null; }   // no storage (private mode, file:// on some builds): just don't remember
+}
+function switchTab(name, remember = true) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['encode','decode'][i] === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
+  if (remember) { try { localStorage.setItem(TAB_KEY, name); } catch { /* storage refused */ } }
 }
+
+// ─── SHARE LINKS ──────────────────────────────────────────────────────────────
+// A link like  https://jarivizero.github.io/bin2png#HTuOfF1W4AA6UfM  decodes by itself:
+// the hash carries the media id, so opening it fetches and decodes with no click. The
+// id is also written into the input, so the URL stays shareable and re-opened by hand.
+// It does NOT auto-destination the DECODE tab's own placeholder, and a bare `#2` (the
+// legacy redirect from the old /bin2png/ path) parses to nothing and is ignored.
+// A hash may carry SEVERAL media ids joined by `+` — the ORDERED parts of one payload, each PNG a
+// capacity-sized slice of the same file (see bin2png-encode.mjs). Returns the ids IN THE ORDER
+// WRITTEN, or null. One bad part rejects the whole hash: a half-stitched file is worse than a clear
+// refusal, and there is no way to guess which part is missing.
+function mediaIdsFromHash(hash) {
+  const raw = decodeURIComponent(String(hash || '').replace(/^#/, '')).trim();
+  if (!raw) return null;
+  const ids = [];
+  for (const part of raw.split('+')) {
+    const p = part.trim();
+    if (!p) continue;
+    const m = p.match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_\-]+)/) || p.match(/^([A-Za-z0-9_\-]{10,})$/);
+    if (!m) return null;
+    ids.push(m[1]);
+  }
+  return ids.length ? ids : null;
+}
+// The single-id form, which is what most links are. Kept as the thin wrapper so both spellings of
+// the rule live in ONE place.
+function mediaIdFromHash(hash) {
+  const ids = mediaIdsFromHash(hash);
+  return ids ? ids[0] : null;
+}
+
+let hashInFlight = false;
+async function decodeFromHash() {
+  const ids = mediaIdsFromHash(location.hash);
+  if (!ids || hashInFlight) return;
+  hashInFlight = true;
+  try {
+    switchTab('decode', false);   // a link decodes for this load without becoming the preference
+    // Written back as `key1+key2`, the same spelling that was in the hash, so the field is
+    // copyable/shareable and the URL still works if it is re-opened by hand.
+    document.getElementById('dec-url').value = ids.join('+');
+    await handleDecodeUrl();
+  } finally {
+    hashInFlight = false;
+  }
+}
+window.addEventListener('hashchange', decodeFromHash);
 
 // ─── ENCODE ───────────────────────────────────────────────────────────────────
 
@@ -604,90 +886,191 @@ function handleEncodeText() {
 }
 
 function encodeBytesToCanvas(bytes, name) {
-  const n = bytes.length;
-  const maxBytes = TOTAL_PIXELS * 4; // RGBA but we use 4 channels
+  const BYTES_PER_PX = 3;
+  const maxBytes = TOTAL_PIXELS * BYTES_PER_PX;   // 2,421,906 B per PNG
+  const total = bytes.length;
 
-  if (n > maxBytes) {
-    setEncStatus(`File too large: ${fmtBytes(n)} — max ${fmtBytes(maxBytes)}`, 'error');
-    return;
-  }
+  // SPLIT HERE, in the page (
+  // instead of pointing at the CLI). A file bigger than one canvas is cut into capacity-sized
+  // slices, IN ORDER, and each slice is written as its own PNG (`name.part1ofN.png` …). The slices
+  // are the raw bytes of the file concatenated — nothing added — so the decoder re-joins them from
+  // a `#key1+key2` link with exact recovery. A file that fits stays one PNG.
+  const slices = [];
+  if (total === 0) slices.push(bytes);
+  else for (let i = 0; i < total; i += maxBytes) slices.push(bytes.subarray(i, i + maxBytes));
+  const nParts = slices.length;
+  const baseName = ((name || 'encoded').replace(/\.[^./\\]*$/, '') || 'encoded');
 
   setEncStatus('Encoding…', 'info');
 
   const canvas = document.getElementById('enc-canvas');
+  const blobs = [];
+  let firstPixels = 0, totalPixels = 0;
+
+  const finish = () => {
+    encodedParts = blobs;
+    document.getElementById('stat-bytes').textContent = fmtBytes(total);
+    document.getElementById('stat-pixels').textContent = totalPixels.toLocaleString();
+    document.getElementById('stat-used').textContent = nParts === 1
+      ? ((firstPixels / TOTAL_PIXELS) * 100).toFixed(2) + '%'
+      : nParts + ' parts';
+    document.getElementById('stat-remaining').textContent = nParts === 1
+      ? (TOTAL_PIXELS - firstPixels).toLocaleString()
+      : '—';
+    document.getElementById('enc-stats').style.display = 'flex';
+    document.getElementById('enc-preview-wrap').style.display = 'block';
+    renderEncParts();
+    if (nParts === 1) {
+      setEncStatus(`Encoded ${fmtBytes(total)} → ${firstPixels.toLocaleString()} pixels`, 'success');
+    } else {
+      setEncStatus(`Encoded ${fmtBytes(total)} → ${nParts} PNGs (${baseName}.part1of${nParts}.png … ${baseName}.part${nParts}of${nParts}.png). Upload them IN ORDER, then share the #key1+key2 link — the decoder joins them.`, 'success');
+    }
+  };
+
+  // The DOWNLOADED bytes come from encodePngBlob (hand-built PNG, no canvas) — canvas.toBlob()
+  // stores pixels premultiplied by alpha, so a partial-alpha boundary pixel (alpha 85/170) gets its
+  // low bits rounded on write: e.g. a last payload byte 0x2C came back 0x2D. That is the same
+  // premultiplication the DECODER had to dodge, and it silently corrupts the last 1-2 bytes of any
+  // file whose length is not a multiple of 3. Building the PNG by hand is exact and matches the CLI
+  // encoder. The canvas is used only for the visual preview.
+  const encodeSlice = async (i) => {
+    if (i >= nParts) { finish(); return; }
+    const px = drawPayloadToCanvas(canvas, slices[i]);   // preview only
+    if (i === 0) firstPixels = px;
+    totalPixels += px;
+    const blob = await encodePngBlob(slices[i]);
+    blobs.push({
+      name: nParts === 1 ? baseName + '.png' : `${baseName}.part${i + 1}of${nParts}.png`,
+      blob, bytes: slices[i].length,
+    });
+    await encodeSlice(i + 1);
+  };
+
+  encodeSlice(0).catch((e) => setEncStatus('Encode failed: ' + e.message, 'error'));
+}
+
+// ─── exact PNG writer (no canvas) ────────────────────────────────────────────
+// Same codec the CLI encoder writes: 8-bit RGBA, filter 0, zlib(deflate) IDAT. Browsers can deflate
+// with CompressionStream, so the page can build the PNG byte-exactly and skip the lossy canvas
+// export entirely.
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) crc = CRC_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function pngChunk(type, data) {
+  const out = new Uint8Array(12 + data.length);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, data.length);
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(data, 8);
+  dv.setUint32(8 + data.length, crc32(out.subarray(4, 8 + data.length)));
+  return out;
+}
+async function deflateBytes(u8) {
+  const stream = new Blob([u8]).stream().pipeThrough(new CompressionStream('deflate'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+// Pack the payload into 8-bit RGBA scanlines (each prefixed with filter byte 0).
+function packScanlines(bytes) {
+  const BYTES_PER_PX = 3;
+  const n = bytes.length;
+  const stride = W * 4;
+  const raw = new Uint8Array(H * (stride + 1));   // zero-filled: unwritten pixels are 0,0,0,0
+  for (let y = 0; y < H; y++) {
+    const row = y * (stride + 1);
+    for (let x = 0; x < W; x++) {
+      const off = (y * W + x) * BYTES_PER_PX;
+      if (off >= n) break;
+      const real = Math.min(3, n - off);
+      const o = row + 1 + x * 4;
+      raw[o]     = bytes[off];
+      raw[o + 1] = real >= 2 ? bytes[off + 1] : 0;
+      raw[o + 2] = real >= 3 ? bytes[off + 2] : 0;
+      raw[o + 3] = real === 3 ? 255 : real === 2 ? 170 : 85;
+    }
+  }
+  return raw;
+}
+async function encodePngBlob(bytes) {
+  const ihdr = new Uint8Array(13);
+  const dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, W); dv.setUint32(4, H);
+  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  const idat = await deflateBytes(packScanlines(bytes));
+  return new Blob([
+    new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+    pngChunk('IHDR', ihdr), pngChunk('IDAT', idat), pngChunk('IEND', new Uint8Array(0)),
+  ], { type: 'image/png' });
+}
+
+// Fill ONE canvas with up to a canvas-worth of payload and return its data-pixel count. Used for
+// the PREVIEW only (the real bytes come from encodePngBlob). (The codec: 3 payload bytes per pixel
+// in R,G,B; the alpha channel is a byte-count marker — 255 = 3 bytes, 170 = 2, 85 = 1, 0 = end.)
+function drawPayloadToCanvas(canvas, bytes) {
+  const BYTES_PER_PX = 3;
+  const n = bytes.length;
   const ctx = canvas.getContext('2d');
   const imgData = ctx.createImageData(W, H);
   const d = imgData.data;
-
-  // Pack: we use RGBA. Each pixel encodes 4 bytes of payload.
-  // But the trick: to use transparency range efficiently, we store all 4 bytes
-  // per pixel using full RGBA. Data pixels are non-transparent (alpha > 0).
-  // We store 3 bytes of payload in RGB and use alpha as a continuation flag.
-  // Actually simplest: store 4 bytes per pixel with alpha derived from the byte value
-  // to create the "range of transparency" effect described.
-  //
-  // Encoding scheme:
-  //  - Pixel index i stores bytes at offset i*3 (R, G, B)
-  //  - Alpha encodes how many of the 3 bytes are "real" (255=full, 128=partial, etc)
-  //  Actually let's do a cleaner approach:
-  //  - Store raw bytes in R, G, B channels (3 bytes per pixel)
-  //  - Alpha = 255 for full pixels, scaled for last pixel if partial
-  //  - Remaining pixels are RGBA 0,0,0,0 (transparent)
-  //
-  // For "range of transparency with all color palette": 
-  // We pack the byte index into RGB freely, and use alpha to represent
-  // a partial-byte pixel at the boundary. This creates the visual spread.
-
-  const BYTES_PER_PX = 3;
   const numDataPixels = Math.ceil(n / BYTES_PER_PX);
 
   for (let px = 0; px < TOTAL_PIXELS; px++) {
-    const base = px * 4; // index into imgData.data
+    const base = px * 4;
     const byteOff = px * BYTES_PER_PX;
-
     if (byteOff >= n) {
-      // Transparent padding
-      d[base] = 0; d[base+1] = 0; d[base+2] = 0; d[base+3] = 0;
+      d[base] = 0; d[base+1] = 0; d[base+2] = 0; d[base+3] = 0;   // transparent padding
     } else {
-      const r = bytes[byteOff] ?? 0;
-      const g = byteOff+1 < n ? bytes[byteOff+1] : 0;
-      const b = byteOff+2 < n ? bytes[byteOff+2] : 0;
-
-      // How many bytes are real in this pixel?
       const real = Math.min(3, n - byteOff);
-      // Alpha encodes completeness: 255 = 3 bytes full, 170 = 2 bytes, 85 = 1 byte
-      // This creates the transparency range effect across the color palette
-      const alpha = real === 3 ? 255 : real === 2 ? 170 : 85;
-
-      d[base]   = r;
-      d[base+1] = g;
-      d[base+2] = b;
-      d[base+3] = alpha;
+      d[base]   = bytes[byteOff] ?? 0;
+      d[base+1] = byteOff+1 < n ? bytes[byteOff+1] : 0;
+      d[base+2] = byteOff+2 < n ? bytes[byteOff+2] : 0;
+      d[base+3] = real === 3 ? 255 : real === 2 ? 170 : 85;
     }
   }
 
   ctx.putImageData(imgData, 0, 0);
-
-  // Build downloadable blob
-  canvas.toBlob(blob => {
-    encodedBlob = blob;
-    const pad = TOTAL_PIXELS - numDataPixels;
-    document.getElementById('stat-bytes').textContent = fmtBytes(n);
-    document.getElementById('stat-pixels').textContent = numDataPixels.toLocaleString();
-    document.getElementById('stat-used').textContent = ((numDataPixels / TOTAL_PIXELS) * 100).toFixed(2) + '%';
-    document.getElementById('stat-remaining').textContent = pad.toLocaleString();
-    document.getElementById('enc-stats').style.display = 'flex';
-    document.getElementById('enc-preview-wrap').style.display = 'block';
-    setEncStatus(`Encoded ${fmtBytes(n)} → ${numDataPixels.toLocaleString()} pixels`, 'success');
-  }, 'image/png');
+  return numDataPixels;
 }
 
-function downloadEncoded() {
-  if (!encodedBlob) return;
+function downloadBlob(blob, name) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(encodedBlob);
-  a.download = 'encoded.png';
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
   a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+// Download every part, IN ORDER (a single part downloads one file).
+function downloadEncoded() {
+  for (const p of encodedParts) downloadBlob(p.blob, p.name);
+}
+
+// The per-part download list, shown only when the payload was split.
+function renderEncParts() {
+  const wrap = document.getElementById('enc-parts');
+  if (!wrap) return;
+  wrap.textContent = '';
+  if (encodedParts.length <= 1) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  for (const p of encodedParts) {
+    const row = document.createElement('div'); row.className = 'enc-part-row';
+    const nm = document.createElement('span'); nm.className = 'enc-part-name'; nm.textContent = p.name;
+    const sz = document.createElement('span'); sz.className = 'enc-part-size'; sz.textContent = fmtBytes(p.bytes);
+    const b = document.createElement('button'); b.className = 'btn'; b.textContent = 'Download';
+    b.addEventListener('click', () => downloadBlob(p.blob, p.name));
+    row.append(nm, sz, b);
+    wrap.appendChild(row);
+  }
 }
 
 function clearEncode() {
@@ -699,7 +1082,8 @@ function clearEncode() {
   document.getElementById('enc-file-input').value = '';
   document.getElementById('enc-text').value = '';
   setEncStatus('', 'info');
-  encodedBlob = null;
+  encodedParts = [];
+  renderEncParts();
 }
 
 // Drag and drop for encode
@@ -732,53 +1116,437 @@ function setDecProgress(pct) {
   document.getElementById('dec-progress').style.width = pct + '%';
 }
 
+// Pure: "3 days ago" from two epoch-ms stamps. Kept browser-free so a test can call it.
+function relTime(fromMs, nowMs) {
+  const unit = (n, name) => `${n} ${name}${n === 1 ? '' : 's'} ago`;
+  const s = Math.max(0, Math.round((nowMs - fromMs) / 1000));
+  if (s < 60) return unit(s, 'second');
+  const m = Math.floor(s / 60);
+  if (m < 60) return unit(m, 'minute');
+  const h = Math.floor(m / 60);
+  if (h < 24) return unit(h, 'hour');
+  return unit(Math.floor(h / 24), 'day');
+}
+
+// Show the source file's Last-Modified (from the response header, or the cache) and its age.
+function renderModified(lastModified) {
+  const el = document.getElementById('dec-modified');
+  if (!el) return;
+  if (!lastModified || Number.isNaN(lastModified)) { el.textContent = ''; el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.textContent = `Last-Modified: ${new Date(lastModified).toUTCString()} (${relTime(lastModified, Date.now())})`;
+}
+
+// A Wayback Machine url is a FETCH TARGET, not a pbs id to re-derive. `…/web/<ts>if_/<url>` is the
+// RAW archived file; without the `if_` the archive answers with an HTML page (banner + rewritten
+// links), which is not the PNG. 
+// pbs url by the matcher below, so the archive copy was never fetched — useless exactly when the
+// live media is gone. Only web.archive.org is treated this way; any other host still goes through
+// the generic "already a complete URL" path.
+function archiveUrl(raw) {
+  // The flag rides on the TIMESTAMP (`/web/20261017232721if_/https://…`), never on its own
+  // segment — matching it as a separate group is what produced `/if_/if_https://…`.
+  const m = raw.match(/^(https?:\/\/web\.archive\.org)\/web\/([^/]+)\/(\S+)$/i);
+  if (!m) return null;
+  const ts = m[2].replace(/(?:if_|id_)$/i, '');
+  return `${m[1].toLowerCase()}/web/${ts}if_/${m[3]}`;   // if_ = the file itself, no banner
+}
+
 function parseMediaId(raw) {
-  raw = raw.trim();
-  // Strip query params, trailing stuff
-  // Accept: full URL, pbs.twimg.com/media/ID, just ID
-  let id = null;
+  raw = (raw || '').trim();
+  const archived = archiveUrl(raw);
+  if (archived) return archived;
+  // Accept: pbs.twimg.com/media/ID, a bare media id, or ANY complete http(s) URL
+  // (that last form is how a plain .txt — or any other file — gets fetched and cached,
+  // not only X media ids).
   const urlMatch = raw.match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_\-]+)/);
+  let id = null;
   if (urlMatch) {
     id = urlMatch[1];
   } else if (/^[A-Za-z0-9_\-]{10,}$/.test(raw)) {
     id = raw;
+  } else if (/^https?:\/\/\S+$/i.test(raw)) {
+    return raw;   // already a complete URL — use it verbatim (this is the cache key)
   }
   if (!id) return null;
-  return `https://pbs.twimg.com/media/${id}.png`;
+  // `?format=png` is the file AS UPLOADED. Measured on live pbs media (2026-10-04): it returns
+  // BYTE-IDENTICAL bytes to `?name=orig` wherever that works (5/5, up to 1.7 MB) and a 200 where
+  // `?name=orig` returns 404 — so it is the first request, and `?name=orig` is the fallback
+  // (see fetchImageBytes). The bare `.png` URL is X's re-encoded copy, which drops the alpha
+  // payload — never use it.
+  return `https://pbs.twimg.com/media/${id}?format=png`;
+}
+
+// One OR MORE ids/URLs: `key`, `key1+key2`, `key1+key2+key3`. Each part goes through parseMediaId,
+// so every single-part form still works unchanged. Returns the canonical URLs in order, or null if
+// ANY part cannot be parsed.
+function parseMediaIds(raw) {
+  const parts = String(raw || '').split('+').map((s) => s.trim()).filter(Boolean);
+  if (!parts.length) return null;
+  const urls = [];
+  for (const p of parts) {
+    const u = parseMediaId(p);
+    if (!u) return null;
+    urls.push(u);
+  }
+  return urls;
+}
+
+// Join the parts of a stitched payload back into one buffer, in the order given. The parts ARE the
+// file (raw ordered slices), so this is the inverse of the encoder's split and nothing else is
+// needed — a video's container header lives in part 1 and the rest is the stream continued.
+function concatParts(parts) {
+  let total = 0;
+  for (const p of parts) total += p.length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) { out.set(p, off); off += p.length; }
+  return out;
+}
+
+// Fetch the image bytes for a media URL. `?format=png` is the primary (see parseMediaId);
+// `?name=orig` is the fallback for the few media where the format form fails. The cache key stays
+// the canonical primary URL, so a fallback download is still a cache hit on the next lookup.
+// Download a list of part URLs — cache-first, IN PARALLEL, in order. The parts are independent
+// images on the same host, so fetching them one after another was pure waiting (
+// 2026-10-17: "add parallel downloading"): X answers a part in ~0.5-1s, which a 4-part link used to
+// pay four times over. Cache hits still download nothing, the shared callers keep the same
+// progress/status feedback, and a failure is reported with the part number that failed.
+// Returns { parts, cachedParts, tooLarge, lastModified } or { error }.
+async function fetchParts(urls, label) {
+  const parts = new Array(urls.length);
+  let cachedParts = 0, tooLarge = false, lastModified = null, done = 0, error = null;
+  await Promise.all(urls.map(async (u, i) => {
+    const hit = await cacheGet(u);
+    if (hit) {
+      parts[i] = hit.bytes;
+      cachedParts++;
+      if (lastModified === null) lastModified = hit.lastModified;
+      return;
+    }
+    setFaviconMode('downloading');
+    try {
+      const got = await fetchImageBytes(u);
+      parts[i] = got.bytes;
+      if (lastModified === null) lastModified = got.lastModified;
+      if ((await cachePut(u, got.bytes, got.lastModified)) === 'too-large') tooLarge = true;
+    } catch (e) {
+      error = error || `Fetch failed (${label ? label.toLowerCase() + ' ' : ''}part ${i + 1}/${urls.length}): ${e.message}`;
+    } finally {
+      done++;
+      setFaviconMode('idle');
+      setDecProgress(10 + (done / urls.length) * 70);
+      setDecStatus(`${label || 'Downloading'} — ${done}/${urls.length} …`, 'info');
+    }
+  }));
+  if (error) return { error };
+  return { parts, cachedParts, tooLarge, lastModified };
+}
+
+// The MIME a name already says. A manifest carries real names, so the extension IS the type —
+// guessing from magic bytes is what this removes (
+const MIME_BY_EXT = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  bmp: 'image/bmp', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
+  mp3: 'audio/mpeg', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac',
+  wav: 'audio/wav', m4a: 'audio/mp4',
+  txt: 'text/plain', json: 'application/json', html: 'text/html', css: 'text/css',
+  js: 'text/javascript', md: 'text/markdown', csv: 'text/csv', xml: 'application/xml',
+  sh: 'text/x-shellscript', py: 'text/x-python',
+  zip: 'application/zip', gz: 'application/gzip', bz2: 'application/x-bzip2', xz: 'application/x-xz',
+  '7z': 'application/x-7z-compressed', rar: 'application/x-rar-compressed', tar: 'application/x-tar',
+  pdf: 'application/pdf', apk: 'application/vnd.android.package-archive',
+  iso: 'application/x-iso9660-image', exe: 'application/x-msdownload', bin: 'application/octet-stream',
+};
+function mimeFromName(name) {
+  const ext = (String(name || '').match(/\.([A-Za-z0-9]+)$/) || [])[1];
+  return (ext && MIME_BY_EXT[ext.toLowerCase()]) || 'application/octet-stream';
+}
+
+// Save bytes to disk under a name. The MIME is implied by the name unless one is given.
+function saveBytes(bytes, name, mime) {
+  const blob = new Blob([bytes], { type: mime || mimeFromName(name) });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name || 'file.bin';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+async function fetchImageBytes(url) {
+  let alt = url.includes('?format=png') ? url.replace('?format=png', '?name=orig') : null;
+  if (!alt) {
+    // An archived copy is the primary; the LIVE media underneath it is the fallback for a
+    // snapshot that was never taken (or was taken of an already-dead image).
+    const m = url.match(/^https:\/\/web\.archive\.org\/web\/[^/]+\/(?:if_|id_)?(https?:\/\/\S+)$/i);
+    if (m) alt = m[1];
+  }
+  let lastErr = null;
+  for (const u of (alt ? [url, alt] : [url])) {
+    try {
+      const res = await fetch(u);
+      if (!res.ok) { lastErr = new Error(`HTTP ${res.status} ${res.statusText} (${u})`); continue; }
+      // Last-Modified is a CORS-safelisted response header, so it is readable on this
+      // cross-origin fetch (pbs.twimg.com sends it: the upload time of the file).
+      const lm = res.headers.get('Last-Modified');
+      let t = lm ? Date.parse(lm) : null;
+      if (Number.isNaN(t)) t = null;
+      return { bytes: new Uint8Array(await res.arrayBuffer()), lastModified: t, url: u };
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error('fetch failed');
 }
 
 async function handleDecodeUrl() {
   const raw = document.getElementById('dec-url').value;
-  const url = parseMediaId(raw);
-  if (!url) {
-    setDecStatus('Could not parse URL or media ID. Try: HIAXGy_XAAAPSen or full pbs.twimg.com URL', 'error');
+  const targets = parseMediaIds(raw);
+  if (!targets) {
+    setDecStatus('Could not parse URL or media ID. Try: HIAXGy_XAAAPsen, a pbs.twimg.com URL, any https:// file URL, or several media ids joined with + (key1+key2)', 'error');
     return;
   }
-  setDecStatus(`Fetching ${url} …`, 'info');
-  setDecProgress(10);
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-    setDecProgress(60);
-    const ab = await res.arrayBuffer();
-    setDecProgress(90);
-    const png = new Blob([ab], {type: 'image/png'});
-    await decodePngBlob(png);
-    setDecProgress(100);
-  } catch(e) {
-    setDecStatus('Fetch failed: ' + e.message, 'error');
-    setDecProgress(-1);
+  const multi = targets.length > 1;
+
+  let tooLarge = false;
+  let lastModified = null;   // epoch-ms from the Last-Modified response header, if any
+  const fetched = await fetchParts(targets, multi ? 'Downloading parts' : null);
+  if (fetched.error) { setDecStatus(fetched.error, 'error'); setDecProgress(-1); return; }
+  const parts = fetched.parts;
+  const cachedParts = fetched.cachedParts;
+  if (fetched.tooLarge) tooLarge = true;
+  if (lastModified === null) lastModified = fetched.lastModified;
+
+  // STITCH = decode EACH part, then join the PAYLOADS. Joining the fetched PNG *files* and letting
+  // the decoder read that concatenation (the first cut of this) fed one combined PNG to
+  // `decodeBytes`, which stops at the first IEND — so a 2-part link reported a 2-part size but
+  // returned part 1 alone. Each part's payload is its own image's pixels, so every part goes through
+  // the codec BEFORE the join. (A video's container header rides in part 1; nothing else is needed.)
+  let bytes = parts[0];
+  if (multi) {
+    const payloads = [];
+    for (let i = 0; i < parts.length; i++) {
+      const payload = await codecPayload(parts[i]);
+      if (!payload) {
+        setDecStatus(`Part ${i + 1}/${targets.length} is not an encoded PNG — cannot stitch`, 'error');
+        setDecProgress(-1);
+        return;
+      }
+      payloads.push(payload);
+    }
+    bytes = concatParts(payloads);
   }
+  // The history key is the canonical URL for one image, and the joined `key1+key2` spelling for a
+  // stitch — that is the string that re-creates this exact decode.
+  const url = multi ? targets.map((u) => u.replace(/^.*\/media\//, '').replace(/\?.*$/, '')).join('+') : targets[0];
+
+  setDecProgress(90);
+  await decodeBytes(bytes);
+  // 
+  // the list — decode every file it names, the same path the ⬇ Fetch all button takes, and save
+  // each under its own name (the sha256 check inside manifestFetchFile still applies).
+  if (decManifest && multi) {
+    const files = decManifest;
+    let done = 0;
+    for (const f of files) {
+      const got = await manifestFetchFile(f);
+      if (!got) break;
+      saveBytes(got.bytes, f.name, got.mime);
+      done++;
+    }
+    renderHistory();
+    setDecStatus(done === files.length
+      ? `Master file — decoded ${done} file(s) automatically, each saved under its own name`
+      : `Master file — saved ${done}/${files.length} file(s); the failure is above`,
+      done === files.length ? 'success' : 'error');
+  }
+  setDecProgress(100);
+  renderModified(lastModified);
+  const head = multi ? `${targets.length} parts → ${fmtBytes(bytes.length)}` : fmtBytes(bytes.length);
+  // decodeBytes reports the MIME and size; all-cached is the more useful headline. A master file
+  // is the exception: presentDecoded already said "Master file — N file(s), M part(s)", and this
+  // line used to overwrite it with "Loaded Loaded 1.8 KB — application/octet-stream" (measured
+  // 2026-10-17 on the real posted master).
+  if (decManifest) {
+    /* the manifest's own status stands */
+  } else if (cachedParts === targets.length) setDecStatus(`${multi ? 'Stitched ' : 'Decoded '}${head} — ${decodedMime} · from cache, no download needed`, 'success');
+  else if (tooLarge) setDecStatus(`${multi ? 'Stitched ' : 'Decoded '}${head} — a part was not cached (over ${fmtBytes(CACHE_MAX_FILE)})`, 'warn');
+  else if (multi) setDecStatus(`Stitched ${head} — ${decodedMime}`, 'success');
+  else setDecStatus(`Loaded ${head} — ${decodedMime}`, 'success');
+  renderCacheInfo();
+  await recordHistory(url, bytes, lastModified, tooLarge);
+  renderHistory();
+}
+
+// Decode whatever bytes we ended up with: a codec PNG goes through the pixel decoder;
+// any other file (say a .txt URL) is shown raw rather than failing.
+async function decodeBytes(bytes, depth = 0) {
+  if (depth === 0) { decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; }
+  const mime = guessMime(bytes);
+  if (mime === 'image/png') {
+    // Exact path first: parse the PNG ourselves. Canvas getImageData() PREMULTIPLIES
+    // colour by alpha, so a partial-alpha boundary pixel (alpha 85/170) loses its low
+    // bits on read-back — e.g. payload byte 0x0A returns as 0x09, corrupting the last
+    // 1-2 bytes of a file whose length is not a multiple of 3. Parsing IDAT and
+    // un-filtering gives the stored bytes exactly. Canvas stays as the fallback for a
+    // PNG this simple reader cannot handle (16-bit, palette, interlaced, no DStream).
+    const exact = await decodePngExact(bytes);
+    if (exact) return presentDecoded(exact, depth, true);   // the PAYLOAD, not the PNG
+    await decodePngBlob(new Blob([bytes], { type: 'image/png' }), depth);
+    return;
+  }
+  return presentDecoded(bytes, depth, false);
+}
+
+// Present a decoded payload — whether it came out of a codec PNG or was fetched directly.
+// A zip is unwrapped here so BOTH paths get it: a single-member zip is decoded as that member
+// (with the member's name kept), a multi-member zip is listed. `fromCodec` only changes the
+// wording of the status line.
+async function presentDecoded(bytes, depth = 0, fromCodec = false) {
+  const mime = guessMime(bytes);
+  // A .bin2png master file (written by x-draft.py) is a LIST, not a payload: show the files it
+  // names instead of dumping raw text. Checked before zip so a manifest is never mistaken for one.
+  if (isManifest(bytes)) {
+    decManifest = parseManifest(bytes);
+    decodedBytes = bytes;
+    decodedMime = mime;
+    showDecodedResult();
+    const parts = decManifest.reduce((n, f) => n + f.parts.length, 0);
+    setDecStatus(`Master file — ${decManifest.length} file(s), ${parts} part(s). Decode one to ` +
+                 'reassemble it; the names and the order are in this file, not in a `+` link.', 'success');
+    return;
+  }
+  if (mime === 'application/zip' && depth < 3) {
+    const entries = readZipEntries(bytes) || [];
+    if (entries.length === 1 && !entries[0].dir) {
+      const inner = await extractZipEntry(bytes, entries[0]);
+      if (inner) {
+        decZipNote = 'ZIP > ' + shortMime(guessMime(inner));
+        decInnerName = entries[0].name;
+        return presentDecoded(inner, depth + 1, fromCodec);
+      }
+    }
+    decZipEntries = entries;
+    decodedBytes = bytes;
+    decodedMime = mime;
+    showDecodedResult();
+    setDecStatus(`Loaded ${fmtBytes(bytes.length)} — ZIP, ${entries.filter(e => !e.dir).length} file(s)`, 'info');
+    return;
+  }
+  decodedBytes = bytes;
+  decodedMime = mime;
+  showDecodedResult();
+  setDecStatus(fromCodec ? `Decoded ${fmtBytes(bytes.length)} — ${mime}`
+                         : `Loaded ${fmtBytes(bytes.length)} — ${mime} (not an encoded PNG, shown as-is)`,
+               fromCodec ? 'success' : 'info');
 }
 
 function handleDecodeFile(input) {
   const file = input.files[0];
   if (!file) return;
-  setDecStatus('Reading PNG…', 'info');
-  decodePngBlob(file);
+  setDecStatus('Reading file…', 'info');
+  renderModified(null);   // a local file has no Last-Modified
+  const reader = new FileReader();
+  reader.onload = e => decodeBytes(new Uint8Array(e.target.result));
+  reader.readAsArrayBuffer(file);
 }
 
-async function decodePngBlob(blob) {
+// The codec's byte reconstruction, from an RGBA buffer. Alpha is the byte-count marker:
+// 255 = 3 bytes, 170 = 2, 85 = 1, 0 = end. Shared by the exact and canvas paths.
+function alphaBytes(d) {
+  const out = [];
+  for (let i = 0; i < d.length; i += 4) {
+    const alpha = d[i + 3];
+    if (alpha === 0) break;   // transparent = end of data
+    if (alpha === 255) out.push(d[i], d[i + 1], d[i + 2]);
+    else if (alpha === 170) out.push(d[i], d[i + 1]);
+    else if (alpha === 85) out.push(d[i]);
+  }
+  return new Uint8Array(out);
+}
+
+// Exact PNG reader for the codec's output: 8-bit RGBA, non-interlaced, filters 0-4.
+// Returns the decoded payload, or null so the caller can fall back to canvas.
+async function decodePngExact(bytes) {
+  try {
+    if (typeof DecompressionStream === 'undefined') return null;
+    if (!(bytes && bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47)) return null;
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let off = 8, w = 0, h = 0, depth = 0, color = 0, interlace = 0;
+    const idat = [];
+    while (off + 8 <= bytes.length) {
+      const len = dv.getUint32(off);
+      const type = String.fromCharCode(bytes[off+4], bytes[off+5], bytes[off+6], bytes[off+7]);
+      const start = off + 8;
+      if (type === 'IHDR') {
+        w = dv.getUint32(start); h = dv.getUint32(start + 4);
+        depth = bytes[start + 8]; color = bytes[start + 9]; interlace = bytes[start + 12];
+      } else if (type === 'IDAT') {
+        idat.push(bytes.subarray(start, start + len));
+      } else if (type === 'IEND') break;
+      off = start + len + 4;
+    }
+    if (depth !== 8 || color !== 6 || interlace !== 0 || !w || !h || !idat.length) return null;
+    let zlen = 0; for (const c of idat) zlen += c.length;
+    const z = new Uint8Array(zlen);
+    let zo = 0; for (const c of idat) { z.set(c, zo); zo += c.length; }
+    const stream = new Blob([z]).stream().pipeThrough(new DecompressionStream('deflate'));
+    const raw = new Uint8Array(await new Response(stream).arrayBuffer());
+    const bpp = 4, stride = w * bpp;
+    if (raw.length < h * (stride + 1)) return null;
+    const px = new Uint8Array(h * stride);
+    let p = 0;
+    for (let y = 0; y < h; y++) {
+      const f = raw[p++], row = y * stride, prev = row - stride;
+      for (let x = 0; x < stride; x++) {
+        const a = x >= bpp ? px[row + x - bpp] : 0;
+        const b = y > 0 ? px[prev + x] : 0;
+        const c = (x >= bpp && y > 0) ? px[prev + x - bpp] : 0;
+        let v = raw[p++];
+        if (f === 1) v += a;
+        else if (f === 2) v += b;
+        else if (f === 3) v += (a + b) >> 1;
+        else if (f === 4) {
+          const pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c);
+          v += (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
+        }
+        px[row + x] = v & 0xff;
+      }
+    }
+    return alphaBytes(px);
+  } catch (e) { return null; }
+}
+
+// The payload bytes of ONE codec PNG: the exact reader first, canvas as the fallback for the
+// re-encoded forms it cannot parse (palette+tRNS, 16-bit, interlaced). Returns null when the bytes
+// are not a PNG at all. The stitcher calls this per part — see handleDecodeUrl.
+async function codecPayload(pngBytes) {
+  const exact = await decodePngExact(pngBytes);
+  if (exact) return exact;
+  return pngPayloadViaCanvas(pngBytes);
+}
+
+// Canvas read-back of a PNG's payload, with NO UI side effects (so a stitch can call it per part).
+async function pngPayloadViaCanvas(pngBytes) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(new Blob([pngBytes], { type: 'image/png' }));
+    img.onload = () => {
+      try {
+        const off = document.createElement('canvas');
+        off.width = img.naturalWidth; off.height = img.naturalHeight;
+        const ctx = off.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        resolve(alphaBytes(ctx.getImageData(0, 0, off.width, off.height).data));
+      } catch (e) { resolve(null); }
+      finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+async function decodePngBlob(blob, depth = 0) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(blob);
@@ -792,28 +1560,15 @@ async function decodePngBlob(blob) {
         const imgData = ctx.getImageData(0, 0, offscreen.width, offscreen.height);
         URL.revokeObjectURL(url);
 
-        const d = imgData.data;
-        const totalPx = offscreen.width * offscreen.height;
-        const out = [];
-
-        for (let px = 0; px < totalPx; px++) {
-          const base = px * 4;
-          const alpha = d[base + 3];
-          if (alpha === 0) break; // transparent = end of data
-          if (alpha === 255) {
-            out.push(d[base], d[base+1], d[base+2]);
-          } else if (alpha === 170) {
-            out.push(d[base], d[base+1]);
-          } else if (alpha === 85) {
-            out.push(d[base]);
-          }
-        }
-
-        decodedBytes = new Uint8Array(out);
-        decodedMime = guessMime(decodedBytes);
-        showDecodedResult();
-        setDecStatus(`Decoded ${fmtBytes(decodedBytes.length)} — ${decodedMime}`, 'success');
-        resolve();
+        // Fallback path only (canvas premultiplies, so partial-alpha pixels here are inexact).
+        // It goes through presentDecoded for the SAME reason the exact path does: this is the
+        // shape X returns for some uploads — it re-encodes a codec PNG as a PALETTE image (PLTE
+        // + tRNS), which decodePngExact refuses — and a master file that lands here was shown as
+        // raw text instead of being recognised (found 2026-10-17 on the real posted master,
+        // HU3i7XEWEAAav21.png: `Decoded 741 B — application/octet-stream`).
+        const payload = alphaBytes(imgData.data);
+        presentDecoded(payload, depth, true).then(resolve, reject);
+        return;
       } catch(e) {
         setDecStatus('Decode error: ' + e.message, 'error');
         reject(e);
@@ -826,6 +1581,520 @@ async function decodePngBlob(blob) {
     };
     img.src = url;
   });
+}
+
+// ─── ZIP — list members, and unwrap a single-file archive ────────────────────
+// A zip is the ONLY container that carries its members' NAMES, so it is the only one where
+// "this was notes.txt" is answerable — a bare file's bytes never say their name. Member
+// names come from an untrusted file, so they are only ever assigned with textContent.
+function readZipEntries(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd = -1;
+  const floor = Math.max(0, bytes.length - 22 - 65535);
+  for (let i = bytes.length - 22; i >= floor; i--) {
+    if (bytes[i] === 0x50 && bytes[i+1] === 0x4B && bytes[i+2] === 0x05 && bytes[i+3] === 0x06) { eocd = i; break; }
+  }
+  if (eocd < 0) return null;
+  const count = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const entries = [];
+  for (let n = 0; n < count && off + 46 <= bytes.length; n++) {
+    if (!(bytes[off] === 0x50 && bytes[off+1] === 0x4B && bytes[off+2] === 0x01 && bytes[off+3] === 0x02)) break;
+    const method = dv.getUint16(off + 10, true);
+    const compSize = dv.getUint32(off + 20, true);
+    const uncompSize = dv.getUint32(off + 24, true);
+    const nameLen = dv.getUint16(off + 28, true);
+    const extraLen = dv.getUint16(off + 30, true);
+    const commentLen = dv.getUint16(off + 32, true);
+    const localOff = dv.getUint32(off + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(off + 46, off + 46 + nameLen));
+    entries.push({ name, dir: name.endsWith('/'), method, compSize, uncompSize, localOff });
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
+async function inflateRawBytes(comp) {
+  if (typeof DecompressionStream === 'undefined') return null;
+  const stream = new Blob([comp]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// Member bytes: method 0 is stored, 8 is raw DEFLATE (what ordinary archives use).
+async function extractZipEntry(bytes, e) {
+  try {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const lo = e.localOff;
+    if (!(bytes[lo] === 0x50 && bytes[lo+1] === 0x4B && bytes[lo+2] === 0x03 && bytes[lo+3] === 0x04)) return null;
+    const nameLen = dv.getUint16(lo + 26, true);
+    const extraLen = dv.getUint16(lo + 28, true);
+    const start = lo + 30 + nameLen + extraLen;
+    const comp = bytes.subarray(start, start + e.compSize);
+    if (e.method === 0) return comp.slice();
+    if (e.method === 8) return await inflateRawBytes(comp);
+    return null;
+  } catch (e2) { return null; }
+}
+
+function shortMime(mime) {
+  const ext = mimeExt(mime);
+  return (ext === 'bin' ? mime : ext).toUpperCase();
+}
+
+// ─── THE `.bin2png` MASTER FILE ───────────────────────────────────────────────
+// x-draft.py writes one whenever a run produces more than one part: every uploaded file's NAME,
+// its size, and its parts IN ORDER. A `key1+key2` hash cannot carry that — it only says
+// "concatenate", which for two different files would be a lie — so this file is the record that
+// keeps them apart. Nothing in it is trusted: names go through textContent, and only a real
+// pbs.twimg.com/media url becomes a link (a `javascript:` url in a decoded file would otherwise
+// be one click away).
+const MANIFEST_MAGIC = '#bin2png-manifest v1';
+function isManifest(bytes) {
+  if (!bytes || bytes.length < MANIFEST_MAGIC.length) return false;
+  let head = '';
+  for (let i = 0; i < MANIFEST_MAGIC.length; i++) head += String.fromCharCode(bytes[i]);
+  return head === MANIFEST_MAGIC;
+}
+function parseManifest(bytes) {
+  const text = new TextDecoder().decode(bytes);
+  const out = [];
+  for (const line of text.split('\n')) {
+    if (!line || line.startsWith('#')) continue;
+    const f = line.split('\t');
+    // Columns are APPENDED, never inserted (x-draft.py, 2026-10-17): a file is
+    // name/bytes/parts[/sha256] and a part is index/url[/media id]. The first fields keep their
+    // meaning, so a master file written before this pass still parses — the metadata is optional.
+    if (f[0] === 'file' && f.length >= 4) {
+      out.push({ name: f[1], bytes: Number(f[2]) || 0, sha256: (f[4] || '').toLowerCase(), parts: [] });
+    } else if (f[0] === 'part' && f.length >= 3 && out.length) {
+      out[out.length - 1].parts.push({ n: f[1], url: f[2], id: f[3] || '' });
+    }
+  }
+  return out;
+}
+
+// sha256 of the bytes a master file names, to check them against the digest it records.
+// The digest is metadata, not a requirement: no crypto.subtle (an insecure origin) answers null
+// and the download goes ahead. Only a MISMATCH stops a save.
+async function sha256Hex(bytes) {
+  try {
+    if (typeof crypto === 'undefined' || !crypto.subtle) return null;
+    const d = await crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch (e) {
+    return null;
+  }
+}
+function renderManifestBody(body) {
+  const files = decManifest || [];
+  const total = files.reduce((n, f) => n + f.parts.length, 0);
+  const count = document.createElement('div');
+  count.className = 'zip-note';
+  count.textContent = `${files.length} file(s), ${total} part(s) — Decode reassembles one file`;
+  body.appendChild(count);
+  const all = document.createElement('button');
+  all.className = 'btn primary';
+  all.textContent = `⬇ Fetch all ${files.length} file(s)`;
+  all.addEventListener('click', async () => {
+    all.disabled = true;
+    for (const f of files) {
+      const got = await manifestFetchFile(f);
+      if (!got) break;
+      all.textContent = `⬇ saved ${f.name}`;
+    }
+    all.textContent = '⬇ Fetch all again';
+    all.disabled = false;
+    renderHistory();
+    setDecStatus('Every file in the master file is saved under its own name (see History).', 'success');
+  });
+  const tools = document.createElement('div');
+  tools.className = 'hist-tools';
+  tools.appendChild(all);
+  body.appendChild(tools);
+  const list = document.createElement('div');
+  list.className = 'zip-list';
+  for (const f of files) {
+    const row = document.createElement('div');
+    row.className = 'zip-row';
+    const name = document.createElement('span');
+    name.className = 'zip-name';
+    name.textContent = '📄 ' + f.name;
+    row.appendChild(name);
+    const size = document.createElement('span');
+    size.className = 'zip-size';
+    size.textContent = f.bytes ? fmtBytes(f.bytes) : `${f.parts.length} part(s)`;
+    if (f.sha256) size.title = 'sha256 ' + f.sha256;   // the digest the download is checked against
+    row.appendChild(size);
+    if (f.parts.length > 1) {
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = 'Decode';
+      b.addEventListener('click', () => {
+        const keys = f.parts.map(p => (p.url.match(/media\/([A-Za-z0-9_\-]+)/) || [])[1]).filter(Boolean);
+        document.getElementById('dec-url').value = keys.join('+');
+        handleDecodeUrl();
+      });
+      row.appendChild(b);
+    }
+    const save = document.createElement('button');
+    save.className = 'btn';
+    save.textContent = '⬇ Save';
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      const got = await manifestFetchFile(f);
+      if (got) { saveBytes(got.bytes, f.name, got.mime); setDecStatus(`Saved ${f.name} — ${fmtBytes(got.bytes.length)} as ${f.name} (${got.mime}, from the name, not sniffed)`, 'success'); }
+      save.disabled = false;
+      renderHistory();
+    });
+    row.appendChild(save);
+    list.appendChild(row);
+    for (const p of f.parts) {
+      const sub = document.createElement('div');
+      sub.className = 'zip-row';
+      const n = document.createElement('span');
+      n.className = 'zip-name';
+      n.textContent = `part ${p.n}`;
+      sub.appendChild(n);
+      const size2 = document.createElement('span');
+      size2.className = 'zip-size';
+      size2.textContent = p.url.replace(/^.*\/media\//, '');
+      if (/^https:\/\/pbs\.twimg\.com\/media\/[A-Za-z0-9_\-]+\.png$/.test(p.url)) {
+        const a = document.createElement('a');
+        a.href = p.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+        a.textContent = size2.textContent;
+        a.style.cssText = 'font-size:11.5px;color:var(--accent);word-break:break-all';
+        sub.appendChild(a);
+      } else {
+        sub.appendChild(size2);   // not a pbs url: never rendered as a clickable link
+      }
+      if (p.id) {
+        // The media id the master file records for this part — the number to quote if one part
+        // ever has to be re-fetched by hand (the url alone is not what X's own tools take).
+        const pid = document.createElement('span');
+        pid.className = 'zip-size';
+        pid.textContent = 'id ' + p.id;
+        pid.title = 'media id recorded in the master file for this part';
+        sub.appendChild(pid);
+      }
+      list.appendChild(sub);
+    }
+  }
+  body.appendChild(list);
+}
+
+// Fetch one file from the master file: every part in parallel, payloads joined IN ORDER, then
+// SAVED UNDER THE MANIFEST'S NAME — and logged that way. The name is what makes the MIME exact
+// (the extension says it), and the name is also what the History shows instead of a media id.
+async function manifestFetchFile(f) {
+  const urls = f.parts.map(p => p.url);
+  const got = await fetchParts(urls, `Fetching ${f.name}`);
+  if (got.error) { setDecStatus(got.error, 'error'); return null; }
+  // Join the PAYLOADS, never the PNG files: a raw concatenation stops the decoder at the first
+  // IEND (the regression that made a 2-part link return part 1 alone).
+  const payloads = [];
+  let anyCodec = false;
+  for (const p of got.parts) {
+    const payload = await codecPayload(p);
+    if (payload) { payloads.push(payload); anyCodec = true; }
+    else payloads.push(p);
+  }
+  if (urls.length > 1 && !anyCodec) {
+    setDecStatus(`${f.name}: none of its ${urls.length} parts is an encoded PNG`, 'error');
+    return null;
+  }
+  const bytes = payloads.length === 1 ? payloads[0] : concatParts(payloads);
+  // A truncated or swapped part still decodes, so the digest in the master file is the only
+  // proof that the bytes are the ones that were uploaded. Checked BEFORE anything is saved.
+  if (f.sha256) {
+    const digest = await sha256Hex(bytes);
+    if (digest && digest !== f.sha256) {
+      setDecStatus(`${f.name}: sha256 mismatch — the master file records ${f.sha256.slice(0, 12)}…, ` +
+                   `${fmtBytes(bytes.length)} fetched hashes to ${digest.slice(0, 12)}… ` +
+                   '(a part is incomplete or was replaced; nothing was saved)', 'error');
+      return null;
+    }
+  }
+  const mime = mimeFromName(f.name);
+  for (let i = 0; i < urls.length; i++) {
+    await historyAdd({
+      url: urls[i],
+      mediaId: (urls[i].match(/media\/([A-Za-z0-9_\-]+)/) || [])[1] || null,
+      name: f.name,
+      size: got.parts[i].length,
+      outSize: payloads[i] ? payloads[i].length : null,
+      fetchedAt: Date.now(),
+      lastModified: got.lastModified || null,
+      mime,
+      note: 'manifest',
+      cached: got.parts[i].length <= CACHE_MAX_FILE,
+      thumb: null,
+    });
+  }
+  return { bytes, mime, cached: got.cachedParts === urls.length };
+}
+
+function renderZipBody(body) {
+  const entries = decZipEntries || [];
+  if (!entries.length) {
+    const p = document.createElement('p');
+    p.style.color = 'var(--muted)'; p.style.fontSize = '13px';
+    p.textContent = 'ZIP archive — no central directory found.';
+    body.appendChild(p);
+    return;
+  }
+  const files = entries.filter(e => !e.dir).length;
+  const count = document.createElement('div');
+  count.className = 'zip-note';
+  count.textContent = `${files} file(s), ${entries.length - files} folder(s)`;
+  body.appendChild(count);
+  const list = document.createElement('div');
+  list.className = 'zip-list';
+  for (const e of entries) {
+    const row = document.createElement('div'); row.className = 'zip-row';
+    const name = document.createElement('span'); name.className = 'zip-name';
+    name.textContent = (e.dir ? '📁 ' : '📄 ') + e.name;   // untrusted name -> textContent
+    row.appendChild(name);
+    if (!e.dir) {
+      const size = document.createElement('span'); size.className = 'zip-size';
+      size.textContent = fmtBytes(e.uncompSize);
+      row.appendChild(size);
+    }
+    list.appendChild(row);
+  }
+  body.appendChild(list);
+}
+
+// A low-quality first-frame still for the history list. A 160px JPEG is a few KB; the cap is
+// a guard, not a real limit — a screenshot can never be allowed past the per-file budget.
+async function makeVideoThumb(bytes, mime) {
+  let url = null;
+  try {
+    url = URL.createObjectURL(new Blob([bytes], { type: mime || 'video/mp4' }));
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = url;
+    await new Promise((res, rej) => {
+      const to = setTimeout(() => rej(new Error('timeout')), 8000);
+      v.onloadeddata = () => { clearTimeout(to); res(); };
+      v.onerror = () => { clearTimeout(to); rej(new Error('video error')); };
+    });
+    try {
+      v.currentTime = Math.min(1, (v.duration || 2) / 3);
+      await new Promise(r => { v.onseeked = r; setTimeout(r, 2000); });
+    } catch (e) { /* a still from frame 0 is fine */ }
+    const w = 160;
+    const h = Math.max(1, Math.round(w * (v.videoHeight && v.videoWidth ? v.videoHeight / v.videoWidth : 0.5625)));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(v, 0, 0, w, h);
+    const dataUrl = c.toDataURL('image/jpeg', 0.5);
+    return Math.floor(dataUrl.length * 3 / 4) <= CACHE_MAX_FILE ? dataUrl : null;
+  } catch (e) { return null; }
+  finally { if (url) URL.revokeObjectURL(url); }
+}
+
+// The decoder's memory. Called after every successful URL decode; the bytes are NOT copied
+// (they already live in the cache when small enough) — only metadata plus a video still.
+async function recordHistory(url, fetchedBytes, lastModified, tooLarge) {
+  const mediaId = (url.match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_-]+)/) || [])[1] || null;
+  let thumb = null;
+  if (decodedMime && decodedMime.startsWith('video/') && decodedBytes) {
+    thumb = await makeVideoThumb(decodedBytes, decodedMime);
+  }
+  await historyAdd({
+    url,
+    mediaId,
+    size: fetchedBytes.length,
+    outSize: decodedBytes ? decodedBytes.length : null,
+    fetchedAt: Date.now(),
+    lastModified: lastModified || null,
+    mime: decodedMime || null,
+    note: decZipNote || null,
+    innerName: decInnerName || null,
+    cached: !tooLarge && fetchedBytes.length <= CACHE_MAX_FILE,
+    thumb,
+  });
+}
+
+// ─── THE HISTORY TOOL (2026-10-17) ────────────────────────────────────────────
+// Tick rows you have fetched over time and turn them into one `.bin2png` master file, or pull the
+// files themselves back down (the original, or the codec PNG ready to re-upload). The tick state
+// lives in a Set of URLs, so a re-render (a new fetch, a Decode) does not lose the selection.
+let histSelected = new Set();
+
+// The name to save a history entry as: the manifest's name when the entry came from one, else the
+// file's own inner name, else the media id plus the extension its MIME implies.
+function historyName(r) {
+  if (r.name) return r.name;
+  if (r.innerName) return r.innerName;
+  return `${r.mediaId || 'file'}.${mimeExt(r.mime)}`;
+}
+
+// A stitch is stored as `key1+key2`, a plain entry as its own url — both must come back as a list
+// of fetchable part urls, in order.
+function recordPartUrls(r) {
+  if (/^https?:/i.test(r.url || '')) return [r.url];
+  return String(r.url || '').split('+').map(s => s.trim()).filter(Boolean).map(k => {
+    const id = k.replace(/^.*\/media\//, '').replace(/\?.*$/, '');
+    return `https://pbs.twimg.com/media/${id}?format=png`;
+  });
+}
+
+function selectedHistory(rows) {
+  return rows.filter(r => histSelected.has(r.url));
+}
+
+// THE MASTER FILE for the ticked rows — one artifact, two forms (the two buttons below). Its
+// `file` blocks come straight from the urls each entry already carries, so NOTHING IS FETCHED:
+// both buttons work with the network unplugged and a cached entry is no special case.
+//
+// HIS RULE, 2026-10-17: "the encoded png is the encoded master file … not each file encoded".
+// So `Download encoded` encodes THIS text, never each file the text names. A stitched entry is
+// listed as its parts, so a stitched file and a plain one read the same way.
+function historyMasterFile(rows) {
+  const at = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+  const lines = ['#bin2png-manifest v1', `# at\t${at}`, '# profile\tpage',
+                 '# built from the decode history on the page — one `file` block per entry'];
+  for (const r of rows) {
+    const urls = recordPartUrls(r);
+    lines.push(`file\t${historyName(r)}\t${r.outSize || r.size || 0}\t${urls.length}`);
+    // A history entry knows one media id; a stitched one is several parts, so its id column is
+    // left blank rather than repeating the entry's single id against the wrong part.
+    urls.forEach((u, i) => lines.push(
+      `part\t${i + 1}/${urls.length}\t${u}\t${urls.length === 1 ? (r.mediaId || '') : ''}`));
+  }
+  return { name: `history-${at.replace(/[:]/g, '')}.bin2png`,
+           bytes: new TextEncoder().encode(lines.join('\n') + '\n') };
+}
+
+function historySelection(rows) {
+  const sel = selectedHistory(rows);
+  if (!sel.length) setDecStatus('Tick some history rows first — the box on the left of each row', 'warn');
+  return sel;
+}
+
+// 1 of 2 — the master file AS WRITTEN. "Predecoded" = before it goes through the codec.
+async function historyDownloadPredecoded() {
+  const sel = historySelection(await historyAll());
+  if (!sel.length) return;
+  const m = historyMasterFile(sel);
+  saveBytes(m.bytes, m.name, 'application/octet-stream');
+  setDecStatus(`Predecoded master file — ${m.name}, ${sel.length} file(s), ${fmtBytes(m.bytes.length)}. Drop it on the decode tab to get every file back by name.`, 'success');
+}
+
+// Run bytes through the page's own encoder and save every part it produces.
+async function encodeAndSave(bytes, name) {
+  encodedParts = [];
+  encodeBytesToCanvas(bytes, name);
+  const t0 = Date.now();
+  while (!encodedParts.length && Date.now() - t0 < 20000) await new Promise(r => setTimeout(r, 50));
+  const made = encodedParts.slice();
+  for (const p of made) saveBytes(new Uint8Array(await p.blob.arrayBuffer()), p.name);
+  return made.length;
+}
+
+// 2 of 2 — the SAME master file through the codec, split at capacity by the encoder. Post these
+// PNGs in order and the decoder hands the master file back, which hands the files back.
+async function historyDownloadEncoded() {
+  const sel = historySelection(await historyAll());
+  if (!sel.length) return;
+  const m = historyMasterFile(sel);
+  const parts = await encodeAndSave(m.bytes, m.name);
+  setDecStatus(`Encoded master file — ${m.name} (${fmtBytes(m.bytes.length)}) → ${parts} PNG part(s) saved. Post them IN ORDER; the PNG decodes back to this same master file.`, 'success');
+}
+
+// The list under the decoder: newest first, each with a tick box, the name it would be saved as,
+// and a Fetch now button. Fetch now re-runs the normal decode, which is cache-first — so a cached
+// entry needs no network at all.
+async function renderHistory() {
+  const wrap = document.getElementById('history-wrap');
+  const listEl = document.getElementById('history-list');
+  if (!wrap || !listEl) return;
+  const rows = await historyAll();
+  rows.sort((a, b) => (b.fetchedAt || 0) - (a.fetchedAt || 0));
+  listEl.textContent = '';
+  if (!rows.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+
+  // The selection toolbar, rebuilt with the list so the count and the tick state always agree.
+  const tools = document.createElement('div');
+  tools.className = 'hist-tools';
+  const allBox = document.createElement('input');
+  allBox.type = 'checkbox'; allBox.id = 'hist-all';
+  allBox.checked = rows.length > 0 && selectedHistory(rows).length === rows.length;
+  allBox.addEventListener('change', () => {
+    histSelected = allBox.checked ? new Set(rows.map(r => r.url)) : new Set();
+    renderHistory();
+  });
+  tools.appendChild(allBox);
+  const allLabel = document.createElement('label');
+  allLabel.htmlFor = 'hist-all'; allLabel.textContent = 'select all';
+  allLabel.className = 'hist-sel-label';
+  tools.appendChild(allLabel);
+  const count = document.createElement('span');
+  count.className = 'hist-count';
+  count.textContent = `${selectedHistory(rows).length} of ${rows.length} selected`;
+  tools.appendChild(count);
+  const mk = (label, title, fn) => {
+    const b = document.createElement('button');
+    b.className = 'btn'; b.textContent = label; b.title = title;
+    b.addEventListener('click', fn);
+    tools.appendChild(b);
+  };
+  // EXACTLY TWO, and each is the master file in one of its two states — his rule 2026-10-17, so
+  // there is nothing to disambiguate (the old three said master / OG / encoded).
+  mk('⬇ Download predecoded', 'The master file itself — the .bin2png text listing every ticked entry', historyDownloadPredecoded);
+  mk('⬇ Download encoded', 'The SAME master file through the codec, as PNG part(s) ready to post', historyDownloadEncoded);
+  const stale = wrap.querySelector('.hist-tools');
+  if (stale) stale.remove();          // re-render must not stack toolbars
+  wrap.insertBefore(tools, listEl);
+
+  for (const r of rows) {
+    const row = document.createElement('div'); row.className = 'hist-row';
+    const box = document.createElement('input');
+    box.type = 'checkbox'; box.className = 'hist-check'; box.checked = histSelected.has(r.url);
+    box.title = 'select for the master file / the downloads below';
+    box.addEventListener('change', () => {
+      if (box.checked) histSelected.add(r.url); else histSelected.delete(r.url);
+      renderHistory();
+    });
+    row.appendChild(box);
+    const main = document.createElement('div'); main.className = 'hist-main';
+    const id = document.createElement('div'); id.className = 'hist-id';
+    // The NAME the file would be saved as, when the entry knows one (a manifest carries it).
+    // BOTH, when the row came from a master file: the file name is the useful half, the media id
+    // is the handle (
+    id.textContent = r.name ? `📄 ${r.name} · ${r.mediaId || r.url}` : (r.mediaId || r.url);   // untrusted -> textContent
+    id.title = r.url;
+    main.appendChild(id);
+    const meta = document.createElement('div'); meta.className = 'hist-meta';
+    const bits = [
+      fmtBytes(r.size),
+      `fetched ${relTime(r.fetchedAt || Date.now(), Date.now())}`,
+      r.lastModified ? `modified ${relTime(r.lastModified, Date.now())}` : null,
+      r.mime,
+      r.name ? 'saved as ' + historyName(r) : null,
+      r.note ? r.note + (r.innerName ? ' ' + r.innerName : '') : null,
+      r.cached ? 'cached' : 'not cached',
+    ].filter(Boolean);
+    meta.textContent = bits.join(' · ');
+    main.appendChild(meta);
+    row.appendChild(main);
+    if (r.thumb) {
+      const img = document.createElement('img');
+      img.className = 'hist-thumb'; img.src = r.thumb; img.alt = 'video thumbnail';
+      row.appendChild(img);
+    }
+    const btn = document.createElement('button');
+    btn.className = 'btn'; btn.textContent = 'Fetch now';
+    btn.addEventListener('click', () => historyFetch(r.url));
+    row.appendChild(btn);
+    listEl.appendChild(row);
+  }
+}
+
+function historyFetch(url) {
+  switchTab('decode', false);
+  document.getElementById('dec-url').value = url;
+  handleDecodeUrl();   // cache-first inside, so a cached entry does no network
 }
 
 function guessMime(bytes) {
@@ -895,6 +2164,22 @@ function showDecodedResult() {
   const body = document.getElementById('dec-body');
   body.innerHTML = '';
 
+  if (decManifest) {
+    document.getElementById('dec-filename').textContent = 'master file';
+    renderManifestBody(body);
+    document.getElementById('dec-result').style.display = 'block';
+    document.getElementById('dec-actions').style.display = 'flex';
+    return;
+  }
+
+  // A zip note / inner name, set when a single-file zip was unwrapped.
+  if (decZipNote || decInnerName) {
+    const note = document.createElement('div');
+    note.className = 'zip-note';
+    note.textContent = [decZipNote, decInnerName ? `“${decInnerName}”` : ''].filter(Boolean).join(' · ');
+    body.appendChild(note);
+  }
+
   if (mime.startsWith('image/')) {
     const img = document.createElement('img');
     img.src = url;
@@ -913,13 +2198,21 @@ function showDecodedResult() {
     const text = new TextDecoder().decode(bytes);
     const pre = document.createElement('pre');
     pre.className = 'decode-text-pre';
-    pre.textContent = text;
+    const code = document.createElement('code');
+    code.className = 'decode-text-code';
+    // textContent, NEVER innerHTML: a .txt's raw bytes may contain `<script>` or an
+    // `<img onerror=…>`, and assigning them as HTML would execute them. This line IS the
+    // XSS defence for text files — nothing decoded is ever parsed as markup.
+    code.textContent = text;
+    pre.appendChild(code);
     body.appendChild(pre);
   } else if (mime === 'application/pdf') {
     const embed = document.createElement('embed');
     embed.src = url; embed.type = 'application/pdf';
     embed.style.cssText = 'width:100%;height:500px;border-radius:6px;';
     body.appendChild(embed);
+  } else if (mime === 'application/zip') {
+    renderZipBody(body);
   } else {
     const p = document.createElement('p');
     p.style.color = 'var(--muted)';
@@ -942,11 +2235,12 @@ function downloadDecoded() {
 }
 
 function clearDecode() {
-  decodedBytes = null; decodedMime = null;
+  decodedBytes = null; decodedMime = null; decManifest = null;
   document.getElementById('dec-result').style.display = 'none';
   document.getElementById('dec-actions').style.display = 'none';
   document.getElementById('dec-file-input').value = '';
   document.getElementById('dec-url').value = '';
+  renderModified(null);
   setDecStatus('', 'info');
 }
 
@@ -959,8 +2253,11 @@ decDz.addEventListener('drop', e => {
   decDz.classList.remove('drag');
   const file = e.dataTransfer.files[0];
   if (!file) return;
-  setDecStatus('Reading PNG…', 'info');
-  decodePngBlob(file);
+  setDecStatus('Reading file…', 'info');
+  renderModified(null);   // a dropped local file has no Last-Modified
+  const reader = new FileReader();
+  reader.onload = ev => decodeBytes(new Uint8Array(ev.target.result));
+  reader.readAsArrayBuffer(file);
 });
 
 function fmtBytes(n) {
@@ -968,6 +2265,17 @@ function fmtBytes(n) {
   if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
   return (n/1024/1024).toFixed(2) + ' MB';
 }
+
+// Last lines of the script, so every handler above is already defined. A page opened with a share
+// hash (`#HTuOfF1W4AA6UfM`) decodes on load with no click; otherwise the last tab you were on is
+// restored from localStorage (default: encode, which is what the markup ships with).
+if (!mediaIdsFromHash(location.hash)) {
+  const t = savedTab();
+  if (t) switchTab(t, false);
+}
+decodeFromHash();
+renderCacheInfo();
+renderHistory();
 </script>
 </body>
 </html>
