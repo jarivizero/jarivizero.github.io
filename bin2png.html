@@ -2,6 +2,29 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script>
+// THE RULES THIS PAGE FOLLOWS (from projects/bin2png/claudesays.txt), merged from the experimental
+// build on 2026-10-18 once it had been proved:
+//   1. NEVER larger than 899x898. The encoder refuses a bigger canvas; the decoder warns and still
+//      tries, because a file that already exists is worth reading.
+//   2. NEVER use canvas to read or write the PAYLOAD. The PNG is built by hand (packScanlines +
+//      deflate + CRC) and read by the exact IDAT parser; canvas is used only for the visual preview
+//      and as the fallback for a PNG the exact reader cannot parse (palette + tRNS, as X re-encodes).
+//   3. No network at runtime: this page works offline from disk, in Chromium, Firefox and Safari.
+//   4. Decode stays backward compatible: sizes are read from IHDR, so every 899x898 file produced
+//      before this build still decodes, and every file this build writes decodes on the old page.
+//   5. The canvas is sized to the payload by default ("fit"), and can be chosen by hand.
+//   6. Per-row filter search (0-4) in the encoder — the decoder already reads all five.
+// Runs before the body exists: an (openfull) link must never paint the encoder UI. The class is on
+// <html>, so the stylesheet above hides every direct child of <body> except #result-stage.
+(function () {
+  var h = decodeURIComponent(location.hash || '').replace(/^#/, '');
+  // ANYWHERE in the hash, not just at the end: his rule 2026-10-17, "if (openfull) exists in the url
+  // at all, it shouldn't load the UI of the normal page". (html) is a result view too — the decoded
+  // document replaces this one, so the encoder UI must not paint first.
+  if (/\((openfull|html)\)/i.test(h)) document.documentElement.className = 'result-only';
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Twitter PNG Codec</title>
 <style>
@@ -19,6 +42,21 @@
     --warn: #fbbf24;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  /* (openfull) is not "the page, replaced later" — it is a result view. The class is set in <head>
+     below, BEFORE the body is parsed, so the UI never paints at all (a white flash then a black
+     screen was the old behaviour). */
+  html.result-only body { background: #000; }
+  html.result-only body > *:not(#result-stage) { display: none !important; }
+  #result-stage { display: none; position: fixed; inset: 0; background: #000; z-index: 9999;
+                  align-items: center; justify-content: center; }
+  html.result-only #result-stage { display: flex; }
+  #result-stage video, #result-stage img { max-width: 100vw; max-height: 100vh; }
+  #result-stage video { width: 100%; height: 100%; }
+  #result-stage audio { width: min(680px, 90vw); }
+  #result-stage iframe { width: 100%; height: 100%; border: 0; background: #000; }
+  #result-stage pre { width: 100%; height: 100%; overflow: auto; padding: 1.5rem; margin: 0;
+                     background: #000; color: #e4e4e7; font-size: 13px; white-space: pre-wrap; }
+  #result-stage .stage-note { color: #71717a; font-size: 13px; text-align: center; padding: 2rem; }
   body {
     background: var(--bg);
     color: var(--text);
@@ -209,6 +247,14 @@
   .stat .val { color: var(--accent); font-weight: 700; font-size: 15px; display: block; }
   .stat .lbl { color: var(--muted); }
 
+  .dim-row { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin:1rem 0 .25rem;
+             font-size:12px; color:var(--muted); }
+  .dim-label { letter-spacing:.04em; text-transform:uppercase; font-size:11px; }
+  .dim-field { display:flex; align-items:center; gap:.35rem; }
+  .dim-field input { width:74px; padding:.35rem .45rem; background:var(--bg); color:var(--fg);
+                     border:1px solid var(--border); border-radius:6px; font:inherit; }
+  .dim-field input:invalid, .dim-field input.bad { border-color:#b91c1c; }
+  .dim-note { opacity:.8; }
   .preview-canvas-wrap {
     margin-top: 1.5rem;
     background: repeating-conic-gradient(#2a2a2e 0% 25%, #1a1a1e 0% 50%) 0 0 / 16px 16px;
@@ -443,12 +489,13 @@
 </style>
 </head>
 <body>
+<div id="result-stage"><div class="stage-note">Decoding…</div></div>
 
 <div class="header">
   <h1>Twitter <span>PNG</span> Codec</h1>
   <span class="badge">encode</span>
   <span class="badge">decode</span>
-  <span class="badge" style="color:var(--accent);border-color:var(--accent)">899×898</span>
+  <span class="badge" style="color:var(--accent);border-color:var(--accent)">≤ 899×898</span>
 </div>
 
 <div class="tabs">
@@ -472,6 +519,13 @@
 
   <textarea id="enc-text" placeholder="Type anything here — the PNG updates in real-time…" oninput="handleEncodeText()"></textarea>
 
+  <div class="dim-row">
+    <span class="dim-label">Canvas</span>
+    <label class="dim-field">W <input id="enc-w" type="number" min="1" max="899" placeholder="auto"></label>
+    <label class="dim-field">H <input id="enc-h" type="number" min="1" max="898" placeholder="auto"></label>
+    <span class="dim-note" id="enc-dim-note">empty = fit the payload · 899 wide, 4–898 tall · applies to every part</span>
+  </div>
+
   <div id="enc-status" class="status info" style="display:none"></div>
 
   <div class="stats-row" id="enc-stats" style="display:none">
@@ -482,7 +536,7 @@
   </div>
 
   <div id="enc-preview-wrap" style="display:none; margin-top:1.5rem;">
-    <p class="section-label">Preview — 899×898</p>
+    <p class="section-label">Preview — up to 899×898, sized to the payload</p>
     <div class="preview-canvas-wrap">
       <canvas id="enc-canvas" width="899" height="898"></canvas>
     </div>
@@ -569,9 +623,9 @@
       </div>
       <div class="how-card">
         <span class="how-card-icon">📐</span>
-        <div class="how-card-title">899 × 898 resolution</div>
+        <div class="how-card-title">Up to 899 × 898</div>
         <div class="how-card-body">
-          Twitter recompresses images above a certain pixel count. <strong>899×898</strong> sits just under that threshold — large enough to hold ~3 MB of data, small enough to pass through untouched.
+          Twitter recompresses images above a certain pixel count. <strong>899×898</strong> sits just under that threshold. The canvas is sized to the payload (any height from 4 to 898, width 899), so a small file ships as a small PNG, and the decoder reads any canvas at or below 899×898 — every file written before this still decodes.
         </div>
       </div>
       <div class="how-card">
@@ -620,6 +674,8 @@ let decZipNote = null;    // e.g. 'ZIP > TXT' when a single-file zip was unwrapp
 let decInnerName = null;  // the member name inside that zip
 let decZipEntries = null; // entries when the payload is a multi-member zip
 let decManifest = null;   // files+parts when the payload is a .bin2png master file (x-draft.py)
+let decOversize = null;   // "900x900" when a decoded PNG was above the codec's ceiling
+let lastFilterChoice = '';// which filter pass won for the last part, for the stats line
 
 // ─── FAVICON — animated, and it reflects what the page is DOING ──────────────
 // Two states drawn onto a 64×64 offscreen canvas and pushed into <link rel="icon">:
@@ -816,8 +872,24 @@ function switchTab(name, remember = true) {
 // capacity-sized slice of the same file (see bin2png-encode.mjs). Returns the ids IN THE ORDER
 // WRITTEN, or null. One bad part rejects the whole hash: a half-stitched file is worse than a clear
 // refusal, and there is no way to guess which part is missing.
+// `#id+id` may be followed by a MODE: `(newtab)` opens the decoded file in a new tab as a blob,
+// `(openfull)` replaces this page with it (Chromium renders video/audio/text/PDF itself). The mode
+// is not part of the address of the payload, so every parser strips it first.
+// `(html)` renders the decoded bytes AS A DOCUMENT (
+// replaced by the decoded file's, so its <style>/<script> run and its relative urls resolve against
+// this page's directory. Unanchored on purpose — he said "if (openfull) exists in the url at all".
+const HASH_MODE_RE = /\((newtab|openfull|download|html)\)/i;
+function hashModeOf(hash) {
+  const m = decodeURIComponent(String(hash || '').replace(/^#/, '')).trim().match(HASH_MODE_RE);
+  return m ? m[1].toLowerCase() : null;
+}
+function hashBody(hash) {
+  return decodeURIComponent(String(hash || '').replace(/^#/, '')).trim()
+    .replace(HASH_MODE_RE, '').trim();
+}
+
 function mediaIdsFromHash(hash) {
-  const raw = decodeURIComponent(String(hash || '').replace(/^#/, '')).trim();
+  const raw = hashBody(hash);
   if (!raw) return null;
   const ids = [];
   for (const part of raw.split('+')) {
@@ -837,18 +909,194 @@ function mediaIdFromHash(hash) {
 }
 
 let hashInFlight = false;
+// A hash is the ADDRESS of a result. It may hold ids, a pbs url, ANY other complete url (a .txt,
+// an archive snapshot) and a mode suffix — `parseMediaIds` already understands every one of those,
+// which `mediaIdsFromHash` (ids only) deliberately does not.
 async function decodeFromHash() {
-  const ids = mediaIdsFromHash(location.hash);
-  if (!ids || hashInFlight) return;
+  const src = hashBody(location.hash);
+  if (!src || hashInFlight) return;
+  if (!parseMediaIds(src)) return;
+  // `(newtab)`: this page is only the launcher — the new tab decodes and renders. Opening here,
+  // synchronously from the load/hashchange, is the only way a popup is not blocked.
+  const mode0 = hashModeOf(location.hash);
+  // `window.opener`: the tab WE opened carries the same `(html)` hash (it must — the mode is the
+  // address, and a mode-less hash would just show the encoder again). Without this guard that tab
+  // would open another one, forever. A tab opened by a page renders in place; a tab the person
+  // navigated to is the launcher and opens a new one.
+  let openedByUs = false;
+  try { openedByUs = !!window.opener && !window.opener.closed; } catch (e) { openedByUs = false; }
+  if ((mode0 === 'newtab' || mode0 === 'html') && !openedByUs && !resultTabOpened) {
+    // `(html)` keeps its own mode in the new tab (that tab replaces its document with the decoded
+    // one); `(newtab)` flips to `(openfull)`, which renders the file natively in a black page.
+    if (openResultTab(mode0 === 'html' ? 'html' : 'openfull')) {
+      setDecStatus(mode0 === 'html' ? 'Opening the decoded page in the new tab.' : 'Decoding in the new tab.', 'success');
+      return;
+    }
+  }
   hashInFlight = true;
   try {
     switchTab('decode', false);   // a link decodes for this load without becoming the preference
     // Written back as `key1+key2`, the same spelling that was in the hash, so the field is
     // copyable/shareable and the URL still works if it is re-opened by hand.
-    document.getElementById('dec-url').value = ids.join('+');
+    document.getElementById('dec-url').value = src;
     await handleDecodeUrl();
   } finally {
     hashInFlight = false;
+  }
+}
+
+// Write the address of what was just decoded back into the URL: bare keys for pbs media (the
+// spelling `mediaIdsFromHash` parses), the url itself for anything else. replaceState, never
+// `location.hash =` — that fires `hashchange` and would decode the same thing again.
+function hashToken(u) {
+  const m = String(u || '').match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_\-]+)/);
+  return m ? m[1] : String(u || '');
+}
+function setResultHash(urls) {
+  const body = (urls || []).map(hashToken).filter(Boolean).join('+');
+  if (!body) return;
+  // A mode belongs to the ADDRESS, not to the payload: keep `(newtab)`/`(openfull)` when the hash
+  // already carries one, or the second decode on the same page would lose it.
+  const mode = hashModeOf(location.hash);
+  const want = body + (mode ? `(${mode})` : '');
+  if (location.hash.replace(/^#/, '') === want) return;
+  try { history.replaceState(null, '', '#' + want); } catch (e) { /* file:// or a sandbox can refuse */ }
+}
+
+// The result as a blob url with the decoded MIME, so Chromium can render it natively.
+function resultBlobUrl() {
+  if (!decodedBytes) return null;
+  return URL.createObjectURL(new Blob([decodedBytes], {
+    type: decodedMime || 'application/octet-stream' }));
+}
+
+// `(newtab)` opens THIS page in the new tab, with the mode flipped to `(openfull)` — the new tab is
+// then a black result-only page that decodes on its own. The obvious alternatives all fail on a
+// file:// page: `window.open('')` INHERITS the opener's url (the page reloads and its app fights
+// the render — 
+// rendered, and writing into a popup's document leaves Chrome free to commit the inherited page
+// over it. A real navigation to `…(openfull)` has none of those problems, and it is also exactly
+// his framing: "decode on the newtab".
+let resultTabOpened = false;
+const STAGE_CSS = 'html,body{margin:0;height:100%;background:#000;color:#e4e4e7;'
+  + 'font:13px ui-monospace,SFMono-Regular,monospace}body{display:flex;align-items:center;'
+  + 'justify-content:center;overflow:hidden}video{width:100%;height:100%}'
+  + 'img{max-width:100vw;max-height:100vh}audio{width:min(680px,90vw)}'
+  + 'iframe{width:100%;height:100%;border:0;background:#000}'
+  + 'pre{width:100%;height:100%;overflow:auto;margin:0;padding:1.5rem;white-space:pre-wrap}'
+  + '.stage-note{color:#71717a;padding:2rem;text-align:center}';
+function openResultTab(mode = 'openfull') {
+  try {
+    const target = location.href.replace(HASH_MODE_RE, `(${mode})`);
+    const w = window.open(target, '_blank');
+    resultTabOpened = !!w;
+  } catch (e) { resultTabOpened = false; }
+  return resultTabOpened;
+}
+
+// `(html)`: replace THIS document with the decoded one — 
+// with the code from the decoded file and refresh". document.open() drops the old document entirely
+// (encoder UI, event listeners, timers), so the decoded page's own <script> runs as it would from
+// disk. A binary payload cannot be a document, so it falls back to the native element.
+function openHtmlDocument(bytes) {
+  const head = bytes.subarray ? bytes.subarray(0, 4096) : bytes.slice(0, 4096);
+  let binary = false;
+  for (let i = 0; i < head.length; i++) { if (head[i] === 0) { binary = true; break; } }
+  document.documentElement.classList.add('result-only');
+  if (binary) {
+    const stage = document.getElementById('result-stage');
+    const el = resultElement(document, bytes, decodedMime);
+    stage.textContent = '';
+    if (el) { document.title = resultFileName(); stage.appendChild(el); }
+    else {
+      const note = document.createElement('div');
+      note.className = 'stage-note';
+      note.textContent = `(html) was asked for, but this file is ${decodedMime} — Chromium cannot render it as a document.`;
+      stage.appendChild(note);
+    }
+    return;
+  }
+  document.open();
+  // A marker on the WINDOW (document.open replaces the document, not the window), so the page can
+  // be recognised after it has been replaced — by a person reloading, or by a test.
+  window.__bin2pngHtml = resultFileName();
+  document.write(new TextDecoder().decode(bytes));
+  document.close();
+}
+
+// The decoded bytes as the element Chromium renders natively for that type. NEVER a navigation to a
+// blob: url — that is what downloaded instead of rendering (a `blob:null/…` on a file:// page is
+// handed to the downloader for several types; 
+// page and pointing it at the blob always renders.
+function resultElement(doc, bytes, mime) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  let el = null;
+  if (mime.startsWith('video/')) {
+    el = doc.createElement('video');
+    el.src = url; el.controls = true; el.autoplay = true; el.playsInline = true;
+  } else if (mime.startsWith('audio/')) {
+    el = doc.createElement('audio');
+    el.src = url; el.controls = true; el.autoplay = true;
+  } else if (mime.startsWith('image/')) {
+    el = doc.createElement('img');
+    el.src = url; el.alt = 'decoded image';
+  } else if (mime === 'application/pdf') {
+    el = doc.createElement('iframe');
+    el.src = url;
+  } else if (mime.startsWith('text/') || mime === 'application/json' || /\+xml$/.test(mime)) {
+    el = doc.createElement('pre');
+    el.textContent = new TextDecoder().decode(bytes);
+  }
+  return el;
+}
+
+// Fill a whole document with the result, black to the edges and nothing else.
+// The name to save as: the inner zip member, else `<ID or url>.<ext from the mime>`.
+function resultFileName() {
+  const mime = decodedMime || 'application/octet-stream';
+  if (decInnerName) return decInnerName;
+  const first = hashBody(location.hash).split('+')[0] || '';
+  const id = hashToken(first).replace(/^https?:\/\//, '').replace(/[^A-Za-z0-9_.-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return `${id || 'decoded'}.${mimeExt(mime)}`;
+}
+
+// `(newtab)` → the pre-opened tab, `(openfull)` → this page with no UI, `(download)` → the file.
+function deliverResultIfRequested() {
+  const mode = hashModeOf(location.hash);
+  if (!mode || decManifest || !decodedBytes) return;
+  // `(html)` first: it is a document replacement, not an element in #result-stage. After this call
+  // the page is the decoded file, so nothing below can run.
+  if (mode === 'html') { openHtmlDocument(decodedBytes); return; }
+  if (mode === 'download') {
+    saveBytes(decodedBytes, resultFileName(), decodedMime);
+    setDecStatus(`Saved ${resultFileName()} — ${fmtBytes(decodedBytes.length)}`, 'success');
+    return;
+  }
+  if (mode === 'openfull') {
+    document.documentElement.classList.add('result-only');
+    const stage = document.getElementById('result-stage');
+    const el = resultElement(document, decodedBytes, decodedMime);
+    stage.textContent = '';
+    if (el) {
+      document.title = resultFileName();
+      stage.appendChild(el);
+    } else {
+      const note = document.createElement('div');
+      note.className = 'stage-note';
+      note.textContent = `This file is ${decodedMime} — Chromium cannot render it.`;
+      stage.appendChild(note);
+    }
+    return;
+  }
+  // `(newtab)` never reaches here in the OPENER: the tab it opened carries `(openfull)`. It is only
+  // here for a popup that was blocked at load, so the result still lands somewhere useful.
+  if (!openResultTab(mode === 'html' ? 'html' : 'openfull')) {
+    document.documentElement.classList.add('result-only');
+    const stage = document.getElementById('result-stage');
+    const el = resultElement(document, decodedBytes, decodedMime);
+    stage.textContent = '';
+    if (el) stage.appendChild(el);
   }
 }
 window.addEventListener('hashchange', decodeFromHash);
@@ -885,10 +1133,24 @@ function handleEncodeText() {
   }, 60);
 }
 
-function encodeBytesToCanvas(bytes, name) {
+let encPackNote = '';
+async function encodeBytesToCanvas(bytes, name) {
+  // COMPRESS FIRST (
+  // decoder unpacks it by itself (see packPayload / presentDecoded). A file that does not compress
+  // — an mp4, a zip — is stored untouched.
+  const packed = await packPayload(bytes);
+  bytes = packed.bytes;
+  encPackNote = packed.note;
   const BYTES_PER_PX = 3;
-  const maxBytes = TOTAL_PIXELS * BYTES_PER_PX;   // 2,421,906 B per PNG
+  const chosen = readCanvasOverride();
+  if (chosen && chosen.error) { setEncStatus(chosen.error, 'error'); return; }
+  const perPart = chosen ? chosen.w * chosen.h * BYTES_PER_PX : TOTAL_PIXELS * BYTES_PER_PX;
+  const maxBytes = perPart;   // 2,421,906 B per PNG at 899x898; smaller when a canvas is chosen
   const total = bytes.length;
+  const dimNote = document.getElementById('enc-dim-note');
+  if (dimNote) dimNote.textContent = chosen
+    ? `using ${chosen.w}×${chosen.h} · ${perPart.toLocaleString()} B per PNG`
+    : `auto · up to ${W}×${H} · ${TOTAL_PIXELS * BYTES_PER_PX.toLocaleString()} B per PNG`;
 
   // SPLIT HERE, in the page (
   // instead of pointing at the CLI). A file bigger than one canvas is cut into capacity-sized
@@ -921,7 +1183,9 @@ function encodeBytesToCanvas(bytes, name) {
     document.getElementById('enc-preview-wrap').style.display = 'block';
     renderEncParts();
     if (nParts === 1) {
-      setEncStatus(`Encoded ${fmtBytes(total)} → ${firstPixels.toLocaleString()} pixels`, 'success');
+      setEncStatus(`Encoded ${fmtBytes(total)} → ${firstPixels.toLocaleString()} pixels`
+        + (lastFilterChoice ? ` · ${lastFilterChoice}` : '')
+        + (encPackNote ? ` · ${encPackNote}` : ''), 'success');
     } else {
       setEncStatus(`Encoded ${fmtBytes(total)} → ${nParts} PNGs (${baseName}.part1of${nParts}.png … ${baseName}.part${nParts}of${nParts}.png). Upload them IN ORDER, then share the #key1+key2 link — the decoder joins them.`, 'success');
     }
@@ -981,32 +1245,123 @@ async function deflateBytes(u8) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 // Pack the payload into 8-bit RGBA scanlines (each prefixed with filter byte 0).
-function packScanlines(bytes) {
+// EXPERIMENTAL (
+// proven 899x898. A small file used to be written into a full 899x898 canvas whose remaining pixels
+// were transparent padding; those cost almost nothing in deflate, but the canvas ITSELF still had to
+// be read and validated by X, and a 1-row canvas for a 1 KB text is a much smaller PNG to upload.
+// The decoder is unchanged: it already reads w and h out of IHDR, so every size <= 899x898 decodes.
+// A hand-chosen canvas (claudesays.txt item 1). Both fields or neither: one empty means "fit".
+// It is validated against the codec's own ceiling, so >899x898 is refused here, before any work.
+function readCanvasOverride() {
+  const wEl = document.getElementById('enc-w'), hEl = document.getElementById('enc-h');
+  const wRaw = (wEl && wEl.value || '').trim(), hRaw = (hEl && hEl.value || '').trim();
+  if (!wRaw && !hRaw) return null;
+  const w = Number(wRaw), h = Number(hRaw);
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w < 1 || h < 1) {
+    return { error: 'Canvas: give BOTH a width and a height as whole numbers, or leave both empty for auto.' };
+  }
+  if (w > W || h > H) return { error: `Canvas: never larger than ${W}×${H} — ${w}×${h} is refused.` };
+  // X's own floor, measured 2026-10-18: CreateDraftTweet answers 324 "Image dimensions must be
+  // >= 4x4" — a 899x1 fit PNG never becomes a draft.
+  if (w < MIN_DIM || h < MIN_DIM) return { error: `Canvas: X requires at least ${MIN_DIM}×${MIN_DIM} — ${w}×${h} is refused.` };
+  return { w, h };
+}
+
+const MIN_DIM = 4;            // X rejects anything smaller (324, measured on a real draft)
+function canvasFor(n) {
+  const chosen = readCanvasOverride();
+  if (chosen && !chosen.error) return chosen;
+  const need = Math.max(1, Math.ceil(n / 3));
+  if (need >= TOTAL_PIXELS) return { w: W, h: H };
+  // Never shorter than 4 rows, even when the payload would fit in one: the size that matters to
+  // X is the IMAGE's, and 899x1 is refused before the draft exists.
+  return { w: W, h: Math.max(MIN_DIM, Math.ceil(need / W)) };
+}
+
+// One PNG filtered row for a given filter type (0-4), into `out` at `o`.
+function filterRow(f, cur, prev, stride, bpp, out, o) {
+  for (let x = 0; x < stride; x++) {
+    const a = x >= bpp ? cur[x - bpp] : 0;
+    const b = prev ? prev[x] : 0;
+    const c = (prev && x >= bpp) ? prev[x - bpp] : 0;
+    let v = cur[x];
+    if (f === 1) v -= a;
+    else if (f === 2) v -= b;
+    else if (f === 3) v -= (a + b) >> 1;
+    else if (f === 4) {
+      const pp = a + b - c, pa = Math.abs(pp - a), pb = Math.abs(pp - b), pc = Math.abs(pp - c);
+      v -= (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
+    }
+    out[o + x] = v & 0xff;
+  }
+}
+// Sum of the absolute values of the bytes read as SIGNED — PNG's own filter heuristic. Cheapest
+// good proxy for "how well will deflate do on this row".
+function filterScore(buf, off, len) {
+  let sum = 0;
+  for (let i = 0; i < len; i++) { const v = buf[off + i]; sum += v < 128 ? v : 256 - v; }
+  return sum;
+}
+
+// Per-row filter search (claudesays.txt item 2): all five filters are tried and the smallest score
+// wins, and the decoder already un-filters 0-4. MEASURED, and it is not always a win: on a repetitive
+// text payload filter 0 lets deflate match whole rows across the image, while a filtered row differs
+// from its neighbour and the match is lost — 5,581 B (filter 0) vs 12,129 B (searched) on the same
+// 58.7 KB JSON. So the encoder now builds BOTH and keeps the smaller IDAT; the search can then only
+// ever help. Cost is one extra scanline pass and one extra deflate.
+function packScanlines(bytes, dims, search = false) {
   const BYTES_PER_PX = 3;
   const n = bytes.length;
-  const stride = W * 4;
-  const raw = new Uint8Array(H * (stride + 1));   // zero-filled: unwritten pixels are 0,0,0,0
-  for (let y = 0; y < H; y++) {
-    const row = y * (stride + 1);
-    for (let x = 0; x < W; x++) {
-      const off = (y * W + x) * BYTES_PER_PX;
+  const { w, h } = dims;
+  const stride = w * 4, bpp = 4;
+  const raw = new Uint8Array(h * (stride + 1));   // zero-filled: unwritten pixels are 0,0,0,0
+  let prev = null;
+  let cur = new Uint8Array(stride);
+  let trial = new Uint8Array(stride);
+  for (let y = 0; y < h; y++) {
+    cur.fill(0);
+    for (let x = 0; x < w; x++) {
+      const off = (y * w + x) * BYTES_PER_PX;
       if (off >= n) break;
       const real = Math.min(3, n - off);
-      const o = row + 1 + x * 4;
-      raw[o]     = bytes[off];
-      raw[o + 1] = real >= 2 ? bytes[off + 1] : 0;
-      raw[o + 2] = real >= 3 ? bytes[off + 2] : 0;
-      raw[o + 3] = real === 3 ? 255 : real === 2 ? 170 : 85;
+      const o = x * 4;
+      cur[o]     = bytes[off];
+      cur[o + 1] = real >= 2 ? bytes[off + 1] : 0;
+      cur[o + 2] = real >= 3 ? bytes[off + 2] : 0;
+      cur[o + 3] = real === 3 ? 255 : real === 2 ? 170 : 85;
     }
+    const row = y * (stride + 1);
+    if (!search) {
+      raw[row] = 0;
+      raw.set(cur, row + 1);
+    } else {
+      let bestF = 0, bestScore = Infinity;
+      for (let f = 0; f < 5; f++) {
+        filterRow(f, cur, prev, stride, bpp, trial, 0);
+        const score = filterScore(trial, 0, stride);
+        if (score < bestScore) { bestScore = score; bestF = f; raw.set(trial, row + 1); }
+      }
+      raw[row] = bestF;
+    }
+    prev = cur;
+    cur = trial;          // reuse the trial buffer for the next row's raw bytes, and the old cur as trial
+    trial = new Uint8Array(stride);
   }
   return raw;
 }
 async function encodePngBlob(bytes) {
+  const dims = canvasFor(bytes.length);
   const ihdr = new Uint8Array(13);
   const dv = new DataView(ihdr.buffer);
-  dv.setUint32(0, W); dv.setUint32(4, H);
+  dv.setUint32(0, dims.w); dv.setUint32(4, dims.h);
   ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
-  const idat = await deflateBytes(packScanlines(bytes));
+  // Both are built and the smaller one is kept: see the measurement above packScanlines.
+  const plain = await deflateBytes(packScanlines(bytes, dims, false));
+  const searched = await deflateBytes(packScanlines(bytes, dims, true));
+  const idat = searched.length < plain.length ? searched : plain;
+  lastFilterChoice = searched.length < plain.length
+    ? `filter search won by ${fmtBytes(plain.length - searched.length)}` : 'filter 0 won';
+  window.__lastFilterChoice = lastFilterChoice;
   return new Blob([
     new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
     pngChunk('IHDR', ihdr), pngChunk('IDAT', idat), pngChunk('IEND', new Uint8Array(0)),
@@ -1019,12 +1374,16 @@ async function encodePngBlob(bytes) {
 function drawPayloadToCanvas(canvas, bytes) {
   const BYTES_PER_PX = 3;
   const n = bytes.length;
+  const dims = canvasFor(n);
+  if (canvas.width !== dims.w) canvas.width = dims.w;
+  if (canvas.height !== dims.h) canvas.height = dims.h;
   const ctx = canvas.getContext('2d');
-  const imgData = ctx.createImageData(W, H);
+  const imgData = ctx.createImageData(dims.w, dims.h);
   const d = imgData.data;
   const numDataPixels = Math.ceil(n / BYTES_PER_PX);
+  const pixels = dims.w * dims.h;
 
-  for (let px = 0; px < TOTAL_PIXELS; px++) {
+  for (let px = 0; px < pixels; px++) {
     const base = px * 4;
     const byteOff = px * BYTES_PER_PX;
     if (byteOff >= n) {
@@ -1340,13 +1699,33 @@ async function handleDecodeUrl() {
   // stitch — that is the string that re-creates this exact decode.
   const url = multi ? targets.map((u) => u.replace(/^.*\/media\//, '').replace(/\?.*$/, '')).join('+') : targets[0];
 
+  // The URL is the address of this result from now on: `#key`, `#key1+key2`, `#https://…`.
+  setResultHash(targets);
   setDecProgress(90);
   await decodeBytes(bytes);
   // 
-  // the list — decode every file it names, the same path the ⬇ Fetch all button takes, and save
-  // each under its own name (the sha256 check inside manifestFetchFile still applies).
-  if (decManifest && multi) {
+  // decode every file it names, the same path the ⬇ Fetch all button takes, and save each under
+  // its own name (the sha256 check inside manifestFetchFile still applies). EVERY master, not only
+  // a `key1+key2` one: he tested a single-id master (`HU3qT6KWMAATiLd`) and got the list.
+  if (decManifest) {
     const files = decManifest;
+    // `(html)` on a master file means "show me the page it lists", not "save every file": fetch the
+    // HTML member (the first one whose name says so, else the first file) and replace this document
+    // with it. His real case, 2026-10-17: `#HU3wc4BWgAAf6Xw(html)` lists basket-random-offline.html.
+    if (hashModeOf(location.hash) === 'html') {
+      const pick = files.find((f) => /\.x?html?$/i.test(f.name || '')) || files[0];
+      const got = await manifestFetchFile(pick);
+      if (got) {
+        decodedBytes = got.bytes;
+        decodedMime = got.mime;
+        decInnerName = pick.name;
+        document.title = pick.name;
+        setDecStatus(`${pick.name} — ${fmtBytes(got.bytes.length)}, opening it as a page`, 'success');
+        openHtmlDocument(got.bytes);
+      }
+      setDecProgress(100);
+      return;
+    }
     let done = 0;
     for (const f of files) {
       const got = await manifestFetchFile(f);
@@ -1376,12 +1755,15 @@ async function handleDecodeUrl() {
   renderCacheInfo();
   await recordHistory(url, bytes, lastModified, tooLarge);
   renderHistory();
+  // Only now, with the state saved: `(openfull)` replaces this page, `(newtab)` fills the tab that
+  // was opened before the decode even started.
+  deliverResultIfRequested();
 }
 
 // Decode whatever bytes we ended up with: a codec PNG goes through the pixel decoder;
 // any other file (say a .txt URL) is shown raw rather than failing.
 async function decodeBytes(bytes, depth = 0) {
-  if (depth === 0) { decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; }
+  if (depth === 0) { decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; decOversize = null; }
   const mime = guessMime(bytes);
   if (mime === 'image/png') {
     // Exact path first: parse the PNG ourselves. Canvas getImageData() PREMULTIPLIES
@@ -1403,6 +1785,15 @@ async function decodeBytes(bytes, depth = 0) {
 // (with the member's name kept), a multi-member zip is listed. `fromCodec` only changes the
 // wording of the status line.
 async function presentDecoded(bytes, depth = 0, fromCodec = false) {
+  // A packed payload is inflated FIRST, then presented exactly as if the original bytes had come
+  // out of the PNG — manifest, zip and mime detection all see the real file.
+  if (depth < 2) {
+    const unpacked = await unpackPayload(bytes);
+    if (unpacked) {
+      if (depth === 0) setDecStatus(`Unpacked ${fmtBytes(bytes.length)} → ${fmtBytes(unpacked.length)}`, 'info');
+      return presentDecoded(unpacked, depth + 1, fromCodec);
+    }
+  }
   const mime = guessMime(bytes);
   // A .bin2png master file (written by x-draft.py) is a LIST, not a payload: show the files it
   // names instead of dumping raw text. Checked before zip so a manifest is never mistaken for one.
@@ -1487,6 +1878,7 @@ async function decodePngExact(bytes) {
       off = start + len + 4;
     }
     if (depth !== 8 || color !== 6 || interlace !== 0 || !w || !h || !idat.length) return null;
+    if (w > W || h > H) decOversize = `${w}×${h}`;   // shown as a note on the result, see showDecodedResult
     let zlen = 0; for (const c of idat) zlen += c.length;
     const z = new Uint8Array(zlen);
     let zo = 0; for (const c of idat) { z.set(c, zo); zo += c.length; }
@@ -1612,6 +2004,45 @@ function readZipEntries(bytes) {
     off += 46 + nameLen + extraLen + commentLen;
   }
   return entries;
+}
+
+// ── the compressed container (
+// A file that compresses is stored deflated, with a 9-byte header so the decoder can tell:
+//   "B2PZ" + codec byte (1 = zlib deflate) + 4-byte original length (big endian) + deflate stream
+// It is only used when it actually wins (compressed + 9 < raw). A payload that merely STARTS with
+// those bytes stays raw: the inflated length must equal the recorded one, or the container is
+// rejected and the bytes are presented as they are.
+const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];
+const PACK_HEADER = 9;
+function isPacked(bytes) {
+  return !!(bytes && bytes.length > PACK_HEADER
+            && bytes[0] === PACK_MAGIC[0] && bytes[1] === PACK_MAGIC[1]
+            && bytes[2] === PACK_MAGIC[2] && bytes[3] === PACK_MAGIC[3] && bytes[4] === 1);
+}
+async function packPayload(bytes) {
+  if (typeof CompressionStream === 'undefined' || bytes.length < 64) return { bytes, note: '' };
+  try {
+    const z = await deflateBytes(bytes);
+    if (z.length + PACK_HEADER >= bytes.length) return { bytes, note: '' };
+    const out = new Uint8Array(PACK_HEADER + z.length);
+    out.set([PACK_MAGIC[0], PACK_MAGIC[1], PACK_MAGIC[2], PACK_MAGIC[3], 1], 0);
+    new DataView(out.buffer).setUint32(5, bytes.length);
+    out.set(z, PACK_HEADER);
+    return { bytes: out, note: `${fmtBytes(bytes.length)} → ${fmtBytes(out.length)} deflated` };
+  } catch (e) {
+    return { bytes, note: '' };          // no stream support, or a hostile payload: store it raw
+  }
+}
+async function unpackPayload(bytes) {
+  if (!isPacked(bytes)) return null;
+  const want = new DataView(bytes.buffer, bytes.byteOffset).getUint32(5);
+  try {
+    const stream = new Blob([bytes.subarray(PACK_HEADER)]).stream()
+      .pipeThrough(new DecompressionStream('deflate'));
+    const out = new Uint8Array(await new Response(stream).arrayBuffer());
+    if (out.length !== want) return null;
+    return out;
+  } catch (e) { return null; }
 }
 
 async function inflateRawBytes(comp) {
@@ -2123,10 +2554,17 @@ function guessMime(bytes) {
   if (sig(0, 0xD0, 0xCF, 0x11, 0xE0)) return 'application/msword';
   if (sig(0, 0x7F, 0x45, 0x4C, 0x46)) return 'application/x-elf';
   if (sig(0, 0x4D, 0x5A)) return 'application/x-msdownload';
-  // Try text
-  const sample = bytes.slice(0, 512);
-  const allPrint = [...sample].every(b => b === 9 || b === 10 || b === 13 || (b >= 32 && b <= 126));
-  if (allPrint) {
+  // Try text. NOT "every byte is ASCII 32..126": a real HTML file has a UTF-8 em dash or an
+  // accented name in its first 512 bytes, and that used to make a whole web page come back as
+  // application/octet-stream — a `.bin` download instead of the page (
+  // basket-random-offline.html). A NUL still means binary; a few control bytes are tolerated.
+  const sample = bytes.slice(0, 4096);
+  let ctrl = 0;
+  for (const b of sample) {
+    if (b === 0) return 'application/octet-stream';
+    if (b < 9 || (b > 13 && b < 32)) ctrl++;
+  }
+  if (ctrl / sample.length <= 0.02) {
     const str = new TextDecoder().decode(sample).trimStart();
     if (str.startsWith('<?xml') || str.startsWith('<html') || str.startsWith('<!DOCTYPE')) return 'text/html';
     if (str.startsWith('{') || str.startsWith('[')) return 'application/json';
@@ -2172,6 +2610,16 @@ function showDecodedResult() {
     return;
   }
 
+  // Above the codec's ceiling: still decoded (the payload is read from IHDR), but said out loud —
+  // the status line is rewritten by the caller, so this lives in the result body.
+  if (decOversize) {
+    const overNote = document.createElement('div');
+    overNote.className = 'zip-note';
+    overNote.id = 'dec-oversize';
+    overNote.textContent = `This PNG is ${decOversize} — above the codec's ${W}×${H}. Decoded anyway.`;
+    body.appendChild(overNote);
+  }
+
   // A zip note / inner name, set when a single-file zip was unwrapped.
   if (decZipNote || decInnerName) {
     const note = document.createElement('div');
@@ -2205,7 +2653,31 @@ function showDecodedResult() {
     // XSS defence for text files — nothing decoded is ever parsed as markup.
     code.textContent = text;
     pre.appendChild(code);
-    body.appendChild(pre);
+    // 
+    // say what it is and offer the new tab, which is `(html)` on the same address.
+    if (mime === 'text/html' && !hashModeOf(location.hash)) {
+      const note = document.createElement('div');
+      note.className = 'zip-note';
+      note.style.display = 'flex';
+      note.style.alignItems = 'center';
+      note.style.gap = '10px';
+      const label = document.createElement('span');
+      label.textContent = 'This is an HTML file — open it as a page in a new tab?';
+      const open = document.createElement('button');
+      open.className = 'btn';
+      open.textContent = 'Open in new tab';
+      open.addEventListener('click', () => {
+        const body = hashBody(location.hash);
+        if (!body) return;
+        window.open(`${location.href.split('#')[0]}#${body}(html)`, '_blank');
+      });
+      note.appendChild(label);
+      note.appendChild(open);
+      // insertBefore needs `pre` to be a child already: append first, then put the note above it.
+      body.appendChild(pre);
+      body.insertBefore(note, pre);
+    }
+    if (!pre.parentNode) body.appendChild(pre);
   } else if (mime === 'application/pdf') {
     const embed = document.createElement('embed');
     embed.src = url; embed.type = 'application/pdf';
@@ -2269,7 +2741,7 @@ function fmtBytes(n) {
 // Last lines of the script, so every handler above is already defined. A page opened with a share
 // hash (`#HTuOfF1W4AA6UfM`) decodes on load with no click; otherwise the last tab you were on is
 // restored from localStorage (default: encode, which is what the markup ships with).
-if (!mediaIdsFromHash(location.hash)) {
+if (!parseMediaIds(hashBody(location.hash))) {
   const t = savedTab();
   if (t) switchTab(t, false);
 }
