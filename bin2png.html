@@ -3179,6 +3179,11 @@ async function manifestFetchFile(f) {
       lastModified: got.lastModified || null,
       mime,
       note: 'manifest',
+      // WHICH part this is, and how many the file has. Without it the dictionary export cannot
+      // put a multi-part name back together in the right order — it would have to guess, and a
+      // stitched file in the wrong order is a corrupt file that still "decrypts" fine.
+      part: urls.length > 1 ? i + 1 : 0,
+      parts: urls.length,
       cached: got.parts[i].length <= CACHE_MAX_FILE,
       thumb: null,
     });
@@ -3359,27 +3364,57 @@ async function historyDownloadEncoded() {
 // names themselves are the secret, and the file is meant to be published next to the page.
 async function historySaveDictionary() {
   const rows = await historyAll();
+  // Group by NAME, not by row: a file fetched from a master file logs one row PER PART, all
+  // carrying the same name. Grouping by row would write one part and silently drop the rest.
   const byName = new Map();
   for (const r of rows) {
     if (!r.name) continue;
-    const urls = recordPartUrls(r).length ? recordPartUrls(r) : (r.url ? [r.url] : []);
+    const urls = recordPartUrls(r);
     if (!urls.length) continue;
-    const prev = byName.get(r.name);
-    if (prev && (prev.at || 0) >= (r.fetchedAt || 0)) continue;   // newest entry per name wins
-    byName.set(r.name, { at: r.fetchedAt || 0, plain: urls.map(hashToken).join('+') });
+    const at = r.fetchedAt || 0;
+    let g = byName.get(r.name);
+    if (!g) { g = { at, items: [] }; byName.set(r.name, g); }
+    g.at = Math.max(g.at, at);
+    g.items.push({ url: urls[0], part: r.part || 0, parts: r.parts || 0, at });
   }
   if (!byName.size) {
     setDecStatus('No history entry carries a file name yet — names come from a master file or an archive listing. Decode one, then save the dictionary.', 'warn');
     return;
   }
   const lines = [IDS_NOTES, ''];
-  for (const [name, v] of [...byName].sort((a, b) => a[0].localeCompare(b[0]))) {
+  let written = 0;
+  const unordered = [];
+  for (const [name, g] of [...byName].sort((a, b) => a[0].localeCompare(b[0]))) {
+    // One row per distinct part url, newest fetch wins.
+    const perUrl = new Map();
+    for (const it of g.items) {
+      const prev = perUrl.get(it.url);
+      if (!prev || it.at >= prev.at) perUrl.set(it.url, it);
+    }
+    const items = [...perUrl.values()];
+    let plain;
+    if (items.length === 1) {
+      plain = hashToken(items[0].url);
+    } else {
+      // Several parts: only join them when every row says WHICH part it is. A wrong order is a
+      // corrupt file that still opens, so an unordered name is skipped and reported, never guessed.
+      const ordered = items.every((i) => i.part > 0) && items.every((i) => i.parts === items.length)
+        ? items.slice().sort((a, b) => a.part - b.part) : null;
+      if (!ordered) { unordered.push(`${name} (${items.length} parts, no order recorded)`); continue; }
+      plain = ordered.map((i) => hashToken(i.url)).join('+');
+    }
     const hash = await sha256Hex(new TextEncoder().encode(name));
     if (!hash) { setDecStatus('This origin has no crypto.subtle, so records cannot be made here — use idsdictionary.py.', 'error'); return; }
-    lines.push(`${IDS_VERSION} ${hash} ${await idsEncryptId(name, v.plain)}`);
+    lines.push(`${IDS_VERSION} ${hash} ${await idsEncryptId(name, plain)}`);
+    written++;
+  }
+  if (!written) {
+    setDecStatus(`Nothing could be written: ${unordered.join(', ')}. Add ${unordered.length > 1 ? 'those names' : 'that name'} with idsdictionary.py instead of guessing the order.`, 'warn');
+    return;
   }
   saveBytes(new TextEncoder().encode(lines.join('\n') + '\n'), IDS_DICT_FILE, 'text/plain');
-  setDecStatus(`IDSDICTIONARY.txt — ${byName.size} name(s), each with its own key. Put it beside the page and open #<name> instead of #<id>.`, 'success');
+  const skipped = unordered.length ? ` · skipped ${unordered.length} with no recorded part order (${unordered.join(', ')})` : '';
+  setDecStatus(`IDSDICTIONARY.txt — ${written} name(s), each with its own key${skipped}. Put it beside the page and open #<name> instead of #<id>.`, 'success');
 }
 
 // The list under the decoder: newest first, each with a tick box, the name it would be saved as,
