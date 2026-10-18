@@ -10,6 +10,8 @@
 //   2. NEVER use canvas to read or write the PAYLOAD. The PNG is built by hand (packScanlines +
 //      deflate + CRC) and read by the exact IDAT parser; canvas is used only for the visual preview
 //      and as the fallback for a PNG the exact reader cannot parse (palette + tRNS, as X re-encodes).
+//      A tt2png payload is not a file: it is the INDEX of one whose bulk sits on TikTok's CDN, so
+//      the page lists its parts and reassembles them on demand (tiktokupload.py, 2026-10-18).
 //   3. No network at runtime: this page works offline from disk, in Chromium, Firefox and Safari.
 //   4. Decode stays backward compatible: sizes are read from IHDR, so every 899x898 file produced
 //      before this build still decodes, and every file this build writes decodes on the old page.
@@ -19,7 +21,7 @@
 // <html>, so the stylesheet above hides every direct child of <body> except #result-stage.
 (function () {
   var h = decodeURIComponent(location.hash || '').replace(/^#/, '');
-  // ANYWHERE in the hash, not just at the end: his rule 2026-10-17, "if (openfull) exists in the url
+
   // at all, it shouldn't load the UI of the normal page". (html) is a result view too — the decoded
   // document replaces this one, so the encoder UI must not paint first.
   if (/\((openfull|html)\)/i.test(h)) document.documentElement.className = 'result-only';
@@ -97,7 +99,7 @@
     background: var(--bg2);
     padding: 0 2rem;
   }
-  /* The history selection toolbar + row tick boxes (
+  
   .hist-tools { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin: 0.4rem 0 0.8rem; }
   .hist-tools .btn { padding: 4px 10px; font-size: 12.5px; }
   .hist-check, .hist-tools input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; flex: 0 0 auto; }
@@ -674,6 +676,8 @@ let decZipNote = null;    // e.g. 'ZIP > TXT' when a single-file zip was unwrapp
 let decInnerName = null;  // the member name inside that zip
 let decZipEntries = null; // entries when the payload is a multi-member zip
 let decManifest = null;   // files+parts when the payload is a .bin2png master file (x-draft.py)
+let decTt2png = null;     // the index when the payload is a tt2png bundle (tiktokupload.py)
+let decPackage = null;    // the log when the payload is a ttbackup/ttcloud package
 let decOversize = null;   // "900x900" when a decoded PNG was above the codec's ceiling
 let lastFilterChoice = '';// which filter pass won for the last part, for the stats line
 
@@ -844,7 +848,6 @@ async function renderCacheInfo() {
   }
 }
 
-// Which page you were on survives a reload (
 // page it is on … the encode or decode"). Only a real TAB CLICK is remembered: a share link or a
 // history "Fetch now" forces the decode tab for that load but must not overwrite the preference,
 // and a hash still wins over the stored tab (an opened link has to decode).
@@ -875,9 +878,9 @@ function switchTab(name, remember = true) {
 // `#id+id` may be followed by a MODE: `(newtab)` opens the decoded file in a new tab as a blob,
 // `(openfull)` replaces this page with it (Chromium renders video/audio/text/PDF itself). The mode
 // is not part of the address of the payload, so every parser strips it first.
-// `(html)` renders the decoded bytes AS A DOCUMENT (
+
 // replaced by the decoded file's, so its <style>/<script> run and its relative urls resolve against
-// this page's directory. Unanchored on purpose — he said "if (openfull) exists in the url at all".
+
 const HASH_MODE_RE = /\((newtab|openfull|download|html)\)/i;
 function hashModeOf(hash) {
   const m = decodeURIComponent(String(hash || '').replace(/^#/, '')).trim().match(HASH_MODE_RE);
@@ -973,7 +976,7 @@ function resultBlobUrl() {
 // `(newtab)` opens THIS page in the new tab, with the mode flipped to `(openfull)` — the new tab is
 // then a black result-only page that decodes on its own. The obvious alternatives all fail on a
 // file:// page: `window.open('')` INHERITS the opener's url (the page reloads and its app fights
-// the render — 
+
 // rendered, and writing into a popup's document leaves Chrome free to commit the inherited page
 // over it. A real navigation to `…(openfull)` has none of those problems, and it is also exactly
 // his framing: "decode on the newtab".
@@ -994,7 +997,6 @@ function openResultTab(mode = 'openfull') {
   return resultTabOpened;
 }
 
-// `(html)`: replace THIS document with the decoded one — 
 // with the code from the decoded file and refresh". document.open() drops the old document entirely
 // (encoder UI, event listeners, timers), so the decoded page's own <script> runs as it would from
 // disk. A binary payload cannot be a document, so it falls back to the native element.
@@ -1026,7 +1028,7 @@ function openHtmlDocument(bytes) {
 
 // The decoded bytes as the element Chromium renders natively for that type. NEVER a navigation to a
 // blob: url — that is what downloaded instead of rendering (a `blob:null/…` on a file:// page is
-// handed to the downloader for several types; 
+
 // page and pointing it at the blob always renders.
 function resultElement(doc, bytes, mime) {
   const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
@@ -1064,12 +1066,15 @@ function resultFileName() {
 // `(newtab)` → the pre-opened tab, `(openfull)` → this page with no UI, `(download)` → the file.
 function deliverResultIfRequested() {
   const mode = hashModeOf(location.hash);
-  if (!mode || decManifest || !decodedBytes) return;
+  // A tt2png index is an ADDRESS, not a file: the bytes here are its JSON, so `(openfull)` would
+  // have shown the index text and `(download)` a .json — the file itself already arrives from
+  // tt2pngFetchAll, which is where those modes would have to point. Skip the generic delivery.
+  if (!mode || decManifest || decTt2png || !decodedBytes) return;
   // `(html)` first: it is a document replacement, not an element in #result-stage. After this call
   // the page is the decoded file, so nothing below can run.
   if (mode === 'html') { openHtmlDocument(decodedBytes); return; }
   if (mode === 'download') {
-    saveBytes(decodedBytes, resultFileName(), decodedMime);
+    saveBytes(decodedBytes, resultFileName(), decodedMime);   // (download) saves, never plays
     setDecStatus(`Saved ${resultFileName()} — ${fmtBytes(decodedBytes.length)}`, 'success');
     return;
   }
@@ -1135,7 +1140,7 @@ function handleEncodeText() {
 
 let encPackNote = '';
 async function encodeBytesToCanvas(bytes, name) {
-  // COMPRESS FIRST (
+
   // decoder unpacks it by itself (see packPayload / presentDecoded). A file that does not compress
   // — an mp4, a zip — is stored untouched.
   const packed = await packPayload(bytes);
@@ -1152,7 +1157,6 @@ async function encodeBytesToCanvas(bytes, name) {
     ? `using ${chosen.w}×${chosen.h} · ${perPart.toLocaleString()} B per PNG`
     : `auto · up to ${W}×${H} · ${TOTAL_PIXELS * BYTES_PER_PX.toLocaleString()} B per PNG`;
 
-  // SPLIT HERE, in the page (
   // instead of pointing at the CLI). A file bigger than one canvas is cut into capacity-sized
   // slices, IN ORDER, and each slice is written as its own PNG (`name.part1ofN.png` …). The slices
   // are the raw bytes of the file concatenated — nothing added — so the decoder re-joins them from
@@ -1245,7 +1249,7 @@ async function deflateBytes(u8) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 // Pack the payload into 8-bit RGBA scanlines (each prefixed with filter byte 0).
-// EXPERIMENTAL (
+
 // proven 899x898. A small file used to be written into a full 899x898 canvas whose remaining pixels
 // were transparent padding; those cost almost nothing in deflate, but the canvas ITSELF still had to
 // be read and validated by X, and a 1-row canvas for a 1 KB text is a much smaller PNG to upload.
@@ -1498,7 +1502,7 @@ function renderModified(lastModified) {
 
 // A Wayback Machine url is a FETCH TARGET, not a pbs id to re-derive. `…/web/<ts>if_/<url>` is the
 // RAW archived file; without the `if_` the archive answers with an HTML page (banner + rewritten
-// links), which is not the PNG. 
+
 // pbs url by the matcher below, so the archive copy was never fetched — useless exactly when the
 // live media is gone. Only web.archive.org is treated this way; any other host still goes through
 // the generic "already a complete URL" path.
@@ -1567,7 +1571,7 @@ function concatParts(parts) {
 // `?name=orig` is the fallback for the few media where the format form fails. The cache key stays
 // the canonical primary URL, so a fallback download is still a cache hit on the next lookup.
 // Download a list of part URLs — cache-first, IN PARALLEL, in order. The parts are independent
-// images on the same host, so fetching them one after another was pure waiting (
+
 // 2026-10-17: "add parallel downloading"): X answers a part in ~0.5-1s, which a 4-part link used to
 // pay four times over. Cache hits still download nothing, the shared callers keep the same
 // progress/status feedback, and a failure is reported with the part number that failed.
@@ -1603,7 +1607,7 @@ async function fetchParts(urls, label) {
 }
 
 // The MIME a name already says. A manifest carries real names, so the extension IS the type —
-// guessing from magic bytes is what this removes (
+
 const MIME_BY_EXT = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
   bmp: 'image/bmp', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
@@ -1622,9 +1626,14 @@ function mimeFromName(name) {
   return (ext && MIME_BY_EXT[ext.toLowerCase()]) || 'application/octet-stream';
 }
 
-// Save bytes to disk under a name. The MIME is implied by the name unless one is given.
+// Save bytes to disk under a name. The NAME carries the type; the blob's type is deliberately
+// NEUTRAL, because Chrome/Brave hand a saveable blob of a type they can render (`video/webm`,
+
+// on a webm tt2png index: "it should've downloaded and decoded … not played in browser".
+// `application/octet-stream` is always a save; the file lands with `name`, so its extension and
+// the app that opens it later are unaffected. `mime` is still logged by callers, not sent.
 function saveBytes(bytes, name, mime) {
-  const blob = new Blob([bytes], { type: mime || mimeFromName(name) });
+  const blob = new Blob([bytes], { type: 'application/octet-stream' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name || 'file.bin';
@@ -1703,15 +1712,15 @@ async function handleDecodeUrl() {
   setResultHash(targets);
   setDecProgress(90);
   await decodeBytes(bytes);
-  // 
+
   // decode every file it names, the same path the ⬇ Fetch all button takes, and save each under
   // its own name (the sha256 check inside manifestFetchFile still applies). EVERY master, not only
-  // a `key1+key2` one: he tested a single-id master (`HU3qT6KWMAATiLd`) and got the list.
+
   if (decManifest) {
     const files = decManifest;
     // `(html)` on a master file means "show me the page it lists", not "save every file": fetch the
     // HTML member (the first one whose name says so, else the first file) and replace this document
-    // with it. His real case, 2026-10-17: `#HU3wc4BWgAAf6Xw(html)` lists basket-random-offline.html.
+
     if (hashModeOf(location.hash) === 'html') {
       const pick = files.find((f) => /\.x?html?$/i.test(f.name || '')) || files[0];
       const got = await manifestFetchFile(pick);
@@ -1727,10 +1736,12 @@ async function handleDecodeUrl() {
       return;
     }
     let done = 0;
-    for (const f of files) {
-      const got = await manifestFetchFile(f);
-      if (!got) break;
-      saveBytes(got.bytes, f.name, got.mime);
+    // Several files at once (each one's parts are already fetched in parallel inside fetchParts),
+    // saved in the manifest's order — a multi-file master was the slowest thing on the page.
+    const fetched = await mapLimit(files, PACKAGE_CONCURRENCY, (f) => manifestFetchFile(f));
+    for (let i = 0; i < files.length; i++) {
+      if (!fetched[i]) break;                      // stop at the first failure, as before
+      saveBytes(fetched[i].bytes, files[i].name, fetched[i].mime);
       done++;
     }
     renderHistory();
@@ -1746,8 +1757,9 @@ async function handleDecodeUrl() {
   // is the exception: presentDecoded already said "Master file — N file(s), M part(s)", and this
   // line used to overwrite it with "Loaded Loaded 1.8 KB — application/octet-stream" (measured
   // 2026-10-17 on the real posted master).
-  if (decManifest) {
-    /* the manifest's own status stands */
+  if (decManifest || decPackage || decTt2png) {
+    /* that panel's own status stands: rewriting it here with "Loaded N B — application/json"
+       hid what the user just decoded (measured 2026-10-18 on a real package id) */
   } else if (cachedParts === targets.length) setDecStatus(`${multi ? 'Stitched ' : 'Decoded '}${head} — ${decodedMime} · from cache, no download needed`, 'success');
   else if (tooLarge) setDecStatus(`${multi ? 'Stitched ' : 'Decoded '}${head} — a part was not cached (over ${fmtBytes(CACHE_MAX_FILE)})`, 'warn');
   else if (multi) setDecStatus(`Stitched ${head} — ${decodedMime}`, 'success');
@@ -1763,7 +1775,7 @@ async function handleDecodeUrl() {
 // Decode whatever bytes we ended up with: a codec PNG goes through the pixel decoder;
 // any other file (say a .txt URL) is shown raw rather than failing.
 async function decodeBytes(bytes, depth = 0) {
-  if (depth === 0) { decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; decOversize = null; }
+  if (depth === 0) { decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; decTt2png = null; decPackage = null; decOversize = null; ttAutoFetched = null; ttFile = null; }
   const mime = guessMime(bytes);
   if (mime === 'image/png') {
     // Exact path first: parse the PNG ourselves. Canvas getImageData() PREMULTIPLIES
@@ -1805,6 +1817,36 @@ async function presentDecoded(bytes, depth = 0, fromCodec = false) {
     const parts = decManifest.reduce((n, f) => n + f.parts.length, 0);
     setDecStatus(`Master file — ${decManifest.length} file(s), ${parts} part(s). Decode one to ` +
                  'reassemble it; the names and the order are in this file, not in a `+` link.', 'success');
+    return;
+  }
+  // A tt2png bundle: the payload is an INDEX, not the file. Its bulk is on TikTok's CDN, and
+  // the TikTok links are far too long to be a share token — this PNG is the token.
+  const tt = parseTt2png(bytes);
+  if (tt) {
+    decTt2png = tt;
+    decodedBytes = bytes;
+    decodedMime = 'application/json';
+    showDecodedResult();
+    setDecStatus(`tt2png — ${tt.name}, ${fmtBytes(tt.bytes)} in ${tt.chunks.length} TikTok part(s). ` +
+                 'Reassembling it from TikTok and checking the sha256 in this index …', 'info');
+
+    // button. The button stays for a retry (a TikTok url can expire), and tt2pngAutoFetch() runs
+    // once per index so a re-render or the canvas fallback cannot fetch the same parts twice.
+    const got = await tt2pngAutoFetch();
+    const b = document.querySelector('#dec-body button.btn.primary');
+    if (b) b.textContent = got ? '⬇ Fetch and verify again'
+                               : '⬇ Fetch and verify again (the failure is above)';
+    return;
+  }
+  const pkg = parseTtPackage(bytes);
+  if (pkg) {
+    decPackage = pkg;
+    decodedBytes = bytes;
+    decodedMime = 'application/json';
+    showDecodedResult();
+    setDecStatus(`Package — ${pkg.files.length} file(s) in ${pkg.dirs.length} folder(s), ` +
+                 `${fmtBytes(pkg.total)}. Download restores them from TikTok and checks every sha256.`,
+                 'success');
     return;
   }
   if (mime === 'application/zip' && depth < 3) {
@@ -1864,6 +1906,7 @@ async function decodePngExact(bytes) {
     if (!(bytes && bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47)) return null;
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     let off = 8, w = 0, h = 0, depth = 0, color = 0, interlace = 0;
+    let plte = null, trns = null;
     const idat = [];
     while (off + 8 <= bytes.length) {
       const len = dv.getUint32(off);
@@ -1872,19 +1915,30 @@ async function decodePngExact(bytes) {
       if (type === 'IHDR') {
         w = dv.getUint32(start); h = dv.getUint32(start + 4);
         depth = bytes[start + 8]; color = bytes[start + 9]; interlace = bytes[start + 12];
+      } else if (type === 'PLTE') {
+        plte = bytes.subarray(start, start + len);
+      } else if (type === 'tRNS') {
+        trns = bytes.subarray(start, start + len);
       } else if (type === 'IDAT') {
         idat.push(bytes.subarray(start, start + len));
       } else if (type === 'IEND') break;
       off = start + len + 4;
     }
-    if (depth !== 8 || color !== 6 || interlace !== 0 || !w || !h || !idat.length) return null;
+    // Colour type 3 (palette) is here because X re-encodes a codec PNG as PLTE + tRNS. Canvas is
+    // useless for it: getImageData PREMULTIPLIES, so a 1- or 2-byte tail pixel (alpha 85 / 170)
+    // comes back with its RGB rounded — and a corrupt last byte is enough for the packed payload
+    // to fail its inflate (measured 2026-10-18: the package id decoded to 598 B and was shown as a
+    // binary file instead of the Package). PLTE gives the exact RGB; tRNS gives the byte count.
+    const palette = color === 3 && depth === 8 && plte && plte.length >= 3;
+    if (depth !== 8 || interlace !== 0 || !w || !h || !idat.length) return null;
+    if (color !== 6 && !palette) return null;
     if (w > W || h > H) decOversize = `${w}×${h}`;   // shown as a note on the result, see showDecodedResult
     let zlen = 0; for (const c of idat) zlen += c.length;
     const z = new Uint8Array(zlen);
     let zo = 0; for (const c of idat) { z.set(c, zo); zo += c.length; }
     const stream = new Blob([z]).stream().pipeThrough(new DecompressionStream('deflate'));
     const raw = new Uint8Array(await new Response(stream).arrayBuffer());
-    const bpp = 4, stride = w * bpp;
+    const bpp = palette ? 1 : 4, stride = w * bpp;
     if (raw.length < h * (stride + 1)) return null;
     const px = new Uint8Array(h * stride);
     let p = 0;
@@ -1905,13 +1959,310 @@ async function decodePngExact(bytes) {
         px[row + x] = v & 0xff;
       }
     }
-    return alphaBytes(px);
+    if (!palette) return alphaBytes(px);
+    // The same byte-count rule as alphaBytes(), read from the palette instead of the canvas.
+    const out = [];
+    for (let i = 0; i < px.length; i++) {
+      const idx = px[i];
+      const a = trns && idx < trns.length ? trns[idx] : 255;
+      if (a === 0) break;
+      const at = idx * 3;
+      out.push(plte[at]);
+      if (a >= 255 || (a !== 170 && a !== 85)) out.push(plte[at + 1], plte[at + 2]);
+      else if (a === 170) out.push(plte[at + 1]);
+    }
+    return new Uint8Array(out);
   } catch (e) { return null; }
 }
 
 // The payload bytes of ONE codec PNG: the exact reader first, canvas as the fallback for the
 // re-encoded forms it cannot parse (palette+tRNS, 16-bit, interlaced). Returns null when the bytes
 // are not a PNG at all. The stitcher calls this per part — see handleDecodeUrl.
+// ── tt2png: a file whose bulk lives on TikTok's CDN ──────────────────────────
+// TikTok's chunk URLs run to hundreds of characters of signed query, so they are not what a
+// person shares: the index (this JSON) is. It is small enough for one pbs PNG, so the share
+
+function parseTt2png(bytes) {
+  if (!bytes || bytes.length < 12 || bytes[0] !== 0x7B) return null;   // 0x7B = '{'
+  let text = '';
+  try { text = new TextDecoder().decode(bytes); } catch (e) { return null; }
+  if (text.indexOf('"tool"') < 0 || text.indexOf('tt2png') < 0) return null;
+  try {
+    const j = JSON.parse(text);
+    if (!j || j.tool !== 'tt2png' || !Array.isArray(j.chunks) || !j.chunks.length) return null;
+    if (j.chunks.some((c) => !c || typeof c.url !== 'string' || !c.url)) return null;
+    return j;
+  } catch (e) { return null; }
+}
+
+// Run `fn` over `items` with at most `limit` in flight — the page used to walk a package one file
+
+// would be more efficient"). Limit, not unbounded: 5,000 files must not open 5,000 requests.
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return out;
+}
+
+// ── a PACKAGE: a ttbackup/ttcloud log, i.e. many files and folders ───────────
+// The log is JSON; every entry names the TikTok parts that hold that file. So a pbs PNG of the log
+
+// into a list you can download. Same payload wrapper as a single file, so ttPayload() reads it.
+function parseTtPackage(bytes) {
+  if (!bytes || bytes.length < 12 || bytes[0] !== 0x7B) return null;   // '{'
+  let j;
+  try { j = JSON.parse(new TextDecoder().decode(bytes)); } catch (e) { return null; }
+  if (!j || j.tool !== 'ttbackup' || !j.entries || typeof j.entries !== 'object') return null;
+  const files = [], dirs = [];
+  for (const [path, e] of Object.entries(j.entries)) {
+    if (!e) continue;
+    if (e.type === 'dir') { dirs.push(path); continue; }
+    if (!Array.isArray(e.chunks) || !e.chunks.length) continue;
+    if (e.chunks.some((c) => !c || typeof c.url !== 'string' || !c.url)) continue;
+    files.push({ path, sha256: e.sha256 || '', bytes: e.bytes || 0, chunks: e.chunks });
+  }
+  if (!files.length && !dirs.length) return null;
+  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return { tool: 'ttbackup', created: j.created || '', files, dirs,
+           root: j.root || '', total: files.reduce((n, f) => n + (f.bytes || 0), 0) };
+}
+
+// One package entry → its exact bytes, or an Error with what was wrong. Verifies TWICE: each chunk
+// against the digest the log recorded for it, then the joined file against the file's own sha256.
+async function packageEntryBytes(entry) {
+  const chunks = [...entry.chunks].sort((a, b) => a.index - b.index);
+  // Every chunk of this file at once, then unwrap/inflate/verify IN ORDER (the join must not
+  // depend on which response came back first).
+  const raw = await Promise.all(chunks.map(async (c) => {
+    const r = await fetch(c.url);
+    if (!r.ok) throw new Error(`${entry.path}: chunk ${c.index} — HTTP ${r.status}`);
+    return new Uint8Array(await r.arrayBuffer());
+  }));
+  const bodies = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const c = chunks[i];
+    let body = ttPayload(raw[i]);
+    if (!body) throw new Error(`${entry.path}: chunk ${c.index} is not a wrapped 1x1 PNG`);
+    if (c.gz) {
+      if (!(body[0] === 0x47 && body[1] === 0x5A && body[2] === 0x31)) {
+        throw new Error(`${entry.path}: chunk ${c.index} says gzip but has no GZ1 marker`);
+      }
+      const stream = new Blob([body.subarray(3)]).stream().pipeThrough(new DecompressionStream('deflate'));
+      body = new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+    if (c.sha256_raw) {
+      const got = await sha256Hex(body);
+      if (got && got !== c.sha256_raw) throw new Error(`${entry.path}: chunk ${c.index} digest mismatch`);
+    }
+    bodies.push(body);
+  }
+  const total = bodies.reduce((n, b) => n + b.length, 0);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const b of bodies) { out.set(b, at); at += b.length; }
+  if (entry.sha256) {
+    const got = await sha256Hex(out);
+    if (got && got !== entry.sha256) throw new Error(`${entry.path}: sha256 mismatch`);
+  }
+  return out;
+}
+
+// A STORE-only zip (no compression: the payload was already gzipped per chunk where it helped),
+// so a package lands as ONE download with its folder structure intact.
+const ZIP_CRC = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = ZIP_CRC[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function zipStore(files) {
+  const enc = new TextEncoder();
+  const parts = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.path);
+    const crc = crc32(f.data);
+    const local = new Uint8Array(30 + name.length);
+    const dv = new DataView(local.buffer);
+    dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, 0x0800, true);
+    dv.setUint16(8, 0, true); dv.setUint16(10, 0, true); dv.setUint16(12, 0, true);
+    dv.setUint32(14, crc, true); dv.setUint32(18, f.data.length, true);
+    dv.setUint32(22, f.data.length, true); dv.setUint16(26, name.length, true);
+    local.set(name, 30);
+    const cen = new Uint8Array(46 + name.length);
+    const cv = new DataView(cen.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, f.data.length, true);
+    cv.setUint32(24, f.data.length, true); cv.setUint16(28, name.length, true);
+    cv.setUint32(42, offset, true);
+    cen.set(name, 46);
+    parts.push(local, f.data);
+    central.push(cen);
+    offset += local.length + f.data.length;
+  }
+  let cdSize = 0;
+  for (const c of central) cdSize += c.length;
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdSize, true); ev.setUint32(16, offset, true);
+  const all = [...parts, ...central, end];
+  const total = all.reduce((n, a) => n + a.length, 0);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const a of all) { out.set(a, at); at += a.length; }
+  return out;
+}
+
+// A TikTok chunk is a 1x1 PNG with the payload appended AFTER IEND, so the pixel codec is the
+// wrong reader here: walk the chunk lengths and take everything past IEND. Never search for the
+// bytes 'IEND' — a payload may contain them.
+function ttPayload(png) {
+  if (!png || png.length < 12 || png[0] !== 0x89 || png[1] !== 0x50 || png[2] !== 0x4E) return null;
+  const dv = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  let off = 8;
+  while (off + 12 <= png.length) {
+    const len = dv.getUint32(off);
+    const type = String.fromCharCode(png[off + 4], png[off + 5], png[off + 6], png[off + 7]);
+    if (type === 'IEND') {
+      const start = off + 12 + len;
+      return start <= png.length ? png.slice(start) : null;
+    }
+    off += 12 + len;
+  }
+  return null;
+}
+
+// "it saves every time but I wanted it played in the page". So the reassembled bytes go through
+// the same native renderer a plain decoded payload uses (<video>/<audio>/<img>/<pre>), with a
+// Save button beside it. A type Chromium cannot render (zip, apk, exe) is still saved — there is
+// no other way to hand it over — and the status names that instead of pretending it played.
+function showTt2pngPayload(bytes, mime, name) {
+  const body = document.getElementById('dec-body');
+  if (!body) return null;
+  let host = document.getElementById('tt-payload');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'tt-payload';
+    body.insertBefore(host, body.firstChild);   // the file first, the index's details below it
+  }
+  host.textContent = '';                        // a retry must not stack two players
+  // The panel header was filled from the INDEX by showDecodedResult (`application/json`, 819 B).
+  // Once the file is here it must describe the FILE — a 7.75 MB webm, not the 819 B address.
+  const mimeEl = document.getElementById('dec-mime');
+  const sizeEl = document.getElementById('dec-size');
+  if (mimeEl) mimeEl.textContent = mime;
+  if (sizeEl) sizeEl.textContent = fmtBytes(bytes.length);
+  ttFile = { bytes, name, mime };
+  // The Save row comes FIRST: under a full-width video it pushed itself off the screen.
+  const save = document.createElement('button');
+  save.className = 'btn tt-save';
+  save.textContent = `⬇ Save ${name}`;
+  save.addEventListener('click', () => saveBytes(bytes, name, mime));
+  const tools = document.createElement('div');
+  tools.className = 'hist-tools';
+  tools.appendChild(save);
+  host.appendChild(tools);
+  const el = resultElement(document, bytes, mime);
+  if (el) {
+    el.className = 'decode-media';
+    host.appendChild(el);
+    // Chrome only autoplays SOUND after a gesture, and this page has just loaded. Muted play makes
+    // the picture move on its own; the speaker icon is one click away, and the note says why.
+    if (typeof el.play === 'function') {
+      el.play().catch(() => {
+        el.muted = true;
+        el.play().catch(() => {});
+        const hint = document.createElement('div');
+        hint.className = 'zip-note';
+        hint.textContent = 'Muted: the browser blocks sound without a click — use the speaker icon.';
+        host.appendChild(hint);
+      });
+    }
+  }
+  if (!el) {
+    const note = document.createElement('div');
+    note.className = 'zip-note';
+    note.textContent = `${name} is ${mime} — Chromium cannot show it, so it was saved instead.`;
+    host.appendChild(note);
+    saveBytes(bytes, name, mime);
+  }
+  return el;
+}
+
+// Fetch every TikTok part, strip the wrapper, join in the order the index records, and check
+// the whole file's sha256 before showing anything.
+// Decoding an index fetches it — ONCE. The index object itself is the key, so the second call
+// (the render, a retry from the canvas fallback) is a no-op rather than a second 8 MB download.
+let ttAutoFetched = null;
+// The FILE an index resolved to, once it is here. `decodedBytes` is still the index JSON, so the
+// panel's own Download button must be pointed at this instead of saving 819 B of address.
+let ttFile = null;
+async function tt2pngAutoFetch() {
+  const t = decTt2png;
+  if (!t || ttAutoFetched === t) return null;
+  ttAutoFetched = t;
+  return tt2pngFetchAll();
+}
+
+async function tt2pngFetchAll() {
+  const t = decTt2png;
+  if (!t) return null;
+  const urls = t.chunks.map((c) => c.url);
+  setDecStatus(`tt2png — fetching ${urls.length} part(s) from TikTok, ${fmtBytes(t.bytes)} to assemble`, 'info');
+  let got = await fetchParts(urls, `Fetching ${t.name} from TikTok`);
+  // ONE retry. The CDN does close a connection now and then — measured 2026-10-18, part 1/2 of a
+  // 5 MB webm came back net::ERR_CONNECTION_CLOSED and the same url served it seconds later. Now
+  // that the fetch is automatic nobody is watching for that blip, and one lost part costs the
+  // whole file. Parts that already landed are cached, so the retry only re-fetches what failed.
+  if (got.error) {
+    setDecStatus(`${got.error} — retrying once`, 'info');
+    got = await fetchParts(urls, `Retrying ${t.name} from TikTok`);
+  }
+  if (got.error) { setDecStatus(got.error, 'error'); return null; }
+  const payloads = got.parts.map(ttPayload);
+  const bad = payloads.findIndex((p) => p === null);
+  if (bad >= 0) {
+    setDecStatus(`tt2png — part ${bad + 1}/${urls.length} is not a wrapped 1x1 PNG: TikTok re-encoded it`, 'error');
+    return null;
+  }
+  const bytes = payloads.length === 1 ? payloads[0] : concatParts(payloads);
+  const digest = await sha256Hex(bytes);
+  if (digest && t.sha256 && digest !== t.sha256) {
+    setDecStatus(`tt2png — sha256 mismatch: the index records ${t.sha256.slice(0, 12)}…, the ` +
+                 `${urls.length} TikTok part(s) hash to ${digest.slice(0, 12)}… (${fmtBytes(bytes.length)})`, 'error');
+    return null;
+  }
+  if (t.bytes && bytes.length !== t.bytes) {
+    setDecStatus(`tt2png — the index records ${fmtBytes(t.bytes)} but the parts hold ${fmtBytes(bytes.length)}`, 'warn');
+  }
+  const mime = mimeFromName(t.name) || guessMime(bytes);
+  const el = showTt2pngPayload(bytes, mime, t.name);
+  setDecStatus(`tt2png — ${t.name}, ${fmtBytes(bytes.length)} reassembled from ${urls.length} TikTok part(s)` +
+               (digest ? `, sha256 ${digest.slice(0, 12)}… verified` : ' (no crypto.subtle here: unverified)') +
+               (el ? ' — decoded below' : ` — ${mime} cannot be shown, so it was saved as ${t.name}`),
+               el ? 'success' : 'warn');
+  renderHistory();
+  return bytes;
+}
+
 async function codecPayload(pngBytes) {
   const exact = await decodePngExact(pngBytes);
   if (exact) return exact;
@@ -2006,7 +2357,6 @@ function readZipEntries(bytes) {
   return entries;
 }
 
-// ── the compressed container (
 // A file that compresses is stored deflated, with a 9-byte header so the decoder can tell:
 //   "B2PZ" + codec byte (1 = zlib deflate) + 4-byte original length (big endian) + deflate stream
 // It is only used when it actually wins (compressed + 9 < raw). A payload that merely STARTS with
@@ -2014,6 +2364,8 @@ function readZipEntries(bytes) {
 // rejected and the bytes are presented as they are.
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];
 const PACK_HEADER = 9;
+// how many files a package restore keeps in flight (each file also fetches its chunks at once)
+const PACKAGE_CONCURRENCY = 6;
 function isPacked(bytes) {
   return !!(bytes && bytes.length > PACK_HEADER
             && bytes[0] === PACK_MAGIC[0] && bytes[1] === PACK_MAGIC[1]
@@ -2116,6 +2468,127 @@ async function sha256Hex(bytes) {
     return null;
   }
 }
+function renderPackageBody(body) {
+  const p = decPackage;
+  const note = document.createElement('div');
+  note.className = 'zip-note';
+  note.textContent = `${p.files.length} file(s), ${p.dirs.length} folder(s), ${fmtBytes(p.total)}` +
+                     (p.created ? ` · ${p.created}` : '') + (p.root ? ` · from ${p.root}` : '');
+  body.appendChild(note);
+  const tools = document.createElement('div');
+  tools.className = 'hist-tools';
+  const btn = document.createElement('button');
+  btn.className = 'btn primary';
+  btn.textContent = `⬇ Download all ${p.files.length} file(s) as one .zip`;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const got = [], bad = [];
+    let landed = 0;
+    setDecStatus(`Package — restoring ${p.files.length} file(s), ${PACKAGE_CONCURRENCY} at a time`, 'info');
+    const results = await mapLimit(p.files, PACKAGE_CONCURRENCY, async (f) => {
+      try {
+        const data = await packageEntryBytes(f);
+        landed++;
+        setDecStatus(`Package — ${landed}/${p.files.length} restored (${f.path})`, 'info');
+        return { path: f.path, data };
+      } catch (e) {
+        bad.push(String(e.message || e));
+        return null;
+      }
+    });
+    // in the package's own order, whatever order the network finished in
+    for (const r of results) if (r) got.push(r);
+    for (const d of p.dirs) got.push({ path: d.endsWith('/') ? d : d + '/', data: new Uint8Array(0) });
+    if (!got.length) {
+      setDecStatus('Package — nothing could be verified: ' + bad.join('; '), 'error');
+      btn.disabled = false;
+      return;
+    }
+    const name = (p.root ? p.root.split('/').filter(Boolean).pop() : 'package') || 'package';
+    saveBytes(zipStore(got), `${name}.zip`, 'application/zip');
+    setDecStatus(`Package — ${got.length - p.dirs.length} file(s) downloaded as ${name}.zip` +
+                 (bad.length ? `, ${bad.length} FAILED: ` + bad.slice(0, 3).join('; ') : ''),
+                 bad.length ? 'warn' : 'success');
+    btn.disabled = false;
+    btn.textContent = `⬇ Download all ${p.files.length} file(s) again`;
+  });
+  tools.appendChild(btn);
+  body.appendChild(tools);
+  const list = document.createElement('div');
+  list.className = 'zip-list';
+  p.files.forEach((f) => {
+    const row = document.createElement('div');
+    row.className = 'zip-row';
+    const nm = document.createElement('span');
+    nm.className = 'zip-name';
+    nm.textContent = f.path;
+    const sz = document.createElement('span');
+    sz.className = 'zip-size';
+    sz.textContent = fmtBytes(f.bytes || 0);
+    row.appendChild(nm); row.appendChild(sz);
+    list.appendChild(row);
+  });
+  p.dirs.forEach((d) => {
+    const row = document.createElement('div');
+    row.className = 'zip-row';
+    const nm = document.createElement('span');
+    nm.className = 'zip-name';
+    nm.textContent = d + (d.endsWith('/') ? '' : '/');
+    const sz = document.createElement('span');
+    sz.className = 'zip-size';
+    sz.textContent = 'folder';
+    row.appendChild(nm); row.appendChild(sz);
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+}
+
+function renderTt2pngBody(body) {
+  const t = decTt2png;
+  const note = document.createElement('div');
+  note.className = 'zip-note';
+  note.textContent = `${t.name} — ${fmtBytes(t.bytes)}, held as ${t.chunks.length} 1×1 PNG(s) of ` +
+                     `${fmtBytes(t.chunk_size || 0)} each on TikTok's CDN` + (t.created ? ` · ${t.created}` : '');
+  body.appendChild(note);
+  const sum = document.createElement('div');
+  sum.className = 'zip-note';
+  sum.textContent = t.sha256 ? `sha256 ${t.sha256} — checked after the TikTok parts are joined`
+                             : 'no sha256 in this index, so the assembled file cannot be checked';
+  body.appendChild(sum);
+  const tools = document.createElement('div');
+  tools.className = 'hist-tools';
+  const btn = document.createElement('button');
+  btn.className = 'btn primary';
+  btn.textContent = `⬇ Fetch ${t.chunks.length} part(s) from TikTok and verify`;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    const got = await tt2pngFetchAll();
+    btn.textContent = got ? '⬇ Fetch and verify again' : '⬇ Fetch and verify again (the failure is above)';
+    btn.disabled = false;
+  });
+  tools.appendChild(btn);
+  body.appendChild(tools);
+  const list = document.createElement('div');
+  list.className = 'zip-list';
+  t.chunks.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'zip-row';
+    const name = document.createElement('span');
+    name.className = 'zip-name';
+    let host = 'tiktok cdn';
+    try { host = new URL(c.url).host; } catch (e) { /* keep the fallback */ }
+    name.textContent = `${i + 1}/${t.chunks.length}  ${host}`;
+    row.appendChild(name);
+    const size = document.createElement('span');
+    size.className = 'zip-size';
+    size.textContent = fmtBytes(c.size || 0);
+    if (c.sha256) size.title = 'sha256 ' + c.sha256;
+    row.appendChild(size);
+    list.appendChild(row);
+  });
+  body.appendChild(list);
+}
+
 function renderManifestBody(body) {
   const files = decManifest || [];
   const total = files.reduce((n, f) => n + f.parts.length, 0);
@@ -2128,11 +2601,12 @@ function renderManifestBody(body) {
   all.textContent = `⬇ Fetch all ${files.length} file(s)`;
   all.addEventListener('click', async () => {
     all.disabled = true;
-    for (const f of files) {
+    let saved = 0;
+    await mapLimit(files, PACKAGE_CONCURRENCY, async (f) => {
       const got = await manifestFetchFile(f);
-      if (!got) break;
-      all.textContent = `⬇ saved ${f.name}`;
-    }
+      if (got) { saved++; all.textContent = `⬇ saved ${saved}/${files.length} — ${f.name}`; }
+      return got;
+    });
     all.textContent = '⬇ Fetch all again';
     all.disabled = false;
     renderHistory();
@@ -2377,7 +2851,7 @@ function selectedHistory(rows) {
 // `file` blocks come straight from the urls each entry already carries, so NOTHING IS FETCHED:
 // both buttons work with the network unplugged and a cached entry is no special case.
 //
-// HIS RULE, 2026-10-17: "the encoded png is the encoded master file … not each file encoded".
+
 // So `Download encoded` encodes THIS text, never each file the text names. A stitched entry is
 // listed as its parts, so a stitched file and a plain one read the same way.
 function historyMasterFile(rows) {
@@ -2470,7 +2944,7 @@ async function renderHistory() {
     b.addEventListener('click', fn);
     tools.appendChild(b);
   };
-  // EXACTLY TWO, and each is the master file in one of its two states — his rule 2026-10-17, so
+
   // there is nothing to disambiguate (the old three said master / OG / encoded).
   mk('⬇ Download predecoded', 'The master file itself — the .bin2png text listing every ticked entry', historyDownloadPredecoded);
   mk('⬇ Download encoded', 'The SAME master file through the codec, as PNG part(s) ready to post', historyDownloadEncoded);
@@ -2492,7 +2966,7 @@ async function renderHistory() {
     const id = document.createElement('div'); id.className = 'hist-id';
     // The NAME the file would be saved as, when the entry knows one (a manifest carries it).
     // BOTH, when the row came from a master file: the file name is the useful half, the media id
-    // is the handle (
+
     id.textContent = r.name ? `📄 ${r.name} · ${r.mediaId || r.url}` : (r.mediaId || r.url);   // untrusted -> textContent
     id.title = r.url;
     main.appendChild(id);
@@ -2556,7 +3030,7 @@ function guessMime(bytes) {
   if (sig(0, 0x4D, 0x5A)) return 'application/x-msdownload';
   // Try text. NOT "every byte is ASCII 32..126": a real HTML file has a UTF-8 em dash or an
   // accented name in its first 512 bytes, and that used to make a whole web page come back as
-  // application/octet-stream — a `.bin` download instead of the page (
+
   // basket-random-offline.html). A NUL still means binary; a few control bytes are tolerated.
   const sample = bytes.slice(0, 4096);
   let ctrl = 0;
@@ -2601,6 +3075,26 @@ function showDecodedResult() {
 
   const body = document.getElementById('dec-body');
   body.innerHTML = '';
+
+  if (decPackage) {
+    document.getElementById('dec-filename').textContent =
+      (decPackage.root ? decPackage.root.split('/').filter(Boolean).pop() : 'package') + ' (package)';
+    renderPackageBody(body);
+    document.getElementById('dec-result').style.display = 'block';
+    document.getElementById('dec-actions').style.display = 'flex';
+    // The caller (#id) rewrites the status line, so say it here, where the panel is rendered.
+    setDecStatus(`Package — ${decPackage.files.length} file(s) in ${decPackage.dirs.length} ` +
+                 `folder(s), ${fmtBytes(decPackage.total)}. Download restores them from TikTok ` +
+                 'and checks every sha256.', 'success');
+    return;
+  }
+  if (decTt2png) {
+    document.getElementById('dec-filename').textContent = decTt2png.name;
+    renderTt2pngBody(body);
+    document.getElementById('dec-result').style.display = 'block';
+    document.getElementById('dec-actions').style.display = 'flex';
+    return;
+  }
 
   if (decManifest) {
     document.getElementById('dec-filename').textContent = 'master file';
@@ -2653,7 +3147,7 @@ function showDecodedResult() {
     // XSS defence for text files — nothing decoded is ever parsed as markup.
     code.textContent = text;
     pre.appendChild(code);
-    // 
+
     // say what it is and offer the new tab, which is `(html)` on the same address.
     if (mime === 'text/html' && !hashModeOf(location.hash)) {
       const note = document.createElement('div');
@@ -2698,16 +3192,16 @@ function showDecodedResult() {
 }
 
 function downloadDecoded() {
+  // An index's Download button means the FILE it names, not the index itself.
+  if (ttFile) { saveBytes(ttFile.bytes, ttFile.name, ttFile.mime); return; }
   if (!decodedBytes) return;
-  const blob = new Blob([decodedBytes], {type: decodedMime});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `decoded.${mimeExt(decodedMime)}`;
-  a.click();
+  // Through saveBytes, so the panel's Download is a SAVE like every other one on the page.
+  saveBytes(decodedBytes, `decoded.${mimeExt(decodedMime)}`, decodedMime);
 }
 
 function clearDecode() {
-  decodedBytes = null; decodedMime = null; decManifest = null;
+  decodedBytes = null; decodedMime = null; decManifest = null; decTt2png = null; decPackage = null;
+  ttAutoFetched = null; ttFile = null;
   document.getElementById('dec-result').style.display = 'none';
   document.getElementById('dec-actions').style.display = 'none';
   document.getElementById('dec-file-input').value = '';
