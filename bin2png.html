@@ -918,7 +918,8 @@ let hashInFlight = false;
 async function decodeFromHash() {
   const src = hashBody(location.hash);
   if (!src || hashInFlight) return;
-  if (!parseMediaIds(src)) return;
+  // A dictionary NAME is an address too — `#yakusoku.mp4` has no media id until it is resolved.
+  if (!parseMediaIds(src) && !src.split('+').some(isNameToken)) return;
   // `(newtab)`: this page is only the launcher — the new tab decodes and renders. Opening here,
   // synchronously from the load/hashchange, is the only way a popup is not blocked.
   const mode0 = hashModeOf(location.hash);
@@ -956,6 +957,9 @@ function hashToken(u) {
   return m ? m[1] : String(u || '');
 }
 function setResultHash(urls) {
+  // Opened by NAME: the address stays the name. Rewriting it to the bare id would throw away the
+  // only part of the link a person can remember, and `#<id>` still works for whoever needs it.
+  if (idsOpenName) return;
   const body = (urls || []).map(hashToken).filter(Boolean).join('+');
   if (!body) return;
   // A mode belongs to the ADDRESS, not to the payload: keep `(newtab)`/`(openfull)` when the hash
@@ -1668,7 +1672,13 @@ async function fetchImageBytes(url) {
 }
 
 async function handleDecodeUrl() {
-  const raw = document.getElementById('dec-url').value;
+  // A NAME is resolved before anything else touches the input, so everything downstream — stitch,
+  // history, modes like `(openfull)` — behaves exactly as if the id had been typed.
+  idsOpenName = null;
+  const names = await resolveNameTokens(document.getElementById('dec-url').value);
+  if (names.error) { setDecStatus(names.error, 'error'); setDecProgress(-1); return; }
+  if (names.resolved.length) idsOpenName = document.getElementById('dec-url').value.trim();
+  const raw = names.raw;
   const targets = parseMediaIds(raw);
   if (!targets) {
     setDecStatus('Could not parse URL or media ID. Try: HIAXGy_XAAAPsen, a pbs.twimg.com URL, any https:// file URL, or several media ids joined with + (key1+key2)', 'error');
@@ -1770,6 +1780,14 @@ async function handleDecodeUrl() {
   // Only now, with the state saved: `(openfull)` replaces this page, `(newtab)` fills the tab that
   // was opened before the decode even started.
   deliverResultIfRequested();
+  // Say which name was opened, after the branches above have had their say — the id itself is
+  // useful to see once (it can be pasted anywhere the name is not known).
+  if (names.resolved.length) {
+    const el = document.getElementById('dec-status');
+    if (el && !/IDSDICTIONARY/.test(el.textContent)) {
+      el.textContent += ` · IDSDICTIONARY: ${names.resolved.map(([n, p]) => `${n} → ${p}`).join(', ')}`;
+    }
+  }
 }
 
 // Decode whatever bytes we ended up with: a codec PNG goes through the pixel decoder;
@@ -2632,6 +2650,169 @@ function parseManifest(bytes) {
   return out;
 }
 
+// ── IDSDICTIONARY: a file NAME is the key to a pbs id ─────────────────────────
+
+// `bin2png.html#yakusoku.mp4`: the name is sha256'd to find its line in IDSDICTIONARY.txt, and the
+// id on that line is decrypted with the SAME name. One thing to remember, nothing extra to share.
+// The file never names a file, so it does not reveal what is in it — but the name IS the secret,
+// so anything private needs an unguessable name. This is obfuscation with a shared secret, not
+// access control, and the plan doc says so in the same words.
+const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
+const IDS_VERSION = 'v1';
+const IDS_ITERATIONS = 100000;
+const IDS_IV = 12, IDS_TAG = 16;
+// The notes an exported dictionary carries. Kept character-for-character equal to idsdictionary.py's
+// NOTES block, and the suite compares the two — a format that drifts between the page and the CLI
+// is the one failure nobody would notice until a record could not be opened.
+const IDS_NOTES = `# IDSDICTIONARY — file name → pbs id, for bin2png.
+#
+# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4
+# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line
+# with the same name — so a renamed file cannot open its own record, and the file itself never
+# says which names exist.
+#
+# One record per line, \`#\` lines are notes:
+#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>
+#
+# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an
+# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's
+# "Save IDSDICTIONARY.txt" button; both write this same format.
+#
+# Not access control: the name is the secret. Use an unguessable name for anything private.`;
+
+function b64uEncode(bytes) {
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64uDecode(text) {
+  const pad = text.length % 4 ? '='.repeat(4 - (text.length % 4)) : '';
+  const bin = atob(text.replace(/-/g, '+').replace(/_/g, '/') + pad);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function idsNoCrypto() {
+  return typeof crypto === 'undefined' || !crypto.subtle;
+}
+// PBKDF2-HMAC-SHA256, salt = sha256(secret) — the same call idsdictionary.py makes.
+async function idsKey(name, passphrase = '') {
+  if (idsNoCrypto()) throw new Error('this origin has no crypto.subtle, so a dictionary name cannot be opened here');
+  const secret = new TextEncoder().encode(name + (passphrase ? '\u0000' + passphrase : ''));
+  const salt = new Uint8Array(await crypto.subtle.digest('SHA-256', secret));
+  const base = await crypto.subtle.importKey('raw', secret, 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: IDS_ITERATIONS, hash: 'SHA-256' }, base, 256);
+  return new Uint8Array(bits);
+}
+async function idsHmac(key, data) {
+  const k = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', k, data));
+}
+// HMAC-SHA256(key, iv ‖ counter) XORed onto the bytes — encryption and decryption are this call.
+async function idsXor(key, iv, data) {
+  const out = new Uint8Array(data.length);
+  let counter = 0, at = 0;
+  while (at < data.length) {
+    const block = new Uint8Array(iv.length + 4);
+    block.set(iv, 0);
+    new DataView(block.buffer).setUint32(iv.length, counter, false);
+    const ks = await idsHmac(key, block);
+    for (let i = 0; i < ks.length && at < data.length; i++, at++) out[at] = data[at] ^ ks[i];
+    counter++;
+  }
+  return out;
+}
+async function idsEncryptId(name, pbsId, passphrase = '') {
+  const key = await idsKey(name, passphrase);
+  const iv = crypto.getRandomValues(new Uint8Array(IDS_IV));
+  const ct = await idsXor(key, iv, new TextEncoder().encode(pbsId));
+  const tag = (await idsHmac(key, concatParts([iv, ct]))).subarray(0, IDS_TAG);
+  return b64uEncode(concatParts([iv, ct, tag]));
+}
+async function idsDecryptId(name, payloadB64, passphrase = '') {
+  const raw = b64uDecode(payloadB64);
+  if (raw.length < IDS_IV + IDS_TAG) throw new Error('the record is too short to hold an iv and a tag');
+  const iv = raw.subarray(0, IDS_IV);
+  const ct = raw.subarray(IDS_IV, raw.length - IDS_TAG);
+  const tag = raw.subarray(raw.length - IDS_TAG);
+  const key = await idsKey(name, passphrase);
+  const want = (await idsHmac(key, concatParts([iv, ct]))).subarray(0, IDS_TAG);
+  let same = tag.length === want.length;
+  for (let i = 0; same && i < tag.length; i++) same = tag[i] === want[i];
+  if (!same) throw new Error('the tag does not check — this name is not the key for that record');
+  return new TextDecoder().decode(await idsXor(key, iv, ct));
+}
+let idsDictCache = null;
+// The name this decode was opened by, so the address keeps it (see setResultHash).
+let idsOpenName = null;
+async function idsDictRecords() {
+  if (idsDictCache) return idsDictCache;
+  const url = new URL(IDS_DICT_FILE, location.href).href;
+  let res;
+  try { res = await fetch(url); }
+  catch (e) { throw new Error(`cannot read ${IDS_DICT_FILE} (${e.message}) — looked at ${url}`); }
+  if (!res.ok) throw new Error(`no ${IDS_DICT_FILE} next to this page (HTTP ${res.status}) — looked at ${url}`);
+  const map = new Map();
+  for (const line of (await res.text()).split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    const parts = t.split(/\s+/);
+    if (parts.length !== 3 || parts[0] !== IDS_VERSION) continue;
+    map.set(parts[1], parts[2]);
+  }
+  idsDictCache = map;
+  return map;
+}
+// A name → its pbs id, or a thrown Error that says exactly what was wrong.
+async function idsResolve(name) {
+  const hash = await sha256Hex(new TextEncoder().encode(name));
+  if (!hash) throw new Error('sha256 is unavailable on this origin');
+  const payload = (await idsDictRecords()).get(hash);
+  if (!payload) throw new Error(`${name} is not in ${IDS_DICT_FILE} (its hash starts ${hash.slice(0, 12)}…)`);
+  return idsDecryptId(name, payload);
+}
+// A record's plaintext is a bare id, `id+id` for a stitched file, or full urls — all three are the
+// normal decode input, so one expansion covers every shape the export can write.
+function idsExpand(plain) {
+  const t = String(plain || '').trim();
+  if (!t) throw new Error('the record decrypted to nothing');
+  if (/^https?:/i.test(t)) return t;
+  return t.split('+').map((k) => {
+    const id = k.trim();
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`the record decrypted to something that is not a pbs id: ${id.slice(0, 24)}`);
+    return `https://pbs.twimg.com/media/${id}?format=png`;
+  }).join('+');
+}
+// `name:foo` / `n:foo` forces a dictionary lookup, `id:HU8…` forces an id. Anything else with a dot
+// is a name; a pbs id is 15 chars of [A-Za-z0-9_-] and never has one.
+const IDS_NAME_PREFIX = /^(?:n|name):/i;
+const IDS_ID_PREFIX = /^id:/i;
+function isNameToken(tok) {
+  const t = String(tok || '').trim();
+  if (!t || /^https?:/i.test(t) || IDS_ID_PREFIX.test(t)) return false;
+  if (IDS_NAME_PREFIX.test(t)) return true;
+  return /\./.test(t) && !/^[A-Za-z0-9_-]{10,}$/.test(t);
+}
+// Resolve the names in a `+`-joined input to pbs urls, keeping the parts in order.
+async function resolveNameTokens(raw) {
+  const parts = String(raw || '').split('+').map((s) => s.trim()).filter(Boolean);
+  const out = [], resolved = [];
+  for (const p of parts) {
+    if (IDS_ID_PREFIX.test(p)) { out.push(p.replace(IDS_ID_PREFIX, '')); continue; }
+    if (!isNameToken(p)) { out.push(p); continue; }
+    const name = p.replace(IDS_NAME_PREFIX, '');
+    try {
+      const plain = await idsResolve(name);
+      resolved.push([name, plain]);
+      out.push(idsExpand(plain));
+    } catch (e) {
+      return { error: `IDSDICTIONARY — ${e.message}` };
+    }
+  }
+  return { raw: out.join('+'), resolved };
+}
+
 // sha256 of the bytes a master file names, to check them against the digest it records.
 // The digest is metadata, not a requirement: no crypto.subtle (an insecure origin) answers null
 // and the download goes ahead. Only a MISMATCH stops a save.
@@ -3173,6 +3354,34 @@ async function historyDownloadEncoded() {
   setDecStatus(`Encoded master file — ${m.name} (${fmtBytes(m.bytes.length)}) → ${parts} PNG part(s) saved. Post them IN ORDER; the PNG decodes back to this same master file.`, 'success');
 }
 
+// Save IDSDICTIONARY.txt — one record per named entry in the history, each encrypted under a key
+// derived from THAT entry's own name, so no two records share a key. Nothing here is secret: the
+// names themselves are the secret, and the file is meant to be published next to the page.
+async function historySaveDictionary() {
+  const rows = await historyAll();
+  const byName = new Map();
+  for (const r of rows) {
+    if (!r.name) continue;
+    const urls = recordPartUrls(r).length ? recordPartUrls(r) : (r.url ? [r.url] : []);
+    if (!urls.length) continue;
+    const prev = byName.get(r.name);
+    if (prev && (prev.at || 0) >= (r.fetchedAt || 0)) continue;   // newest entry per name wins
+    byName.set(r.name, { at: r.fetchedAt || 0, plain: urls.map(hashToken).join('+') });
+  }
+  if (!byName.size) {
+    setDecStatus('No history entry carries a file name yet — names come from a master file or an archive listing. Decode one, then save the dictionary.', 'warn');
+    return;
+  }
+  const lines = [IDS_NOTES, ''];
+  for (const [name, v] of [...byName].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const hash = await sha256Hex(new TextEncoder().encode(name));
+    if (!hash) { setDecStatus('This origin has no crypto.subtle, so records cannot be made here — use idsdictionary.py.', 'error'); return; }
+    lines.push(`${IDS_VERSION} ${hash} ${await idsEncryptId(name, v.plain)}`);
+  }
+  saveBytes(new TextEncoder().encode(lines.join('\n') + '\n'), IDS_DICT_FILE, 'text/plain');
+  setDecStatus(`IDSDICTIONARY.txt — ${byName.size} name(s), each with its own key. Put it beside the page and open #<name> instead of #<id>.`, 'success');
+}
+
 // The list under the decoder: newest first, each with a tick box, the name it would be saved as,
 // and a Fetch now button. Fetch now re-runs the normal decode, which is cache-first — so a cached
 // entry needs no network at all.
@@ -3215,6 +3424,9 @@ async function renderHistory() {
   // there is nothing to disambiguate (the old three said master / OG / encoded).
   mk('⬇ Download predecoded', 'The master file itself — the .bin2png text listing every ticked entry', historyDownloadPredecoded);
   mk('⬇ Download encoded', 'The SAME master file through the codec, as PNG part(s) ready to post', historyDownloadEncoded);
+  // Not a master file: the keyring. Every named entry in the history, as one publishable
+
+  mk('🔑 Save IDSDICTIONARY.txt', 'Every named entry in this history as a published keyring — one record per name, each encrypted with a key derived from its own name', historySaveDictionary);
   const stale = wrap.querySelector('.hist-tools');
   if (stale) stale.remove();          // re-render must not stack toolbars
   wrap.insertBefore(tools, listEl);
