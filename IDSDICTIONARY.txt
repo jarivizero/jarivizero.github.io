@@ -1,0 +1,16 @@
+# IDSDICTIONARY — file name → pbs id, for bin2png.
+#
+# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4
+# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line
+# with the same name — so a renamed file cannot open its own record, and the file itself never
+# says which names exist.
+#
+# One record per line, `#` lines are notes:
+#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>
+#
+# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an
+# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's
+# "Save IDSDICTIONARY.txt" button; both write this same format.
+#
+# Not access control: the name is the secret. Use an unguessable name for anything private.
+v1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 Hpg2cv9an5_5XWsi_4wNGqTn2uzoPdDVN6eCn2QJatXmGRCjWjZbHwZ85w
