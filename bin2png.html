@@ -1775,7 +1775,7 @@ async function handleDecodeUrl() {
 // Decode whatever bytes we ended up with: a codec PNG goes through the pixel decoder;
 // any other file (say a .txt URL) is shown raw rather than failing.
 async function decodeBytes(bytes, depth = 0) {
-  if (depth === 0) { decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; decTt2png = null; decPackage = null; decOversize = null; ttAutoFetched = null; ttFile = null; }
+  if (depth === 0) { decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; decTt2png = null; decPackage = null; decOversize = null; ttAutoFetched = null; ttFile = null; ttRawJson = ''; }
   const mime = guessMime(bytes);
   if (mime === 'image/png') {
     // Exact path first: parse the PNG ourselves. Canvas getImageData() PREMULTIPLIES
@@ -1826,6 +1826,7 @@ async function presentDecoded(bytes, depth = 0, fromCodec = false) {
     decTt2png = tt;
     decodedBytes = bytes;
     decodedMime = 'application/json';
+    ttRawJson = new TextDecoder().decode(bytes);   // verbatim, for the Raw manifest button
     showDecodedResult();
     setDecStatus(`tt2png — ${tt.name}, ${fmtBytes(tt.bytes)} in ${tt.chunks.length} TikTok part(s). ` +
                  'Reassembling it from TikTok and checking the sha256 in this index …', 'info');
@@ -2198,11 +2199,13 @@ function showTt2pngPayload(bytes, mime, name) {
     }
   }
   if (!el) {
+    // NEVER save on its own. A 75 MB zip index used to start a download the moment it decoded
+
     const note = document.createElement('div');
     note.className = 'zip-note';
-    note.textContent = `${name} is ${mime} — Chromium cannot show it, so it was saved instead.`;
+    note.textContent = `${name} is ${mime} — Chromium cannot show it here. Use the Save button ` +
+                       'above when you want the file.';
     host.appendChild(note);
-    saveBytes(bytes, name, mime);
   }
   return el;
 }
@@ -2215,6 +2218,9 @@ let ttAutoFetched = null;
 // The FILE an index resolved to, once it is here. `decodedBytes` is still the index JSON, so the
 // panel's own Download button must be pointed at this instead of saving 819 B of address.
 let ttFile = null;
+// The index text EXACTLY as it arrived (B2PZ already unpacked) — the Raw manifest button shows it
+// rather than re-serialising the parsed object, so nothing is lost in the round trip.
+let ttRawJson = '';
 async function tt2pngAutoFetch() {
   const t = decTt2png;
   if (!t || ttAutoFetched === t) return null;
@@ -2257,7 +2263,7 @@ async function tt2pngFetchAll() {
   const el = showTt2pngPayload(bytes, mime, t.name);
   setDecStatus(`tt2png — ${t.name}, ${fmtBytes(bytes.length)} reassembled from ${urls.length} TikTok part(s)` +
                (digest ? `, sha256 ${digest.slice(0, 12)}… verified` : ' (no crypto.subtle here: unverified)') +
-               (el ? ' — decoded below' : ` — ${mime} cannot be shown, so it was saved as ${t.name}`),
+               (el ? ' — decoded below' : ` — ${mime} cannot be shown here; Save is a click`),
                el ? 'success' : 'warn');
   renderHistory();
   return bytes;
@@ -2555,6 +2561,37 @@ function renderTt2pngBody(body) {
   sum.textContent = t.sha256 ? `sha256 ${t.sha256} — checked after the TikTok parts are joined`
                              : 'no sha256 in this index, so the assembled file cannot be checked';
   body.appendChild(sum);
+  // WHAT IS INSIDE, when the index carries it: tiktokupload.py lists an archive's members (name,
+
+  const inside = Array.isArray(t.files) ? t.files : null;
+  if (inside) {
+    const head = document.createElement('div');
+    head.className = 'zip-note';
+    const listed = t.files_total && t.files_total > inside.length
+      ? `${inside.length} of ${t.files_total} file(s)` : `${inside.length} file(s)`;
+    const total = t.files_bytes || inside.reduce((n, f) => n + (f.size || 0), 0);
+    head.textContent = `Inside: ${listed}, ${fmtBytes(total)} uncompressed`;
+    body.appendChild(head);
+    const fl = document.createElement('div');
+    fl.className = 'zip-list';
+    for (const f of inside) {
+      const row = document.createElement('div');
+      row.className = 'zip-row';
+      const nm = document.createElement('span');
+      nm.className = 'zip-name';
+      nm.textContent = (f.dir ? '📁 ' : '📄 ') + f.path;
+      row.appendChild(nm);
+      const sz = document.createElement('span');
+      sz.className = 'zip-size';
+      sz.textContent = f.dir ? 'folder' : fmtBytes(f.size || 0);
+      const when = f.modified || '';
+      if (when) sz.title = `modified ${when}` + (f.sha256 ? ` · sha256 ${f.sha256}` : '');
+      else if (f.sha256) sz.title = `sha256 ${f.sha256}`;
+      row.appendChild(sz);
+      fl.appendChild(row);
+    }
+    body.appendChild(fl);
+  }
   const tools = document.createElement('div');
   tools.className = 'hist-tools';
   const btn = document.createElement('button');
@@ -2567,6 +2604,24 @@ function renderTt2pngBody(body) {
     btn.disabled = false;
   });
   tools.appendChild(btn);
+
+  // The index is rarely worth reading on its own, but with an archive's listing inside it is the
+  // only place the whole metadata is visible. textContent, never innerHTML — it is untrusted input.
+  const raw = document.createElement('button');
+  raw.className = 'btn';
+  raw.id = 'tt-raw-btn';
+  raw.textContent = '⊞ Raw manifest';
+  raw.addEventListener('click', () => {
+    const open = document.getElementById('tt-raw');
+    if (open) { open.remove(); raw.textContent = '⊞ Raw manifest'; return; }
+    const pre = document.createElement('pre');
+    pre.className = 'decode-text-pre';
+    pre.id = 'tt-raw';
+    pre.textContent = ttRawJson || JSON.stringify(decTt2png, null, 1);
+    body.insertBefore(pre, tools.nextSibling);   // right under the toolbar it was opened from
+    raw.textContent = '⊟ Raw manifest';
+  });
+  tools.appendChild(raw);
   body.appendChild(tools);
   const list = document.createElement('div');
   list.className = 'zip-list';
@@ -3201,7 +3256,7 @@ function downloadDecoded() {
 
 function clearDecode() {
   decodedBytes = null; decodedMime = null; decManifest = null; decTt2png = null; decPackage = null;
-  ttAutoFetched = null; ttFile = null;
+  ttAutoFetched = null; ttFile = null; ttRawJson = '';
   document.getElementById('dec-result').style.display = 'none';
   document.getElementById('dec-actions').style.display = 'none';
   document.getElementById('dec-file-input').value = '';
