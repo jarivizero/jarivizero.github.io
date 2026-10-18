@@ -1828,6 +1828,20 @@ async function presentDecoded(bytes, depth = 0, fromCodec = false) {
     decodedMime = 'application/json';
     ttRawJson = new TextDecoder().decode(bytes);   // verbatim, for the Raw manifest button
     showDecodedResult();
+
+    // the zip file … just no downloading without clicking download"). What it costs instead is the
+    // TAIL: a zip's directory sits at the end, so one part lists it. A playable payload still
+    // fetches itself, which is his other ask on the same day.
+    const archive = Array.isArray(tt.files) || /\.(zip|apk|jar|7z|rar|tar|tgz|bz2|xz|gz)$/i.test(tt.name || '');
+    if (archive) {
+      setDecStatus(`tt2png — ${tt.name}, ${fmtBytes(tt.bytes)} in ${tt.chunks.length} TikTok part(s). ` +
+                   'Nothing is downloaded until you ask; reading the tail for a listing …', 'info');
+      if (!Array.isArray(tt.files) && /\.zip$/i.test(tt.name || '')) await ttListZipFromTail(tt);
+      else if (Array.isArray(tt.files)) setDecStatus(`tt2png — ${tt.name}, ${fmtBytes(tt.bytes)} in ` +
+                   `${tt.chunks.length} part(s); what is inside is listed below. Nothing is fetched ` +
+                   'until you click.', 'success');
+      return;
+    }
     setDecStatus(`tt2png — ${tt.name}, ${fmtBytes(tt.bytes)} in ${tt.chunks.length} TikTok part(s). ` +
                  'Reassembling it from TikTok and checking the sha256 in this index …', 'info');
 
@@ -2269,6 +2283,162 @@ async function tt2pngFetchAll() {
   return bytes;
 }
 
+// ── reading a zip's DIRECTORY without the file ────────────────────────────────────────────────
+// The last 22 bytes of a zip are the End Of Central Directory record; just before it sits the
+// central directory, one fixed 46-byte entry per member plus its name. So the tail of the file is
+// the whole listing. Only the LAST parts are fetched (newest first), stopping as soon as the
+// directory is covered, and each part is checked against the digest the index recorded.
+function zipCentralDirectory(buf, fileSize) {
+  // buf holds the END of the file: `at` is the absolute offset of buf[0].
+  const at = fileSize - buf.length;
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0; i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return { error: 'no zip end-of-directory record in the tail' };
+  let entries = dv.getUint16(eocd + 10, true);
+  let cdSize = dv.getUint32(eocd + 12, true);
+  let cdOff = dv.getUint32(eocd + 16, true);
+  // ZIP64: the 32-bit fields are all 1s and a locator (PK\x06\x07) points at the real record.
+  if (entries === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) {
+    let loc = -1;
+    for (let i = eocd - 20; i >= 0; i--) {
+      if (dv.getUint32(i, true) === 0x07064b50) { loc = i; break; }
+    }
+    if (loc >= 0) {
+      const z64 = Number(dv.getBigUint64(loc + 8, true));
+      const zoff = z64 - at;
+      if (zoff >= 0 && zoff + 56 <= buf.length && dv.getUint32(zoff, true) === 0x06064b50) {
+        entries = Number(dv.getBigUint64(zoff + 32, true));
+        cdSize = Number(dv.getBigUint64(zoff + 40, true));
+        cdOff = Number(dv.getBigUint64(zoff + 48, true));
+      } else {
+        return { error: 'this zip is ZIP64 and its directory is further back than one part' };
+      }
+    } else {
+      return { error: 'this zip is ZIP64 with no locator in the tail' };
+    }
+  }
+  const start = cdOff - at;                       // where the directory starts inside buf
+  if (start < 0) {
+    return { needFrom: cdOff, entries, cdSize, cdOff,
+             error: `the directory starts ${fmtBytes(cdOff - at)} before this part` };
+  }
+  const files = [];
+  let k = start;
+  const end = Math.min(start + cdSize, buf.length);
+  while (k + 46 <= end && dv.getUint32(k, true) === 0x02014b50 && files.length < 5000) {
+    const nlen = dv.getUint16(k + 28, true);
+    const elen = dv.getUint16(k + 30, true);
+    const clen = dv.getUint16(k + 32, true);
+    const size = dv.getUint32(k + 24, true);
+    const csize = dv.getUint32(k + 20, true);
+    const dosTime = dv.getUint16(k + 12, true);
+    const dosDate = dv.getUint16(k + 14, true);
+    const name = new TextDecoder().decode(buf.subarray(k + 46, k + 46 + nlen));
+    const when = (dosDate || dosTime)
+      ? new Date(Date.UTC(1980 + ((dosDate >> 9) & 0x7f), ((dosDate >> 5) & 0x0f) - 1, dosDate & 0x1f,
+                          (dosTime >> 11) & 0x1f, (dosTime >> 5) & 0x3f, (dosTime & 0x1f) * 2)).toISOString()
+      : '';
+    files.push({ path: name, size, csize, dir: /\/$/.test(name), modified: when });
+    k += 46 + nlen + elen + clen;
+  }
+  if (files.length !== entries) {
+    return { error: `the directory holds ${entries} entr${entries === 1 ? 'y' : 'ies'} but only ` +
+                    `${files.length} could be read from this part` };
+  }
+  return { files, entries, cdOff, cdSize };
+}
+
+// Fetch parts from the END of the file until the central directory is covered, then list it.
+async function ttListZipFromTail(t) {
+  const last = t.chunks.length - 1;
+  const total = t.bytes || t.chunks.reduce((n, c) => n + (c.size || 0), 0);
+  let from = last, merged = new Uint8Array(0), covered = 0, tried = 0;
+  while (from >= 0 && tried < 4) {
+    const c = t.chunks[from];
+    setDecStatus(`zip tail — fetching part ${from + 1}/${t.chunks.length} (${fmtBytes(c.size || 0)})`, 'info');
+    let png;
+    try { png = new Uint8Array(await (await fetch(c.url)).arrayBuffer()); }
+    catch (e) { setDecStatus(`zip tail — part ${from + 1} could not be fetched: ${e.message}`, 'error'); return false; }
+    if (c.sha256) {
+      const got = await sha256Hex(png);
+      if (got && got !== c.sha256) {
+        setDecStatus(`zip tail — part ${from + 1} does not match the digest in the index`, 'error'); return false;
+      }
+    }
+    const body = ttPayload(png);
+    if (!body) { setDecStatus(`zip tail — part ${from + 1} is not a wrapped 1x1 PNG`, 'error'); return false; }
+    const joined = new Uint8Array(body.length + merged.length);
+    joined.set(body, 0); joined.set(merged, body.length);
+    merged = joined;
+    covered += body.length;
+    const cd = zipCentralDirectory(merged, total);
+    if (cd.files) {
+      renderTailListing(cd, merged.length, t);
+      return true;
+    }
+    if (cd.needFrom === undefined || cd.needFrom < total - covered) {
+      setDecStatus(`zip tail — ${cd.error}`, 'error'); return false;
+    }
+    from--; tried++;                                // the directory reaches into the part before
+  }
+  setDecStatus('zip tail — the last 4 part(s) did not contain a readable zip directory', 'error');
+  return false;
+}
+
+function renderTailListing(cd, tailBytes, t) {
+  const body = document.getElementById('dec-body');
+  if (!body) return;
+  let host = document.getElementById('tt-tail');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'tt-tail';
+    body.insertBefore(host, document.getElementById('tt-payload'));
+  }
+  host.textContent = '';
+  const head = document.createElement('div');
+  head.className = 'zip-note';
+  const bytes = cd.files.reduce((n, f) => n + (f.size || 0), 0);
+  head.textContent = `Inside ${t.name}: ${cd.files.length} entr${cd.files.length === 1 ? 'y' : 'ies'}, ` +
+                     `${fmtBytes(bytes)} uncompressed — read from the last ${fmtBytes(tailBytes)} ` +
+                     `of ${fmtBytes(t.bytes || 0)}, not the whole file`;
+  host.appendChild(head);
+  const list = document.createElement('div');
+  list.className = 'zip-list';
+  for (const f of cd.files) {
+    const row = document.createElement('div');
+    row.className = 'zip-row';
+    const nm = document.createElement('span');
+    nm.className = 'zip-name';
+    nm.textContent = (f.dir ? '📁 ' : '📄 ') + f.path;   // textContent: names are untrusted
+    row.appendChild(nm);
+    const sz = document.createElement('span');
+    sz.className = 'zip-size';
+    sz.textContent = f.dir ? 'folder' : `${fmtBytes(f.size)}${f.csize && f.csize !== f.size ? ` (${fmtBytes(f.csize)} packed)` : ''}`;
+    if (f.modified) sz.title = 'modified ' + f.modified;
+    row.appendChild(sz);
+    list.appendChild(row);
+  }
+  host.appendChild(list);
+  // ONE member that is itself an archive is a nested case, and it must be said out loud: a tar
+  // keeps no trailing index (each member's header precedes its data), so a tail cannot list it.
+  const one = cd.files.length === 1 ? cd.files[0] : null;
+  if (one && !one.dir && /\.(zip|tar|tgz|tar\.gz|tar\.bz2|tar\.xz)$/i.test(one.path)) {
+    const note = document.createElement('div');
+    note.className = 'zip-note';
+    note.textContent = `Its only member is ${one.path} — a nested archive. A .tar has no index at ` +
+                       'the end to read, so its own listing needs the metadata an upload records ' +
+                       'in the index (tiktokupload.py does that).';
+    host.appendChild(note);
+  }
+  const file = cd.files.reduce((n, f) => n + (f.size || 0), 0);
+  setDecStatus(`zip tail — ${cd.files.length} entr${cd.files.length === 1 ? 'y' : 'ies'} listed from ` +
+               `${fmtBytes(tailBytes)} of ${fmtBytes(t.file || t.bytes || 0)} (${fmtBytes(file)} inside); ` +
+               'nothing was downloaded beyond that part', 'success');
+}
+
 async function codecPayload(pngBytes) {
   const exact = await decodePngExact(pngBytes);
   if (exact) return exact;
@@ -2570,7 +2740,11 @@ function renderTt2pngBody(body) {
     const listed = t.files_total && t.files_total > inside.length
       ? `${inside.length} of ${t.files_total} file(s)` : `${inside.length} file(s)`;
     const total = t.files_bytes || inside.reduce((n, f) => n + (f.size || 0), 0);
-    head.textContent = `Inside: ${listed}, ${fmtBytes(total)} uncompressed`;
+    // `inner` is set when the uploader had to walk INTO a single nested archive (a zip around a
+    // tar is the common one) — say which archive the names came from instead of implying the zip
+    // itself holds them.
+    head.textContent = `Inside${t.inner ? ` ${t.inner}` : ''}: ${listed}, ${fmtBytes(total)} uncompressed` +
+                       (t.inner ? ` (it is the one member of ${t.name})` : '');
     body.appendChild(head);
     const fl = document.createElement('div');
     fl.className = 'zip-list';
@@ -2594,9 +2768,26 @@ function renderTt2pngBody(body) {
   }
   const tools = document.createElement('div');
   tools.className = 'hist-tools';
+  // For an archive, ONE click does the whole thing: fetch every part, check the sha256, save it.
+  const archiveIndex = Array.isArray(t.files) || /\.(zip|apk|jar|7z|rar|tar|tgz|bz2|xz|gz)$/i.test(t.name || '');
+  if (archiveIndex) {
+    const get = document.createElement('button');
+    get.className = 'btn primary';
+    get.id = 'tt-fetch-save';
+    get.textContent = `⬇ Download and save ${t.name} (${fmtBytes(t.bytes)})`;
+    get.addEventListener('click', async () => {
+      get.disabled = true;
+      const got = await tt2pngFetchAll();
+      if (got) saveBytes(got, t.name, mimeFromName(t.name) || guessMime(got));
+      get.textContent = got ? '⬇ Download and save again' : '⬇ Download and save (the failure is above)';
+      get.disabled = false;
+    });
+    tools.appendChild(get);
+  }
   const btn = document.createElement('button');
   btn.className = 'btn primary';
-  btn.textContent = `⬇ Fetch ${t.chunks.length} part(s) from TikTok and verify`;
+  btn.textContent = archiveIndex ? `⬇ Fetch and verify ${t.chunks.length} part(s) (no save)`
+                                 : `⬇ Fetch ${t.chunks.length} part(s) from TikTok and verify`;
   btn.addEventListener('click', async () => {
     btn.disabled = true;
     const got = await tt2pngFetchAll();
@@ -2604,6 +2795,27 @@ function renderTt2pngBody(body) {
     btn.disabled = false;
   });
   tools.appendChild(btn);
+  // A ZIP whose index carries NO listing (an older upload) can still be listed cheaply: a zip's
+  // central directory sits at the END of the file, so the LAST part alone names every member.
+  // Measured on HU8pn-_WUAAY3yN (75.85 MB, 16 parts): one 4.53 MB part gave the whole listing.
+  // A `Range: bytes=-65536` would cut that to 64 KB — TikTok answers the CORS preflight for a
+  // `Range` header with 403, so the browser cannot ask for it (curl can; both measured 2026-10-18).
+  if (!inside && /\.zip$/i.test(t.name || '')) {
+    const last = t.chunks[t.chunks.length - 1] || {};
+    const tail = document.createElement('button');
+    tail.className = 'btn';
+    tail.id = 'tt-tail-btn';
+    tail.textContent = `⊞ List contents (last part only, ${fmtBytes(last.size || 0)})`;
+    tail.addEventListener('click', async () => {
+      tail.disabled = true;
+      const before = tail.textContent;
+      tail.textContent = '⊞ Reading the tail …';
+      const ok = await ttListZipFromTail(t);
+      tail.textContent = ok ? '⊞ List contents again' : `${before} (the failure is above)`;
+      tail.disabled = false;
+    });
+    tools.appendChild(tail);
+  }
 
   // The index is rarely worth reading on its own, but with an archive's listing inside it is the
   // only place the whole metadata is visible. textContent, never innerHTML — it is untrusted input.
