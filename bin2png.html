@@ -667,6 +667,10 @@
 <script>
 const W = 899, H = 898;
 const TOTAL_PIXELS = W * H;
+// The encoder cuts a file at this many bytes per PNG, so part i starts at i * CAPACITY. The
+// streaming worker depends on that arithmetic: it is how a byte range finds its part without
+// downloading the parts before it.
+const CAPACITY = TOTAL_PIXELS * 3;
 
 let encodedParts = [];
 let decodedBytes = null;
@@ -1035,14 +1039,18 @@ function openHtmlDocument(bytes) {
 
 // page and pointing it at the blob always renders.
 function resultElement(doc, bytes, mime) {
-  const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  // `bytes` may be null: a STREAMED result sets its own src (a byte-range URL), and building a
+  // blob for nothing would leave a stray object url behind.
+  const url = bytes ? URL.createObjectURL(new Blob([bytes], { type: mime })) : '';
   let el = null;
   if (mime.startsWith('video/')) {
     el = doc.createElement('video');
-    el.src = url; el.controls = true; el.autoplay = true; el.playsInline = true;
+    if (url) el.src = url;
+    el.controls = true; el.autoplay = true; el.playsInline = true;
   } else if (mime.startsWith('audio/')) {
     el = doc.createElement('audio');
-    el.src = url; el.controls = true; el.autoplay = true;
+    if (url) el.src = url;
+    el.controls = true; el.autoplay = true;
   } else if (mime.startsWith('image/')) {
     el = doc.createElement('img');
     el.src = url; el.alt = 'decoded image';
@@ -1057,14 +1065,28 @@ function resultElement(doc, bytes, mime) {
 }
 
 // Fill a whole document with the result, black to the edges and nothing else.
-// The name to save as: the inner zip member, else `<ID or url>.<ext from the mime>`.
-function resultFileName() {
-  const mime = decodedMime || 'application/octet-stream';
+// The name to save as, in priority order: the zip member, the stream's own name, the index's name,
+// the name the address was opened by, then `<ID or url>.<ext from the mime>`.
+
+// hard-coded `decoded.<ext>`, and a name that already carries an extension was given a second one.
+// A name that already ends in an extension is never re-suffixed.
+function decodeName() {
   if (decInnerName) return decInnerName;
+  if (decStream && decStream.name) return decStream.name;
+  if (decTt2png && decTt2png.name) return decTt2png.name;
+  if (idsOpenName) {
+    const first = String(idsOpenName).split('+')[0]
+      .replace(/^(?:n|name):/i, '').replace(/\([a-z]+\)$/i, '').trim();
+    if (first && /\.[A-Za-z0-9]+$/.test(first)) return first;
+  }
   const first = hashBody(location.hash).split('+')[0] || '';
   const id = hashToken(first).replace(/^https?:\/\//, '').replace(/[^A-Za-z0-9_.-]+/g, '_')
     .replace(/^_+|_+$/g, '');
-  return `${id || 'decoded'}.${mimeExt(mime)}`;
+  return `${id || 'decoded'}.${mimeExt(decodedMime || 'application/octet-stream')}`;
+}
+function resultFileName() {
+  const name = decodeName();
+  return /\.[A-Za-z0-9]+$/.test(name) ? name : `${name}.${mimeExt(decodedMime || 'application/octet-stream')}`;
 }
 
 // `(newtab)` → the pre-opened tab, `(openfull)` → this page with no UI, `(download)` → the file.
@@ -1671,6 +1693,164 @@ async function fetchImageBytes(url) {
   throw lastErr || new Error('fetch failed');
 }
 
+// A video used to be downloaded part by part, joined, and only then handed to a <video>. On a
+// 5-part file that is the whole wait; on a 16-part one it is minutes before the first frame.
+// `#yakusoku.mp4` already tells us the type from its NAME, so there is nothing to discover first:
+// the player is put on screen immediately, pointed at a URL the service worker answers, and the
+// worker fetches a part only when a byte range actually reaches it (see b2p-stream.js).
+//
+// Two things this fixes besides the wait: the URL ends in the file's own name, so the browser's
+// "Save video as …" offers `yakusoku.mp4` (a blob: url offered a uuid), and the panel's filename is
+// the same name instead of `decoded.mp4`.
+const STREAM_PLAN_CACHE = 'b2p-plan-v1';
+const STREAM_SCRIPT = 'b2p-stream.js';
+let streamWorker = null;   // Promise<registration|null>, cached so one page registers once
+let decStream = null;      // { name, mime, url } when the result is a live stream, not bytes
+let noStream = false;      // set when a stream failed and the whole-file path should run
+
+function streamScriptUrl() { return new URL(STREAM_SCRIPT, location.href); }
+function streamPlanKey(id) { return new URL('__b2p/plan/' + id, streamScriptUrl()).href; }
+
+// Register the worker that speaks ranges. Resolves null (never throws) when this page cannot have
+// one: a file:// page, an old browser, or a refused registration — the caller then does what the
+// page always did and downloads the parts.
+function ensureStreamWorker() {
+  if (streamWorker) return streamWorker;
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)
+      || !window.isSecureContext || location.protocol === 'file:') return Promise.resolve(null);
+  streamWorker = (async () => {
+    try {
+      const reg = await navigator.serviceWorker.register(streamScriptUrl().href);
+      await navigator.serviceWorker.ready;
+      if (!navigator.serviceWorker.controller) {
+        // A worker only answers fetches from a page it CONTROLS. `clients.claim()` takes this
+        // first load over; the event is the moment it did.
+        await new Promise((res) => {
+          const t = setTimeout(res, 2500);
+          navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(t); res(); }, { once: true });
+        });
+      }
+      return navigator.serviceWorker.controller ? reg : null;
+    } catch (e) { return null; }
+  })();
+  return streamWorker;
+}
+
+// Write the plan where the worker can read it and hand back the address of the stream.
+async function streamUrlFor(name, urls, mime, total) {
+  const reg = await ensureStreamWorker();
+  if (!reg || !urls || !urls.length || !name) return null;
+  const id = 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const plan = { id, name, mime, cap: CAPACITY, parts: urls, total: total || 0 };
+  try {
+    const cache = await caches.open(STREAM_PLAN_CACHE);
+    await cache.put(streamPlanKey(id), new Response(JSON.stringify(plan), {
+      headers: { 'Content-Type': 'application/json' } }));
+  } catch (e) { return null; }
+  return new URL('__b2p/' + encodeURIComponent(name) + '?id=' + id, streamScriptUrl()).href;
+}
+
+// The name a `#<name>` token stands for, or null when this decode was opened by an id/url.
+function streamedName(names) {
+  if (!names || !names.resolved || names.resolved.length !== 1) return null;
+  return names.resolved[0][0];
+}
+
+// Put the player on screen NOW, before a single part has been fetched.
+async function startStreamDecode(urls, name, mime) {
+  if (noStream) return false;
+  const url = await streamUrlFor(name, urls, mime);
+  if (!url) return false;
+  decStream = { name, mime, url, parts: urls };
+  decodedBytes = null;
+  decodedMime = mime;
+  decInnerName = null;
+  decManifest = decTt2png = decPackage = null;
+  document.title = name;
+  document.getElementById('dec-mime').textContent = mime;
+  document.getElementById('dec-size').textContent = 'streaming';
+  document.getElementById('dec-filename').textContent = name;
+
+  const el = resultElement(document, null, mime);
+  el.src = url;
+  el.controls = true;
+  el.autoplay = true;
+  el.className = 'decode-media';
+  // A stream that cannot be read (no worker, a part that is not the codec's shape) falls back to
+  // the path that always works: every part, joined, as a blob.
+  el.addEventListener('error', () => {
+    if (!decStream) return;
+    decStream = null;
+    noStream = true;
+    setDecStatus('The stream could not start — downloading every part instead …', 'warn');
+    handleDecodeUrl();
+  }, { once: true });
+
+  const note = document.createElement('div');
+  note.className = 'zip-note';
+  note.textContent = `${urls.length} part(s) — the player reads only the byte ranges it needs, ` +
+                     'so it starts after part 1 instead of after the whole file. ' +
+                     'Right-click → Save video as offers this file\u2019s own name.';
+
+  if (hashModeOf(location.hash) === 'openfull') {
+    document.documentElement.classList.add('result-only');
+    const stage = document.getElementById('result-stage');
+    stage.textContent = '';
+    stage.appendChild(el);
+    setDecProgress(100);
+    return true;
+  }
+
+  const body = document.getElementById('dec-body');
+  body.innerHTML = '';
+  body.appendChild(note);
+  body.appendChild(el);
+  body.appendChild(streamTools(name, urls));
+  document.getElementById('dec-result').style.display = 'block';
+  document.getElementById('dec-actions').style.display = 'flex';
+  setDecProgress(100);
+  setDecStatus(`Streaming ${name} — ${urls.length} part(s); playback starts on part 1, ` +
+               'and only the parts that are watched are fetched', 'success');
+  return true;
+}
+
+// One button, and it means the same thing as the panel's Download: fetch everything and save it
+// under the file's own name.
+// Fetch every part and save it under the file's own name. Shared by the stream's own button and
+// the panel's Download, so the two can never save under different names.
+async function saveStreamedFile(name, urls) {
+  if (decStream && decStream.parts) urls = decStream.parts;
+  if (!name) name = resultFileName();
+  const got = await fetchParts(urls, 'Downloading parts');
+  if (got.error) { setDecStatus(got.error, 'error'); return null; }
+  const payloads = [];
+  for (const p of got.parts) {
+    const payload = await codecPayload(p);
+    if (!payload) { setDecStatus('A part is not an encoded PNG — cannot stitch', 'error'); return null; }
+    payloads.push(payload);
+  }
+  const bytes = concatParts(payloads);
+  saveBytes(bytes, name, mimeFromName(name) || guessMime(bytes));
+  setDecStatus(`Saved ${name} — ${fmtBytes(bytes.length)}`, 'success');
+  return bytes;
+}
+
+function streamTools(name, urls) {
+  const tools = document.createElement('div');
+  tools.className = 'hist-tools';
+  const btn = document.createElement('button');
+  btn.className = 'btn';
+  btn.id = 'stream-download';
+  btn.textContent = `⬇ Download ${name} (every part)`;
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    await saveStreamedFile(name, urls);
+    btn.disabled = false;
+  });
+  tools.appendChild(btn);
+  return tools;
+}
+
 async function handleDecodeUrl() {
   // A NAME is resolved before anything else touches the input, so everything downstream — stitch,
   // history, modes like `(openfull)` — behaves exactly as if the id had been typed.
@@ -1685,6 +1865,21 @@ async function handleDecodeUrl() {
     return;
   }
   const multi = targets.length > 1;
+  // A NAME with a media extension says what the payload is before ANY byte is fetched
+  // (`#yakusoku.mp4`), so the player goes up at once and the parts arrive as playback needs them.
+  // `(download)` and `(html)` still take the whole-file path: they want the bytes, not a stream.
+  const named = streamedName(names);
+  const quickMime = named ? mimeFromName(named) : '';
+  const modeNow = hashModeOf(location.hash);
+  if (named && /^(video|audio)\//.test(quickMime) && (!modeNow || modeNow === 'openfull')) {
+    if (await startStreamDecode(targets, named, quickMime)) {
+      const el = document.getElementById('dec-status');
+      if (el && !/IDSDICTIONARY/.test(el.textContent)) {
+        el.textContent += ` · IDSDICTIONARY: ${names.resolved.map(([n, p]) => `${n} → ${p}`).join(', ')}`;
+      }
+      return;
+    }
+  }
 
   let tooLarge = false;
   let lastModified = null;   // epoch-ms from the Last-Modified response header, if any
@@ -1793,7 +1988,7 @@ async function handleDecodeUrl() {
 // Decode whatever bytes we ended up with: a codec PNG goes through the pixel decoder;
 // any other file (say a .txt URL) is shown raw rather than failing.
 async function decodeBytes(bytes, depth = 0) {
-  if (depth === 0) { decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; decTt2png = null; decPackage = null; decOversize = null; ttAutoFetched = null; ttFile = null; ttRawJson = ''; }
+  if (depth === 0) { decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; decTt2png = null; decPackage = null; decOversize = null; ttAutoFetched = null; ttFile = null; ttRawJson = ''; decStream = null; }
   const mime = guessMime(bytes);
   if (mime === 'image/png') {
     // Exact path first: parse the PNG ourselves. Canvas getImageData() PREMULTIPLIES
@@ -3585,7 +3780,7 @@ function showDecodedResult() {
 
   document.getElementById('dec-mime').textContent = mime;
   document.getElementById('dec-size').textContent = fmtBytes(bytes.length);
-  document.getElementById('dec-filename').textContent = `decoded.${mimeExt(mime)}`;
+  document.getElementById('dec-filename').textContent = resultFileName();
 
   const body = document.getElementById('dec-body');
   body.innerHTML = '';
@@ -3708,13 +3903,17 @@ function showDecodedResult() {
 function downloadDecoded() {
   // An index's Download button means the FILE it names, not the index itself.
   if (ttFile) { saveBytes(ttFile.bytes, ttFile.name, ttFile.mime); return; }
+  // A streamed video has no bytes in memory yet: the button means "give me the whole thing".
+  if (decStream) { saveStreamedFile(decStream.name, decStream.parts); return; }
   if (!decodedBytes) return;
-  // Through saveBytes, so the panel's Download is a SAVE like every other one on the page.
-  saveBytes(decodedBytes, `decoded.${mimeExt(decodedMime)}`, decodedMime);
+  // Through saveBytes, so the panel's Download is a SAVE like every other one on the page — under
+
+  saveBytes(decodedBytes, resultFileName(), decodedMime);
 }
 
 function clearDecode() {
   decodedBytes = null; decodedMime = null; decManifest = null; decTt2png = null; decPackage = null;
+  decStream = null; decInnerName = null;
   ttAutoFetched = null; ttFile = null; ttRawJson = '';
   document.getElementById('dec-result').style.display = 'none';
   document.getElementById('dec-actions').style.display = 'none';
