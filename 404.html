@@ -8,7 +8,11 @@
 // BEFORE THE FIRST PAINT. `/file/<name>` is a player address dressed as a path: this document is
 // only the frame around the renderer, so it must never paint the 404 art or the home link on its
 // way to the video (his 2026-10-19 report: "will still load a page, then a video loading").
-if (/^\/file\//.test(location.pathname)) document.documentElement.className = 'file-path';
+
+if (/^\/file\//.test(location.pathname) ||
+    /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname)) {
+  document.documentElement.className = 'file-path';
+}
 </script>
 <style>
   :root { --bg:#fff; --fg:#1b1b1f; --muted:#666; --accent:#0645ad; }
@@ -71,8 +75,10 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 
   // ── 1. /file/<name> ─────────────────────────────────────────────────────────────────────────
   const asPath = location.pathname.match(/^\/file\/(.+)$/);
-  if (asPath) {
-    const name = asPath[1].replace(/\/+$/, '');
+  // `jarivizero.github.io/<id>` — no `/file` in the path, and still a file address.
+  const asRoot = !asPath && /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
+  if (asPath || asRoot) {
+    const name = (asPath ? asPath[1] : location.pathname.slice(1)).replace(/\/+$/, '');
     if (!name) { location.replace('/file'); return; }
     document.title = decodeURIComponent(name);
     // The player goes up in THIS document, before anything is fetched: a media name is a player
