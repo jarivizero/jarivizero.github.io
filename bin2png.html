@@ -1810,11 +1810,11 @@ async function startStreamDecode(urls, name, mime) {
                      'so it starts after part 1 instead of after the whole file. ' +
                      'Right-click → Save video as offers this file\u2019s own name.';
 
-  // A VIDEO is the whole page, mode or no mode — that is what a video page looks like, and his
-  // report 2026-10-18 was that the player sat in the middle of the panel instead of filling the
-  // window. Audio and text keep the panel. The download control rides in the corner because
-  // `result-only` hides everything outside the stage.
-  if (/^video\//.test(mime) || hashModeOf(location.hash) === 'openfull') {
+  // A video stays IN THE PANEL here; `(openfull)` is the only thing that takes the window. His
+  // rule 2026-10-19: "it just opens in fullscreen even on bin2png no matter what, it's not supposed
+  // to do that, only on file/ pages". A 2026-10-18 report had pushed the opposite way; that was
+  // about /file/ and is fixed there by the renderer's own media mode.
+  if (hashModeOf(location.hash) === 'openfull') {
     document.documentElement.classList.add('result-only');
     const stage = document.getElementById('result-stage');
     stage.textContent = '';
@@ -1879,6 +1879,30 @@ function streamTools(name, urls) {
 // first part's HEAD through the worker — one byte range, decoded from a PNG prefix — and the file
 // is known without downloading a single part. The LAST part's end is read by the same worker when
 // it works out the total, which is what the player needs anyway.
+// A PACKED payload is a DEFLATE stream with a 9-byte header. A PREFIX of it still inflates to a
+// prefix of the file — every complete block comes out before the truncation error — which is all a
+// sniff needs. `unpackPayload` refuses a cut stream on purpose (it cannot prove the recorded
+// length), so the probe cannot use it: a 7.75 MB webm answered "binary" for exactly that reason.
+async function unpackPrefix(bytes) {
+  if (!isPacked(bytes)) return null;
+  const chunks = [];
+  let total = 0;
+  try {
+    const reader = new Blob([bytes.subarray(PACK_HEADER)]).stream()
+      .pipeThrough(new DecompressionStream('deflate')).getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value && value.length) { chunks.push(value); total += value.length; }
+    }
+  } catch (e) { /* truncated: what came through is still the start of the file */ }
+  if (!total) return null;
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.length; }
+  return out;
+}
+
 async function rangedProbe(targets) {
   const first = targets[0] || '';
   const name = (first.match(/media\/([A-Za-z0-9_-]+)/) || [])[1] ||
@@ -1889,8 +1913,9 @@ async function rangedProbe(targets) {
   if (res.status !== 206) return null;
   const head = new Uint8Array(await res.arrayBuffer());
   if (!head.length) return null;
-  const mime = guessMime(isPacked(head) ? await unpackPayload(head) : head);
-  return { mime, name };
+  const packed = isPacked(head);
+  const plain = packed ? await unpackPrefix(head) : head;
+  return { mime: guessMime(plain || head), packed, name };
 }
 
 async function handleDecodeUrl() {
@@ -1919,7 +1944,13 @@ async function handleDecodeUrl() {
   if (dotAddress && !names.resolved.length) {
     try {
       const probe = await rangedProbe(targets);
-      if (probe && /^(video|audio)\//.test(probe.mime) && (!hashModeOf(location.hash) ||
+      // A PACKED payload cannot be streamed: the player would be handed DEFLATE bytes instead of
+      // frames. Say so once and take the whole-file path, which unpacks it — no point putting a
+      // player up only to have it fail back into the same download.
+      if (probe && probe.packed) {
+        setDecStatus(`${probe.mime || 'this file'} is stored PACKED (deflated) — its bytes have to ` +
+                     'be decompressed from the start, so it is fetched in full rather than streamed.', 'info');
+      } else if (probe && /^(video|audio)\//.test(probe.mime) && (!hashModeOf(location.hash) ||
           hashModeOf(location.hash) === 'openfull')) {
         if (await startStreamDecode(targets, `${probe.name}.${mimeExt(probe.mime)}`, probe.mime)) {
           setResultHash(targets);
@@ -3786,7 +3817,11 @@ function guessMime(bytes) {
   if (sig(0, 0x00, 0x00, 0x00) && (sig(4, 0x66, 0x74, 0x79, 0x70) || (bytes.length > 8 && sig(4, 0x66, 0x74, 0x79, 0x70)))) return 'video/mp4';
   // check ftyp at byte 4 for mp4
   if (bytes.length > 8 && sig(4, 0x66, 0x74, 0x79, 0x70)) return 'video/mp4';
-  if (sig(0, 0x1A, 0x45, 0xDF, 0xA3)) return 'video/webm';
+  // EBML is BOTH .webm and .mkv; the DocType in the first bytes says which.
+  if (sig(0, 0x1A, 0x45, 0xDF, 0xA3)) {
+    const head = new TextDecoder('latin1').decode(h.subarray(0, Math.min(64, h.length)));
+    return /webm/i.test(head) ? 'video/webm' : 'video/x-matroska';
+  }
   if (sig(0, 0x4F, 0x67, 0x67, 0x53)) return 'audio/ogg';
   if (sig(0, 0x49, 0x44, 0x33) || sig(0, 0xFF, 0xFB) || sig(0, 0xFF, 0xF3) || sig(0, 0xFF, 0xF2)) return 'audio/mpeg';
   if (sig(0, 0x66, 0x4C, 0x61, 0x43)) return 'audio/flac';
