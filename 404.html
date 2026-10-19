@@ -39,6 +39,13 @@
 //    answers a byte range, and reloads — the reload is served by the worker and the video plays.
 //    The plan rides in the url (`p=` ids, `u=` urls, `m=` type), so nothing has to be cached here.
 // 3. anything else — the 404 art (catbox.moe's), and one way home.
+// Install the worker on ANY 404, not only a stream address: once it controls the site, a navigation
+// to a path that is not a file is answered by the worker from its precache instead of waiting for
+
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('/b2p-stream.js', { scope: '/' }).catch(() => {});
+}
+
 const art = document.getElementById('art');
 const msg = document.getElementById('msg');
 const home = document.getElementById('home');
