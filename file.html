@@ -13,6 +13,10 @@
   body.media .status { display: none; }
   
   body.media > header, body.media > #kind, body.media > #meta { display: none; }
+  
+  body.plain > header, body.plain > #kind, body.plain > #meta, body.plain .status { display: none; }
+  body.plain { margin: 0; }
+  body.plain pre { padding: 0; margin: 0; }
   body.media #stage { height: 100vh; margin: 0; }
   img { max-width: 100%; max-height: calc(100vh - 40px); }
   pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
@@ -455,8 +459,35 @@ async function streamUrlFor(name, urls, mime) {
 // `mime` is the type the router already resolved — from the name, or from the probe when the
 // address had no extension. Re-deriving it here is what made `clip.dat` (a sniffed mp4) come out as
 // an <audio> element.
+// The first bytes of the payload, cheaply: enough to tell a manifest from a media container.
+async function peekHead(n = 64) {
+  try {
+    if (src.direct) return await sourceRange(0, n - 1);
+    const ends = await rangedEnds();
+    return ends ? ends.head.subarray(0, n) : null;
+  } catch (e) { return null; }
+}
+function isManifestHead(bytes) {
+  if (!bytes || bytes.length < 20) return false;
+  const t = new TextDecoder('latin1').decode(bytes.subarray(0, 20));
+  return t.startsWith('#bin2png-manifest');
+}
+
 async function renderMedia(mime) {
   mime = mime || 'application/octet-stream';
+  // A NAME can lie, and a master file always does: `file/blindspots.webm` is a .webm by name and a
+  // manifest by content (his 2026-10-19 report — it errored). Look at the first bytes first.
+  if (manifestDepth < 1 && isManifestHead(await peekHead())) {
+    const master = followManifest(await wholeFile());
+    if (master) {
+      manifestDepth++;
+      src = { ...src, name: master.name, urls: master.urls };
+      partCache.clear();
+      stage.textContent = '';
+      stage.appendChild(statusEl);
+      return renderMedia(mimeFromName(master.name) || '');
+    }
+  }
   const isVideo = mime.startsWith('video/');
   const el = document.createElement(isVideo ? 'video' : 'audio');
   el.controls = true;
@@ -468,7 +499,9 @@ async function renderMedia(mime) {
     el.src = src.urls[0];
     status(`Playing ${src.urls[0]}`);
   } else {
-    const url = await streamUrlFor(src.name, src.urls, mime);
+    // A PACKED payload (B2PZ) is a deflate stream: byte N of the file is not at byte N of the
+    // payload, so a player reading ranges gets compressed bytes and dies. Fetch and unpack instead.
+    const url = src.packed ? null : await streamUrlFor(src.name, src.urls, mime);
     if (url) {
       el.src = url;
       status(`${src.urls.length} part(s) — byte-range streaming: the player fetches only what it reads`);
@@ -929,6 +962,7 @@ async function renderBytes(bytes, name, fromLabel) {
     document.close();
     return;
   } else if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
+    document.body.className = 'plain';
     const pre = document.createElement('pre');
     pre.textContent = new TextDecoder().decode(bytes);
     stage.appendChild(pre);
@@ -1043,6 +1077,7 @@ async function run() {
         status(`${probe.mime} — stored packed (deflated), so it is fetched and unpacked in full ` +
                'before it plays; a packed payload cannot be byte-ranged.');
       }
+      if (probe.packed) src.packed = true;
       if (probe.zip) zipByName = true;
       else if (probe.mime) {
         mime = probe.mime;
@@ -1091,6 +1126,7 @@ async function run() {
       return;
     }
     if (mime.startsWith('image/')) {
+      document.body.className = 'plain';
       status('Fetching…');
       const bytes = await wholeFile();
       const img = document.createElement('img');
