@@ -5,18 +5,58 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>404 — not found</title>
 <script>
-// BEFORE THE FIRST PAINT. `/file/<name>` is a player address dressed as a path: this document is
-// only the frame around the renderer, so it must never paint the 404 art or the home link on its
-// way to the video (his 2026-10-19 report: "will still load a page, then a video loading").
+// BEFORE THE FIRST PAINT. `/file/<name>` is a file address dressed as a path: this document is only
+// the frame around the renderer, so it must never paint the 404 art or the home link on its way to
+// the payload (his 2026-10-19 report: "will still load a page, then a video loading"). `/<id>` at the
 
-if (/^\/file\//.test(location.pathname) ||
-    /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname)) {
-  document.documentElement.className = 'file-path';
-}
+//
+// WHICH frame is decided by the ADDRESS ALONE, and a text address is a TEXT frame: black is right for
+// a player and wrong for a .txt, whose tab is white in light mode and dark in dark mode because of
+// `<meta name="color-scheme" content="light dark">` (his 2026-10-19 ask: "it does this for video
+// files but txt have a special style"). The kinds mirror file.html's pre-paint — keep the two lists
+// in step; they are the same decision made twice, once for the server's 404 and once for the worker's
+// precached renderer.
+(function () {
+  const path = location.pathname;
+  const inFile = path.match(/\/file\/(.+)$/);
+  const idAtRoot = /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(path);
+  if (!inFile && !idAtRoot) return;
+  const address = decodeURIComponent(inFile ? inFile[1] : path.slice(1)).replace(/\/+$/, '').trim();
+  let hint = location.search.replace(/^\?/, '');
+  try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
+  let raw = address;                       // the prefix grammar: `.` archive, `,` video
+  for (;;) {
+    if (raw.length > 1 && (raw.charAt(0) === '.' || raw.charAt(0) === ',')) { raw = raw.slice(1); continue; }
+    break;
+  }
+  const forcedMedia = address.charAt(0) === ',';
+  const name = hint && !hint.includes('=') && !/[?#]/.test(hint) ? hint : raw;
+  const ext = (name.match(/\.([A-Za-z0-9]+)$/) || [])[1];
+  const e = ext ? ext.toLowerCase() : '';
+  const MEDIA = ['mp4','m4v','mov','webm','mkv','avi','mp3','m4a','aac','ogg','oga','opus','flac','wav'];
+  const IMAGE = ['png','jpg','jpeg','gif','webp','bmp','avif','ico','svg'];
+  // `id` = an address with no extension at all: nothing is known yet, and black is the better guess
+  // (an id is usually a player); file.html's own pre-paint clears it if the sniff says otherwise.
+  let kind = 'id';
+  if (forcedMedia || MEDIA.includes(e)) kind = 'media';
+  else if (raw.charAt(0) === '.') kind = 'text';
+  else if (e) kind = IMAGE.includes(e) ? 'image' : 'text';
+  document.documentElement.className = 'file-' + kind;
+  if (kind === 'text') {
+    const meta = document.createElement('meta');
+    meta.name = 'color-scheme';
+    meta.content = 'light dark';
+    document.head.appendChild(meta);
+  }
+  window.__fileKind = kind;               // the video frame below is built only for `media`
+})();
 </script>
 <style>
   :root { --bg:#fff; --fg:#1b1b1f; --muted:#666; --accent:#0645ad; }
-  html.file-path, html.file-path body { background:#000; }
+  html.file-media, html.file-media body { background:#000; }
+  html.file-image, html.file-image body { background:#0e0e0e; }
+  /* `file-text` and `file-id` set no colour on purpose: the canvas comes from the color-scheme meta
+     (light mode white, dark mode near-black), which is what a `file:///` tab does. */
   html.file-path body > main { display:none; }   /* the iframe is a child of body, and must show */
   * { box-sizing:border-box; }
   html,body { margin:0; min-height:100%; background:var(--bg); color:var(--fg);
@@ -83,8 +123,9 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     document.title = decodeURIComponent(name);
     // The player goes up in THIS document, before anything is fetched: a media name is a player
     // address, so the first paint is the black window with its controls — not "a blank page, then a
-    // black page with no video load UI" (his 2026-10-19 report).
-    if (/\.(mp4|m4v|mov|webm|mkv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav)$/i.test(name)) {
+    // black page with no video load UI" (his 2026-10-19 report). The pre-paint above already decided
+    // the kind from the same address, so the two can never disagree.
+    if (window.__fileKind === 'media') {
       const v = document.createElement('video');
       v.controls = true;
       v.playsInline = true;
