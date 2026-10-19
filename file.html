@@ -5,13 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>file</title>
 <style>
-  /* No design. The browser's defaults, plus the two things a renderer needs: a video that fits the
-     window and a pre that wraps. The zip listing is plain <pre> on purpose — an old autoindex. */
+  /* No design. The browser's defaults are what an autoindex looks like, and a video is the page. */
   body { margin: 8px; }
-  video { max-width: 100%; max-height: calc(100vh - 40px); background: #000; }
+  body.media { margin: 0; background: #000; height: 100vh; overflow: hidden; }
+  body.media video { display: block; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
+  body.media audio { display: block; margin: 40vh auto 0; width: min(720px, 90vw); }
+  body.media .status { display: none; }
+  
+  body.media > header, body.media > #kind, body.media > #meta { display: none; }
+  body.media #stage { height: 100vh; margin: 0; }
   img { max-width: 100%; max-height: calc(100vh - 40px); }
   pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
-  .status { margin: 10px 0 0; font-size: 12px; }
+  table { border-collapse: collapse; }
+  .status { margin: 6px 0 0; font-size: 12px; }
   .status.error { color: #b42318; }
 </style>
 </head>
@@ -448,8 +454,10 @@ async function renderMedia(mime) {
       status(`${fmt(bytes.length)} — ${src.urls.length} part(s)`);
     }
   }
+  document.body.className = 'media';
   el.addEventListener('loadedmetadata', () => {
     if (Number.isFinite(el.duration) && el.duration) $('meta').textContent = `${Math.round(el.duration)}s`;
+    status('');
   });
   stage.appendChild(el);
   return el;
@@ -653,74 +661,223 @@ async function memberBytes(f) {
   throw new Error(`member uses compression method ${f.method}, which this page cannot unpack`);
 }
 
+// Apache 2.4's autoindex, copied: the same table, the same icon column, the same date and size
+// columns, and the `<address>` line at the bottom. The only change is the first data row: where
+// Apache puts "Parent Directory", this puts "Download Zip".
+const ICON_BY_EXT = {
+  text: 'txt md html htm json js css csv xml sh py diff ini yml yaml svg'.split(' '),
+  compressed: 'zip gz bz2 xz 7z rar tar tgz apk jar'.split(' '),
+  image2: 'png jpg jpeg gif webp bmp ico'.split(' '),
+  movie: 'mp4 webm mov mkv m4v'.split(' '),
+  sound1: 'mp3 ogg wav flac m4a opus'.split(' '),
+};
+function iconFor(path, dir) {
+  if (dir) return ['folder', '[DIR]'];
+  const ext = ((path.match(/\.([A-Za-z0-9]+)$/) || [])[1] || '').toLowerCase();
+  for (const [icon, list] of Object.entries(ICON_BY_EXT)) {
+    if (list.includes(ext)) return [icon, icon === 'text' ? '[TXT]' : icon === 'image2' ? '[IMG]'
+      : icon === 'movie' ? '[VID]' : icon === 'sound1' ? '[SND]' : '[   ]'];
+  }
+  return ['unknown', '[   ]'];
+}
+// Apache's size column: bytes plain, then 27K / 1.4M / 304K.
+function apacheSize(n) {
+  if (!Number.isFinite(n)) return '-';
+  if (n < 1024) return String(n);
+  const units = ['K', 'M', 'G', 'T'];
+  let v = n, i = -1;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v >= 10 ? Math.round(v) : v.toFixed(1)}${units[i]}`;
+}
+// Apache's date column: 2026-10-18 22:00
+function apacheDate(d) {
+  if (!d) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
+         `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
 function indexOf(files, total, name) {
-  // The old autoindex page, not a UI: `Index of …`, a rule, then a <pre> of links with the date and
-  // the size in plain columns. The parent-directory link is replaced by Download Zip.
   $('where').textContent = `Index of ${name}`;
   $('kind').textContent = '';
   $('meta').textContent = '';
   document.title = `Index of ${name}`;
   clearStage();
 
-  const rule = () => stage.appendChild(document.createElement('hr'));
+  const table = document.createElement('table');
+  const rule = () => {
+    const tr = document.createElement('tr');
+    const th = document.createElement('th');
+    th.colSpan = 5;
+    th.appendChild(document.createElement('hr'));
+    tr.appendChild(th);
+    table.appendChild(tr);
+  };
+  const head = document.createElement('tr');
+  const iconTh = document.createElement('th');
+  iconTh.setAttribute('valign', 'top');
+  const blank = document.createElement('img');
+  blank.src = '/icons/blank.gif';
+  blank.alt = '[ICO]';
+  iconTh.appendChild(blank);
+  head.appendChild(iconTh);
+  for (const label of ['Name', 'Last modified', 'Size', 'Description']) {
+    const th = document.createElement('th');
+    const a = document.createElement('a');
+    a.href = '#';
+    a.textContent = label;
+    th.appendChild(a);
+    head.appendChild(th);
+  }
+  table.appendChild(head);
   rule();
-  const pre = document.createElement('pre');
-  const zipA = document.createElement('a');
-  zipA.id = 'download-zip';
-  zipA.href = '#';
-  zipA.textContent = 'Download Zip';
-  zipA.title = `Download ${name} (${fmt(total)})`;
-  zipA.addEventListener('click', async (e) => {
-    e.preventDefault();
-    zipA.textContent = 'fetching…';
+
+  const addRow = (icon, alt, text, onClick, date, size) => {
+    const tr = document.createElement('tr');
+    const ic = document.createElement('td');
+    ic.setAttribute('valign', 'top');
+    const img = document.createElement('img');
+    img.src = `/icons/${icon}.gif`;
+    img.alt = alt;
+    ic.appendChild(img);
+    tr.appendChild(ic);
+    const nm = document.createElement('td');
+    const a = document.createElement('a');
+    a.href = '#';
+    a.textContent = text;
+    if (onClick) a.addEventListener('click', (e) => { e.preventDefault(); onClick(a); });
+    nm.appendChild(a);
+    tr.appendChild(nm);
+    const dt = document.createElement('td');
+    dt.setAttribute('align', 'right');
+    dt.textContent = date + '  ';
+    tr.appendChild(dt);
+    const sz = document.createElement('td');
+    sz.setAttribute('align', 'right');
+    sz.textContent = size;
+    tr.appendChild(sz);
+    const de = document.createElement('td');
+    de.textContent = '\u00a0';
+    tr.appendChild(de);
+    table.appendChild(tr);
+    return a;
+  };
+
+  const zipLink = addRow('back', '[PARENTDIR]', 'Download Zip', async (a) => {
+    a.textContent = 'fetching…';
     try {
       const bytes = await wholeFile();
       saveBytes(bytes, name, 'application/zip');
       status(`saved ${name} — ${fmt(bytes.length)}`);
     } catch (err) { status(`could not fetch the archive: ${err.message}`, true); }
-    zipA.textContent = 'Download Zip';
-  });
-  pre.appendChild(zipA);
-  pre.appendChild(document.createTextNode('\n'));
+    a.textContent = 'Download Zip';
+  }, '', '-');
+  zipLink.id = 'download-zip';
+  zipLink.title = `Download ${name} (${fmt(total)})`;
 
-  const pad = (text, width) => text.length >= width ? text + ' ' : text + ' '.repeat(width - text.length);
   for (const f of files) {
-    if (f.dir) {
-      pre.appendChild(document.createTextNode(pad(f.path.replace(/\/$/, '') + '/', 56) +
-        '  ' + (f.modified ? stamp(f.modified) : '') + '\n'));
-      continue;
-    }
-    const a = document.createElement('a');
-    a.className = 'member';
-    a.href = '#';
-    a.textContent = f.path;
-    a.title = `${f.path} (${fmt(f.size)}) — only the bytes this member needs`;
-    a.addEventListener('click', async (e) => {
-      e.preventDefault();
-      a.textContent = f.path + ' …';
+    const [icon, alt] = iconFor(f.path, f.dir);
+    const label = f.path.replace(/\/$/, '') + (f.dir ? '/' : '');
+    const a = addRow(icon, alt, label, f.dir ? null : async (el) => {
+      el.textContent = label + ' …';
       try {
         const bytes = await memberBytes(f);
         const base = f.path.replace(/^.*\//, '');
         saveBytes(bytes, base, mimeFromName(base));
         status(`saved ${base} — ${fmt(bytes.length)}`);
       } catch (err) { status(`could not read ${f.path}: ${err.message}`, true); }
-      a.textContent = f.path;
-    });
-    pre.appendChild(a);
-    pre.appendChild(document.createTextNode(' ' +
-      pad('', 56 - f.path.length) + ' ' + (f.modified ? stamp(f.modified) : '') + ' ' +
-      fmt(f.size).padStart(9) + '\n'));
+      el.textContent = label;
+    }, apacheDate(f.modified), f.dir ? '-' : apacheSize(f.size));
+    if (!f.dir) {
+      a.className = 'member';
+      a.title = `${f.path} (${fmt(f.size)}) — only the bytes this member needs`;
+    }
   }
-  stage.appendChild(pre);
   rule();
+  stage.appendChild(table);
+  const addr = document.createElement('address');
+  addr.textContent = 'jarivizero.github.io';
+  stage.appendChild(addr);
   status(`${files.length} entr${files.length === 1 ? 'y' : 'ies'} read from the end of the file`);
 }
 
-// nginx's autoindex stamp: 18-Oct-2026 22:00
-function stamp(d) {
-  const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
-  return `${String(d.getUTCDate()).padStart(2, '0')}-${m}-${d.getUTCFullYear()} ` +
-         `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+// A member of an archive, rendered BY its own byte range. `/file/<base>/bug.gif` lands here.
+async function renderZipMember(baseLabel, memberPath) {
+  const want = String(memberPath || '').replace(/^\/+/, '');
+  status(`Reading the directory of ${baseLabel}…`);
+  let listing = null, whole = null;
+  try {
+    listing = await readZipCentral();
+  } catch (e) {
+    // A packed payload has no byte-for-byte offsets; the whole file is the only way in.
+    whole = await wholeFile();
+    listing = await zipFromMemory(whole);
+  }
+  const find = (test) => listing.files.find(test);
+  const entry = find((f) => f.path === want)
+    || find((f) => f.path.toLowerCase() === want.toLowerCase())
+    || find((f) => f.path.endsWith('/' + want));
+  if (!entry) throw new Error(`"${want}" is not in ${baseLabel}`);
+  if (entry.dir) throw new Error(`"${want}" is a folder, not a file`);
+  const bytes = whole ? await extractFrom(whole, entry) : await memberBytes(entry);
+  const name = entry.path.replace(/^.*\//, '');
+  await renderBytes(bytes, name, baseLabel);
+}
+
+// Member bytes out of an archive that is already in memory (the packed-payload path).
+async function extractFrom(block, f) {
+  const lo = f.localOff;
+  if (!(block[lo] === 0x50 && block[lo + 1] === 0x4b && block[lo + 2] === 0x03 && block[lo + 3] === 0x04)) {
+    throw new Error('the member local header is not where the directory says it is');
+  }
+  const nlen = u16(block, lo + 26), elen = u16(block, lo + 28);
+  const start = lo + 30 + nlen + elen;
+  const comp = block.subarray(start, start + f.csize);
+  if (f.method === 0) return comp;
+  if (f.method === 8) return inflate(comp, 'deflate-raw');
+  throw new Error(`member uses compression method ${f.method}, which this page cannot unpack`);
+}
+
+// Bytes with a name → the thing they are. One place, so a zip member and a plain payload render
+// the same way (an HTML member becomes the document, an image is an image, text is text).
+async function renderBytes(bytes, name, fromLabel) {
+  const mime = mimeFromName(name) || sniffMime(bytes);
+  document.title = name;
+  $('where').textContent = name;
+  $('kind').textContent = mime;
+  $('meta').textContent = fmt(bytes.length);
+  document.body.className = '';
+  clearStage();
+  if (mime.startsWith('image/')) {
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    img.alt = name;
+    stage.appendChild(img);
+  } else if (mime === 'text/html') {
+    window.__fileHtml = name;
+    document.open();
+    document.write(new TextDecoder().decode(bytes));
+    document.close();
+    return;
+  } else if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
+    const pre = document.createElement('pre');
+    pre.textContent = new TextDecoder().decode(bytes);
+    stage.appendChild(pre);
+  } else if (mime.startsWith('video/') || mime.startsWith('audio/')) {
+    const el = document.createElement(mime.startsWith('video/') ? 'video' : 'audio');
+    el.controls = true;
+    el.src = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    if (mime.startsWith('video/')) document.body.className = 'media';
+    stage.appendChild(el);
+  } else {
+    const p = document.createElement('p');
+    const a = document.createElement('a');
+    a.href = '#';
+    a.textContent = `Download ${name} (${fmt(bytes.length)})`;
+    a.addEventListener('click', (e) => { e.preventDefault(); saveBytes(bytes, name, mime); });
+    p.appendChild(a);
+    stage.appendChild(p);
+  }
+  status(`${name} — ${fmt(bytes.length)}${fromLabel ? ` from ${fromLabel}` : ''}`);
 }
 
 // ─── the router ───────────────────────────────────────────────────────────────────────────────
@@ -737,13 +894,20 @@ async function run() {
       'file#something.zip.</p>';
     return;
   }
-  let token;
+  // `/file/<base>/<member>` — the address may point INSIDE a zip (bug.gif in a zip of a game).
+  // Try the whole token first (a dictionary name can contain a slash), then split at the first one.
+  let token, member = null;
   try {
     token = await resolveToken(raw);
   } catch (e) {
-    status(e.message, true);
-    return;
+    const cut = raw.indexOf('/');
+    if (cut <= 0) { status(e.message, true); return; }
+    try {
+      token = await resolveToken(raw.slice(0, cut));
+      member = raw.slice(cut + 1);
+    } catch (e2) { status(e2.message, true); return; }
   }
+  document.body.className = '';
   // `direct` means "an ordinary http url", where the browser's own Range requests work. A pbs url
   // is NEVER direct: its bytes are pixels, so every byte has to come through the codec.
   src = { name: token.name || 'file', urls: token.urls,
@@ -788,6 +952,12 @@ async function run() {
     }
     if (mime === 'application/zip' || zipByName) {
       status('Reading the end of the file for its directory…');
+      if (member) {
+        // An id has no extension; the archive still saves as an archive.
+        const label = /\.(zip|apk|jar)$/i.test(src.name) ? src.name : `${src.name}.zip`;
+        await renderZipMember(label, member);
+        return;
+      }
       let listing;
       try {
         listing = await readZipCentral();
