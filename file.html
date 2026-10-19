@@ -494,6 +494,12 @@ async function renderMedia(mime) {
   el.autoplay = true;
   el.playsInline = true;
 
+  // Following a master lands here with NEW parts and no sniff of its own: check whether what it
+  // names is PACKED before offering it to a player (a packed webm otherwise went black for 23 s).
+  if (!src.direct && !src.packed) {
+    const h = await peekHead(16);
+    if (h && isPacked(h)) src.packed = true;
+  }
   if (src.direct) {
     // An ordinary url is already streamable by the browser: point at it and let it do the work.
     el.src = src.urls[0];
