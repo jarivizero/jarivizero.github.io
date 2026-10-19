@@ -1,2 +1,122 @@
-<script>window.location.replace("https://jarivizero.github.io/#2");</script>
-<noscript>Links don't populate without javascript.</noscript>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 — not found</title>
+<style>
+  :root { --bg:#f4efe6; --fg:#1b1b1f; --muted:#6b6b73; --accent:#2b6cb0; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; min-height:100%; background:var(--bg); color:var(--fg);
+    font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  body { display:flex; align-items:center; justify-content:center; padding:24px; }
+  main { text-align:center; max-width:560px; }
+  img { width:min(100%, 420px); height:auto; display:block; margin:0 auto 8px; }
+  p { margin:6px 0; color:var(--muted); }
+  p.msg { color:var(--fg); }
+  p.msg.error { color:#b42318; }
+  a { color:var(--accent); text-decoration:none; font-weight:600; }
+  a:hover { text-decoration:underline; }
+  #home { font-size:15px; }
+</style>
+</head>
+<body>
+<main id="stage">
+  <img id="art" src="/404.png" alt="404 — whatever you are looking for, it is not here">
+  <p class="msg" id="msg"></p>
+  <p id="home"><a href="/bin2png">click me to go home</a></p>
+</main>
+<script>
+'use strict';
+// 404.html — one page with three jobs, all of them "the url was not a file".
+//
+// 1. `/file/<name>` — the path spelling of a renderer address. The renderer is loaded in place, so
+//    the address a person typed and will copy stays exactly what it is (a redirect to `/file#<name>`
+//    would rewrite it).
+// 2. `/__b2p/<name>?…` — a STREAM address. Its answer lives in `b2p-stream.js`, and a browser only
+//    asks a service worker after registering one. A visitor who never opened /file or /bin2png has
+//    no worker, so this page installs it, waits for it to control the page, proves the address
+//    answers a byte range, and reloads — the reload is served by the worker and the video plays.
+//    The plan rides in the url (`p=` ids, `u=` urls, `m=` type), so nothing has to be cached here.
+// 3. anything else — the 404 art (catbox.moe's), and one way home.
+const art = document.getElementById('art');
+const msg = document.getElementById('msg');
+const home = document.getElementById('home');
+const stage = document.getElementById('stage');
+
+function fail(text) {
+  msg.className = 'msg error';
+  msg.textContent = text;
+  home.innerHTML = '<a href="/bin2png">click me to go home</a>';
+}
+
+(async () => {
+  // ── 1. /file/<name> ─────────────────────────────────────────────────────────────────────────
+  const asPath = location.pathname.match(/^\/file\/(.+)$/);
+  if (asPath) {
+    const name = asPath[1].replace(/\/+$/, '');
+    if (!name) { location.replace('/file'); return; }
+    document.title = decodeURIComponent(name);
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.padding = '0';
+    document.body.style.display = 'block';
+    const frame = document.createElement('iframe');
+    frame.title = decodeURIComponent(name);
+    frame.src = '/file#' + encodeURIComponent(name);
+    frame.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0;background:#0b0b0d';
+    document.body.textContent = '';
+    document.body.appendChild(frame);
+    return;
+  }
+  if (location.pathname === '/file/') { location.replace('/file'); return; }
+
+  // ── 2. a stream url opened cold ─────────────────────────────────────────────────────────────
+  if (location.pathname.includes('/__b2p/')) {
+    msg.className = 'msg';
+    msg.textContent = 'Preparing the stream…';
+    home.textContent = '';
+    if (!('serviceWorker' in navigator) || !window.isSecureContext) {
+      fail('This browser cannot install the worker the stream needs.');
+      return;
+    }
+    try {
+      // Absolute, on purpose: this page is served for the requested path, so a relative script url
+      // would resolve against a directory that does not exist.
+      await navigator.serviceWorker.register('/b2p-stream.js', { scope: '/' });
+      await navigator.serviceWorker.ready;
+      if (!navigator.serviceWorker.controller) {
+        await new Promise((res) => {
+          const t = setTimeout(res, 10000);
+          navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(t); res(); }, { once: true });
+        });
+      }
+      if (!navigator.serviceWorker.controller) {
+        fail('The worker installed but did not take control of this page. Reload it once.');
+        return;
+      }
+      // Two bytes prove the plan is reachable: 206 with them, or 410 when the address carries no
+      // plan and this browser has never cached one.
+      const probe = await fetch(location.href, { headers: { Range: 'bytes=0-1' }, cache: 'no-store' });
+      if (probe.status === 206 || probe.status === 200) {
+        msg.textContent = 'Stream ready — opening it.';
+        location.replace(location.href);
+        return;
+      }
+      if (probe.status === 410) {
+        fail('This address carries no streaming plan, and this browser has not opened that file ' +
+             'before. Open it from /file (or /bin2png) by its name first.');
+        return;
+      }
+      fail(`The worker answered HTTP ${probe.status} for this address.`);
+    } catch (e) {
+      fail(`The worker could not be installed: ${e.message}`);
+    }
+    return;
+  }
+
+  // ── 3. an ordinary missing page: the art is already showing ─────────────────────────────────
+  msg.textContent = 'Whatever you are looking for, it is not here.';
+})();
+</script>
+</body>
+</html>
