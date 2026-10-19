@@ -2026,7 +2026,8 @@ async function handleDecodeUrl() {
       masterFollowed = true;
       const only = files[0];
       const targets = only.parts.map((p) => {
-        const ref = p.id || p.url || '';
+        // `url` first: `id` is the NUMERIC media id, not a pbs hash (a `?format=png` on it 404s).
+        const ref = p.url || p.id || '';
         return /^https?:/i.test(ref) ? ref : `https://pbs.twimg.com/media/${ref}?format=png`;
       });
       const mm = mimeFromName(only.name) || '';
