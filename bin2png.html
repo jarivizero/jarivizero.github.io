@@ -1747,7 +1747,16 @@ async function streamUrlFor(name, urls, mime, total) {
     await cache.put(streamPlanKey(id), new Response(JSON.stringify(plan), {
       headers: { 'Content-Type': 'application/json' } }));
   } catch (e) { return null; }
-  return new URL('__b2p/' + encodeURIComponent(name) + '?id=' + id, streamScriptUrl()).href;
+  // The URL carries the plan in a form a NEW browser can use: `p=` are pbs ids (the common case),
+  // `u=` full urls (a fixture, or any other host), `m=` the type. So copying the address of a
+  // playing video, or opening a shared one, still streams — the worker does not need this page's
+  // Cache API entry (404.html relies on exactly that).
+  const q = new URLSearchParams({ id });
+  const ids = urls.map((u) => (u.match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_-]+)/) || [])[1]);
+  if (ids.length === urls.length && ids.every(Boolean)) q.set('p', ids.join('+'));
+  else q.set('u', urls.map((u) => encodeURIComponent(u)).join('|'));
+  if (mime) q.set('m', mime);
+  return new URL('__b2p/' + encodeURIComponent(name) + '?' + q.toString(), streamScriptUrl()).href;
 }
 
 // The name a `#<name>` token stands for, or null when this decode was opened by an id/url.
