@@ -8,14 +8,17 @@
 // BEFORE THE FIRST PAINT. An address that names a media file must be the player from the very first
 // frame: no white page, no header line reading "file". The class is set while the head is parsed,
 // so the canvas is already black when the body is painted (his 2026-10-19 report: "will still load
-// a page, then a video loading …"). `mimeFromName` does not exist yet, so this is a plain extension
-// test on the hash, and nothing else depends on it.
+// a page, then a video loading …"). The address is the hash OR the path, because this page IS the
+// document of `/file/<name>` — the worker serves it there, and 404.html writes it into the same
+// document for the first visit. `mimeFromName` does not exist yet, so this is a plain extension
+// test, and nothing else depends on it.
 try {
-  const address = decodeURIComponent(location.hash.replace(/^#/, '')).replace(/^\.+/, '');
+  const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1] || '';
+  const address = decodeURIComponent(location.hash.replace(/^#/, '') || fromPath).replace(/^\.+/, '');
   if (/\.(mp4|m4v|mov|webm|mkv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav)$/i.test(address)) {
     document.documentElement.className = 'media-address';
   }
-} catch (e) { /* a broken hash is handled by run() */ }
+} catch (e) { /* a broken address is handled by run() */ }
 </script>
 <style>
   /* No design. The browser's defaults are what an autoindex looks like, and a video is the page. */
@@ -63,19 +66,43 @@ try {
 // The service worker only answers `/__b2p/…`; this page itself comes from GitHub Pages' HTTP cache,
 // so a deploy could sit behind a 10-minute `max-age`. Ask for the file with the cache bypassed and
 
-const BUILD = '2026-10-19T05:12';
-(function checkBuild() {
+// Where this page's own files live. It can BE the document of `/file/<name>` (the worker serves it
+// there so the typed address survives with no wrapper document), and then a relative URL resolves
+// under `/file/`, where IDSDICTIONARY.txt and b2p-stream.js do not exist. Everything internal is
+// built from the directory that HOLDS `/file`.
+const SITE_BASE = (() => {
+  const at = location.pathname.lastIndexOf('/file');
+  const dir = at >= 0 ? location.pathname.slice(0, at + 1) : new URL('.', location.href).pathname;
+  return location.origin + dir;
+})();
+const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
+
+const BUILD = '2026-10-19T05:40';
+(async function checkBuild() {
   if (!/^https?:$/.test(location.protocol)) return;
   const key = 'b2p-build-' + location.pathname;
   let seen = '';
   try { seen = sessionStorage.getItem(key) || ''; } catch (e) {}
-  fetch(location.pathname + location.search, { cache: 'reload' }).then((r) => (r.ok ? r.text() : ''))
-    .then((t) => {
-      const m = t && t.match(/const BUILD = '([^']+)'/);
-      if (!m || m[1] === BUILD || seen === m[1]) return;
-      try { sessionStorage.setItem(key, m[1]); } catch (e) {}
-      location.reload();
-    }).catch(() => {});
+  try {
+    // The REAL file, never the `/file` route: that one can be answered by the worker from its own
+    // precache, which is exactly the copy this check has to see past.
+    const res = await fetch(siteUrl('file.html'), { cache: 'reload' });
+    if (!res.ok) return;
+    const text = await res.text();
+    const m = text.match(/const BUILD = '([^']+)'/);
+    if (!m || m[1] === BUILD || seen === m[1]) return;
+    // A reload would be served from the same stale precache, so replace that copy first.
+    if (window.caches) {
+      try {
+        const cache = await caches.open('b2p-page-v1');
+        await cache.put(siteUrl('file'), new Response(text, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        }));
+      } catch (e) { /* no cache access: the reload still asks the server */ }
+    }
+    try { sessionStorage.setItem(key, m[1]); } catch (e) {}
+    location.reload();
+  } catch (e) { /* offline: what is on screen is the best there is */ }
 })();
 
 // file.html — the renderer. No encoder, no tabs, no options: an address in, the thing rendered.
@@ -173,7 +200,7 @@ async function idsDecrypt(name, payloadB64) {
 let dictCache = null;
 async function dictionary() {
   if (dictCache) return dictCache;
-  const url = new URL(IDS_DICT_FILE, location.href).href;
+  const url = siteUrl(IDS_DICT_FILE);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`no ${IDS_DICT_FILE} next to this page (HTTP ${res.status}) — looked at ${url}`);
   const map = new Map();
@@ -460,7 +487,7 @@ const STREAM_PLAN_CACHE = 'b2p-plan-v1';
 const STREAM_SCRIPT = 'b2p-stream.js';
 let streamWorker = null;
 
-function streamScriptUrl() { return new URL(STREAM_SCRIPT, location.href); }
+function streamScriptUrl() { return new URL(siteUrl(STREAM_SCRIPT)); }
 
 // Install the worker on load, not on the first stream: it also answers "this path is not a file".
 if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && window.isSecureContext) {
@@ -1131,8 +1158,18 @@ function optimisticMedia(mime) {
   return el;
 }
 
+// `/file#name` and `/file/name` are the same address, spelled differently: the second is what the
+// worker serves this page for (and what 404.html writes it into on a first visit), so the typed url
+// is never rewritten.
+function addressFromLocation() {
+  const hash = location.hash.replace(/^#/, '');
+  if (hash) return decodeURIComponent(hash).trim();
+  const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1];
+  return fromPath ? decodeURIComponent(fromPath).replace(/\/+$/, '').trim() : '';
+}
+
 async function run() {
-  const address = decodeURIComponent(location.hash.replace(/^#/, '')).trim();
+  const address = addressFromLocation();
 
   // `file/.HU3ep_nXIAAa6AR+…` reads the FIRST part's start and the LAST part's end through the
   // worker's byte ranges — the head says mp4/text/png, the tail says zip — instead of downloading
