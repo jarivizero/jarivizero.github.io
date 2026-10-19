@@ -5,48 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>file</title>
 <style>
-  :root { --bg:#0b0b0d; --fg:#e7e7ea; --muted:#8b8b94; --line:#232327; --accent:#6ee7b7; }
-  * { box-sizing:border-box; }
-  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
-    font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
-  header { display:flex; align-items:center; gap:14px; padding:10px 18px;
-    border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:2; }
-  header .name { font-weight:600; }
-  header .meta { color:var(--muted); font-size:12px; margin-left:auto; }
-  main { padding:18px; max-width:1100px; margin:0 auto; }
-  h1 { font-size:16px; font-weight:600; margin:0 0 12px; }
-  .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
-  button, a.btn { font:inherit; font-size:13px; color:var(--fg); background:#16161a;
-    border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; text-decoration:none; }
-  button:hover, a.btn:hover { border-color:#3a3a42; background:#1c1c21; }
-  button.primary { color:#08120d; background:var(--accent); border-color:var(--accent); font-weight:600; }
-  button.primary:hover { background:#8df0c6; }
-  button:disabled { opacity:.55; cursor:default; }
-  .status { color:var(--muted); font-size:12px; margin:0 0 14px; min-height:18px; }
-  .status.error { color:#fca5a5; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th { text-align:left; color:var(--muted); font-weight:500; font-size:12px;
-    border-bottom:1px solid var(--line); padding:6px 8px; }
-  td { padding:5px 8px; border-bottom:1px solid #151518; vertical-align:baseline; }
-  td.size, th.size { text-align:right; color:var(--muted); white-space:nowrap; width:110px; }
-  td.dl { width:110px; text-align:right; }
-  td.dl button { padding:2px 8px; font-size:12px; }
-  .icon { color:var(--muted); margin-right:6px; }
-  .row:hover td { background:#101014; }
-  pre { margin:0; padding:16px; background:#0f0f12; border:1px solid var(--line); border-radius:8px;
-    overflow:auto; white-space:pre-wrap; word-break:break-word; max-height:calc(100vh - 160px); }
-  video { width:100%; max-height:calc(100vh - 150px); background:#000; border-radius:8px; }
-  img { max-width:100%; max-height:calc(100vh - 150px); display:block; margin:0 auto; }
-  .empty { color:var(--muted); }
-  .tag { font-size:11px; color:var(--muted); border:1px solid var(--line); border-radius:4px; padding:1px 6px; }
+  /* No design. The browser's defaults, plus the two things a renderer needs: a video that fits the
+     window and a pre that wraps. The zip listing is plain <pre> on purpose — an old autoindex. */
+  body { margin: 8px; }
+  video { max-width: 100%; max-height: calc(100vh - 40px); background: #000; }
+  img { max-width: 100%; max-height: calc(100vh - 40px); }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .status { margin: 10px 0 0; font-size: 12px; }
+  .status.error { color: #b42318; }
 </style>
 </head>
 <body>
-<header>
-  <span class="name" id="where">file</span>
-  <span class="tag" id="kind"></span>
-  <span class="meta" id="meta"></span>
-</header>
+<header id="where">file</header><div id="kind"></div><div id="meta"></div>
 <main id="stage">
   <p class="empty">Open a file by name: <code>file#yakusoku.mp4</code>, <code>file#notes.txt</code>, <code>file#something.zip</code>.</p>
 </main>
@@ -438,7 +408,16 @@ async function streamUrlFor(name, urls, mime) {
       headers: { 'Content-Type': 'application/json' },
     }));
   } catch (e) { return null; }
-  return new URL('__b2p/' + encodeURIComponent(name) + '?id=' + id, streamScriptUrl()).href;
+  // The URL carries the plan in a form a NEW browser can use: `p=` are pbs ids (the common case),
+  // `u=` full urls (a fixture, or any other host), `m=` the type. So copying the address of a
+  // playing video, or opening a shared one, still streams — the worker does not need this page's
+  // Cache API entry (404.html relies on exactly that).
+  const q = new URLSearchParams({ id });
+  const ids = urls.map((u) => (u.match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_-]+)/) || [])[1]);
+  if (ids.length === urls.length && ids.every(Boolean)) q.set('p', ids.join('+'));
+  else q.set('u', urls.map((u) => encodeURIComponent(u)).join('|'));
+  if (mime) q.set('m', mime);
+  return new URL('__b2p/' + encodeURIComponent(name) + '?' + q.toString(), streamScriptUrl()).href;
 }
 
 // `mime` is the type the router already resolved — from the name, or from the probe when the
@@ -614,11 +593,17 @@ async function sniffSource() {
     if (!total) return { mime: '' };
     const tail = await sourceRange(Math.max(0, total - 65557), total - 1);
     if (looksLikeZipTail(tail)) return { zip: true };
-    return { mime: sniffMime(await sourceRange(0, Math.min(total - 1, 65535))) };
+    const head = await sourceRange(0, Math.min(total - 1, 65535));
+    // A packed payload (the encoder's DEFLATE wrapper) hides its type; unpack when the head is
+    // enough for it, which it always is for a text-sized file.
+    const unpacked = isPacked(head) ? await unpackPayload(head) : null;
+    return { mime: sniffMime(unpacked || head) };
   }
   const tail = await partPayload(src.urls.length - 1);
   if (looksLikeZipTail(tail)) return { zip: true };
-  return { mime: sniffMime(await partPayload(0)) };
+  const head = await partPayload(0);
+  const unpacked = isPacked(head) ? await unpackPayload(head) : null;
+  return { mime: sniffMime(unpacked || head) };
 }
 
 function parseCentral(block, at, entries, cdSize, cdOff, total) {
@@ -669,87 +654,73 @@ async function memberBytes(f) {
 }
 
 function indexOf(files, total, name) {
+  // The old autoindex page, not a UI: `Index of …`, a rule, then a <pre> of links with the date and
+  // the size in plain columns. The parent-directory link is replaced by Download Zip.
   $('where').textContent = `Index of ${name}`;
-  $('kind').textContent = 'zip';
-  $('meta').textContent = `${fmt(total)}`;
+  $('kind').textContent = '';
+  $('meta').textContent = '';
+  document.title = `Index of ${name}`;
   clearStage();
-  const bar = document.createElement('div');
-  bar.className = 'toolbar';
-  const zipBtn = document.createElement('button');
-  zipBtn.className = 'primary';
-  zipBtn.id = 'download-zip';
-  zipBtn.textContent = `⬇ Download Zip`;
-  zipBtn.title = `Download ${name} (${fmt(total)})`;
-  zipBtn.addEventListener('click', async () => {
-    zipBtn.disabled = true;
-    zipBtn.textContent = 'Fetching every part…';
+
+  const rule = () => stage.appendChild(document.createElement('hr'));
+  rule();
+  const pre = document.createElement('pre');
+  const zipA = document.createElement('a');
+  zipA.id = 'download-zip';
+  zipA.href = '#';
+  zipA.textContent = 'Download Zip';
+  zipA.title = `Download ${name} (${fmt(total)})`;
+  zipA.addEventListener('click', async (e) => {
+    e.preventDefault();
+    zipA.textContent = 'fetching…';
     try {
       const bytes = await wholeFile();
       saveBytes(bytes, name, 'application/zip');
-      status(`Saved ${name} — ${fmt(bytes.length)}`);
-    } catch (e) { status(`Could not fetch the archive: ${e.message}`, true); }
-    zipBtn.disabled = false;
-    zipBtn.textContent = '⬇ Download Zip';
+      status(`saved ${name} — ${fmt(bytes.length)}`);
+    } catch (err) { status(`could not fetch the archive: ${err.message}`, true); }
+    zipA.textContent = 'Download Zip';
   });
-  bar.appendChild(zipBtn);
-  const count = files.filter((f) => !f.dir).length;
-  const note = document.createElement('span');
-  note.className = 'status';
-  note.style.margin = '0';
-  note.textContent = `${count} file(s) — read from the end of the file, nothing else downloaded yet`;
-  bar.appendChild(note);
-  stage.appendChild(bar);
+  pre.appendChild(zipA);
+  pre.appendChild(document.createTextNode('\n'));
 
-  const table = document.createElement('table');
-  const head = document.createElement('tr');
-  for (const [text, cls] of [['Name', ''], ['Size', 'size'], ['Modified', 'size'], ['', 'dl']]) {
-    const th = document.createElement('th');
-    th.textContent = text;
-    if (cls) th.className = cls;
-    head.appendChild(th);
-  }
-  table.appendChild(head);
+  const pad = (text, width) => text.length >= width ? text + ' ' : text + ' '.repeat(width - text.length);
   for (const f of files) {
-    const tr = document.createElement('tr');
-    tr.className = 'row';
-    const nm = document.createElement('td');
-    const icon = document.createElement('span');
-    icon.className = 'icon';
-    icon.textContent = f.dir ? '📁' : '📄';
-    nm.appendChild(icon);
-    nm.appendChild(document.createTextNode(f.path.replace(/\/$/, '')));
-    tr.appendChild(nm);
-    const sz = document.createElement('td');
-    sz.className = 'size';
-    sz.textContent = f.dir ? '—' : fmt(f.size);
-    tr.appendChild(sz);
-    const dt = document.createElement('td');
-    dt.className = 'size';
-    dt.textContent = f.modified ? f.modified.toISOString().slice(0, 10) : '';
-    tr.appendChild(dt);
-    const dl = document.createElement('td');
-    dl.className = 'dl';
-    if (!f.dir) {
-      const b = document.createElement('button');
-      b.textContent = '⬇';
-      b.title = `Download ${f.path} (${fmt(f.size)}) — only the bytes this member needs`;
-      b.addEventListener('click', async () => {
-        b.disabled = true;
-        try {
-          const bytes = await memberBytes(f);
-          const base = f.path.replace(/^.*\//, '');
-          saveBytes(bytes, base, mimeFromName(base));
-          status(`Saved ${base} — ${fmt(bytes.length)}${f.size && bytes.length !== f.size ? ` (expected ${fmt(f.size)})` : ''}`);
-        } catch (e) { status(`Could not read ${f.path}: ${e.message}`, true); }
-        b.disabled = false;
-      });
-      dl.appendChild(b);
+    if (f.dir) {
+      pre.appendChild(document.createTextNode(pad(f.path.replace(/\/$/, '') + '/', 56) +
+        '  ' + (f.modified ? stamp(f.modified) : '') + '\n'));
+      continue;
     }
-    tr.appendChild(dl);
-    table.appendChild(tr);
+    const a = document.createElement('a');
+    a.className = 'member';
+    a.href = '#';
+    a.textContent = f.path;
+    a.title = `${f.path} (${fmt(f.size)}) — only the bytes this member needs`;
+    a.addEventListener('click', async (e) => {
+      e.preventDefault();
+      a.textContent = f.path + ' …';
+      try {
+        const bytes = await memberBytes(f);
+        const base = f.path.replace(/^.*\//, '');
+        saveBytes(bytes, base, mimeFromName(base));
+        status(`saved ${base} — ${fmt(bytes.length)}`);
+      } catch (err) { status(`could not read ${f.path}: ${err.message}`, true); }
+      a.textContent = f.path;
+    });
+    pre.appendChild(a);
+    pre.appendChild(document.createTextNode(' ' +
+      pad('', 56 - f.path.length) + ' ' + (f.modified ? stamp(f.modified) : '') + ' ' +
+      fmt(f.size).padStart(9) + '\n'));
   }
-  stage.appendChild(table);
-  status(`${files.length} entr${files.length === 1 ? 'y' : 'ies'}; click ⬇ for one file, or Download Zip for all of it`);
+  stage.appendChild(pre);
+  rule();
+  status(`${files.length} entr${files.length === 1 ? 'y' : 'ies'} read from the end of the file`);
+}
+
+// nginx's autoindex stamp: 18-Oct-2026 22:00
+function stamp(d) {
+  const m = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+  return `${String(d.getUTCDate()).padStart(2, '0')}-${m}-${d.getUTCFullYear()} ` +
+         `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 // ─── the router ───────────────────────────────────────────────────────────────────────────────
@@ -762,8 +733,8 @@ async function run() {
   stage.textContent = '';
   stage.appendChild(statusEl);
   if (!raw) {
-    stage.innerHTML = '<p class="empty">Open a file by name: <code>file#yakusoku.mp4</code>, ' +
-      '<code>file#notes.txt</code>, <code>file#something.zip</code>.</p>';
+    stage.innerHTML = '<p>Open a file by name: file#yakusoku.mp4, file#notes.txt, ' +
+      'file#something.zip.</p>';
     return;
   }
   let token;
@@ -845,6 +816,16 @@ async function run() {
     status('Fetching…');
     const bytes = await wholeFile();
     $('meta').textContent = fmt(bytes.length);
+    // An HTML payload IS a page: render it as the document, not as its source. Same rule as
+    // bin2png's `(html)` mode — document.open()/write()/close() drops this page and lets the
+    // decoded page's own <style>/<script> run, with relative urls resolved against this directory.
+    if (mime === 'text/html') {
+      window.__fileHtml = src.name;
+      document.open();
+      document.write(new TextDecoder().decode(bytes));
+      document.close();
+      return;
+    }
     if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml'
         || mime === 'application/pdf') {
       if (mime === 'application/pdf') {
