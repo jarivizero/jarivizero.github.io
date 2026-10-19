@@ -3975,7 +3975,9 @@ function showDecodedResult() {
     body.appendChild(img);
   } else if (mime.startsWith('video/')) {
     const v = document.createElement('video');
-    v.src = url; v.controls = true; v.className = 'decode-media';
+    // Autoplay like the streamed player: a decoded video used to arrive ready but paused, so a
+    // packed payload (which cannot stream) looked dead until it was clicked.
+    v.src = url; v.controls = true; v.autoplay = true; v.playsInline = true; v.className = 'decode-media';
     body.appendChild(v);
   } else if (mime.startsWith('audio/')) {
     const a = document.createElement('audio');
