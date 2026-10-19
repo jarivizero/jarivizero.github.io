@@ -5,11 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>file</title>
 <script>
-// BEFORE THE FIRST PAINT. An address that names a media file must be the player from the very first
-// frame: no white page, no header line, no "loading video" text (his 2026-10-19 report). The class is
-// set while the head is parsed, so the canvas is already black when the body is painted. `,<id>` is
-// the address that says "video" outright; a name with a media extension says it too, and so does the
-// `?name.mp4` that can ride along with an id.
+
+// 2026-10-19: a media address is the player from the very first frame, and a `.txt` address is a TEXT
+// page from the very first frame, which for an ordinary tab means the canvas colour the UA picks from
+// `<meta name="color-scheme" content="light dark">` — the one node a `file:///` .txt tab has in its
+// head. A media name got that treatment and a text name did not, so a text page flashed black first.
+// `,<id>` says video outright, an extension says which kind, `?name.ext` can ride along with an id.
 try {
   const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
     || (/^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname) ? location.pathname.slice(1) : '')
@@ -18,15 +19,43 @@ try {
   const address = decodeURIComponent(hash || fromPath).trim();
   let hint = location.search.replace(/^\?/, '');
   try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
-  const name = hint && !hint.includes('=') ? hint : address;
-  const isMedia = address.startsWith(',') ||
-    /\.(mp4|m4v|mov|webm|mkv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav)$/i.test(name);
-  if (isMedia) document.documentElement.className = 'media-address';
+  // The prefix grammar, exactly as run() reads it: a leading `.` is an archive, a leading `,` a video.
+  let raw = address;
+  for (;;) {
+    if (raw.length > 1 && (raw.charAt(0) === '.' || raw.charAt(0) === ',')) { raw = raw.slice(1); continue; }
+    break;
+  }
+  const forcedMedia = address.charAt(0) === ',';
+  const name = hint && !hint.includes('=') ? hint : raw;
+  const ext = (name.match(/\.([A-Za-z0-9]+)$/) || [])[1];
+  const e = ext ? ext.toLowerCase() : '';
+  const MEDIA = ['mp4','m4v','mov','webm','mkv','avi','mp3','m4a','aac','ogg','oga','opus','flac','wav'];
+  // The list of kinds a text tab covers: anything a `file:///` tab prints rather than plays. Kept
+  // beside the same list in 404.html, which needs it for the FIRST frame of a cold visit.
+  const IMAGE = ['png','jpg','jpeg','gif','webp','bmp','avif','ico','svg'];
+  const kind = forcedMedia || MEDIA.includes(e) ? 'media'
+    : (raw.charAt(0) === '.' ? 'text' : (e ? (IMAGE.includes(e) ? 'image' : 'text') : ''));
+  if (kind === 'media') document.documentElement.className = 'media-address';
+  else if (kind === 'image') document.documentElement.className = 'image-address';
+  else if (kind === 'text') {
+    document.documentElement.className = 'text-address';
+    const meta = document.createElement('meta');
+    meta.name = 'color-scheme';
+    meta.content = 'light dark';
+    document.head.appendChild(meta);
+  } else {
+    // An id with no extension: nothing is known yet, so leave the canvas alone (the sniff decides).
+    document.documentElement.className = '';
+  }
 } catch (e) { /* a broken address is handled by run() */ }
 </script>
 <style>
   /* No design. The browser's defaults are what an autoindex looks like, and a file is the page. */
   html.media-address, html.media-address body { background: #000; }
+  /* An image tab is a dark canvas with the picture in it (bareImage's own colour). A `text-address`
+     deliberately sets NO background: the canvas comes from the color-scheme meta, so a .txt page is
+     white in light mode and #121212-ish in dark mode, exactly like the native tab. */
+  html.image-address, html.image-address body { background: #0e0e0e; }
   /* What this page BUILDS is all it styles: Apache's index table, a status line under it, the 404
      art, a PDF's embed. A text, image or media view removes this stylesheet entirely (`bareHead`),
      so what is left is exactly what a `file:///` tab has — nothing but the payload element. */
@@ -57,7 +86,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-19T06:07';
+const BUILD = '2026-10-19T06:41';
 // ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
 // `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
@@ -608,7 +637,13 @@ async function peekHead(n = 64) {
   try {
     if (src.direct) return await sourceRange(0, n - 1);
     const ends = await rangedEnds();
-    return ends ? ends.head.subarray(0, n) : null;
+    if (ends) return ends.head.subarray(0, n);
+    // NO WORKER (a browser refusing service workers, or a `file://` page) — and then the head still
+    // has to be readable, because the master test below is what stops a manifest from being played
+    // as a video. The worker exists to avoid this download; here the whole-file path would fetch the
+    // part anyway, and a MASTER part is a few hundred bytes.
+    const first = await partPayload(0);
+    return first.subarray(0, n);
   } catch (e) { return null; }
 }
 function isManifestHead(bytes) {
@@ -616,12 +651,27 @@ function isManifestHead(bytes) {
   const t = new TextDecoder('latin1').decode(bytes.subarray(0, 20));
   return t.startsWith('#bin2png-manifest');
 }
+// ONE read of the payload's head, answering both questions a player start has to ask: is the payload
+// DEFLATE-wrapped (`src.packed`), and is this address really a MASTER file (a name can lie — `file/
+// blindspots.webm` is a .webm by name and a manifest by content)? The raw head is what tells the first
+// one; the second needs the INFLATED prefix, because a packed head reads `B2PZ…` and says nothing.
+// Measured 2026-10-19: `x-draft.py` packs the master, so `/file/<id>.webm` peeked at `B2PZ`, never saw
+// the manifest, and handed the player the 1 KB manifest TEXT as a video — readyState 0 forever —
+// while the same id with a `,` in front worked, because run()'s SNIFF unpacks before deciding.
+async function peekForRender() {
+  const raw = await peekHead(4096).catch(() => null);
+  if (!raw) return { raw: null, plain: null, packed: false };
+  const packed = isPacked(raw);
+  let plain = raw;
+  if (packed) plain = (await unpackPrefix(raw).catch(() => null)) || raw;
+  return { raw, plain, packed };
+}
 
 async function renderMedia(mime) {
   mime = mime || 'application/octet-stream';
-  // A NAME can lie, and a master file always does: `file/blindspots.webm` is a .webm by name and a
-  // manifest by content (his 2026-10-19 report — it errored). Look at the first bytes first.
-  if (manifestDepth < 1 && isManifestHead(await peekHead())) {
+  const head = await peekForRender();
+  // A master file is followed before anything is offered to a player.
+  if (manifestDepth < 1 && isManifestHead(head.plain)) {
     const master = followManifest(await wholeFile());
     if (master) {
       manifestDepth++;
@@ -637,12 +687,9 @@ async function renderMedia(mime) {
     ? pendingVideo : bareMedia(isVideo ? 'video' : 'audio');
   pendingVideo = null;
 
-  // Following a master lands here with NEW parts and no sniff of its own: check whether what it
-  // names is PACKED before offering it to a player (a packed webm otherwise went black for 23 s).
-  if (!src.direct && !src.packed) {
-    const h = await peekHead(16);
-    if (h && isPacked(h)) src.packed = true;
-  }
+  // Following a master lands here with NEW parts and no sniff of its own, so the head read above is
+  // the one that says whether what it names is PACKED (a packed webm otherwise went black for 23 s).
+  if (!src.direct && !src.packed && head.packed) src.packed = true;
   if (src.direct) {
     // An ordinary url is already streamable by the browser: point at it and let it do the work.
     setMediaSource(el, src.urls[0], mime);
