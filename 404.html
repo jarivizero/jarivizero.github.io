@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>404 — not found</title>
 <style>
-  :root { --bg:#f4efe6; --fg:#1b1b1f; --muted:#6b6b73; --accent:#2b6cb0; }
+  :root { --bg:#fff; --fg:#1b1b1f; --muted:#666; --accent:#0645ad; }
   * { box-sizing:border-box; }
   html,body { margin:0; min-height:100%; background:var(--bg); color:var(--fg);
     font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; }
@@ -114,8 +114,8 @@ function fail(text) {
     return;
   }
 
-  // ── 3. an ordinary missing page: the art is already showing ─────────────────────────────────
-  msg.textContent = 'Whatever you are looking for, it is not here.';
+  // ── 3. an ordinary missing page: the art says it, so nothing else is added ──────────────────
+  msg.textContent = '';
 })();
 </script>
 </body>
