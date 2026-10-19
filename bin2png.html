@@ -684,6 +684,7 @@ let decZipNote = null;    // e.g. 'ZIP > TXT' when a single-file zip was unwrapp
 let decInnerName = null;  // the member name inside that zip
 let decZipEntries = null; // entries when the payload is a multi-member zip
 let decManifest = null;   // files+parts when the payload is a .bin2png master file (x-draft.py)
+let masterFollowed = false;   // a one-file master is followed ONCE, never in a loop
 let decTt2png = null;     // the index when the payload is a tt2png bundle (tiktokupload.py)
 let decPackage = null;    // the log when the payload is a ttbackup/ttcloud package
 let decOversize = null;   // "900x900" when a decoded PNG was above the codec's ceiling
@@ -2017,6 +2018,42 @@ async function handleDecodeUrl() {
 
   if (decManifest) {
     const files = decManifest;
+    // A MASTER that names exactly ONE file is not a list to browse: it is that file, wrapped. Render
+    // it — the player for media, the stitched bytes for anything else — instead of showing "Master
+    // file — saved 0/1" and a Decode button (his 2026-10-19 report on `#blindspots.webm`, whose
+    // master names the four parts of the webm).
+    if (files.length === 1 && (files[0].parts || []).length && !masterFollowed) {
+      masterFollowed = true;
+      const only = files[0];
+      const targets = only.parts.map((p) => {
+        const ref = p.id || p.url || '';
+        return /^https?:/i.test(ref) ? ref : `https://pbs.twimg.com/media/${ref}?format=png`;
+      });
+      const mm = mimeFromName(only.name) || '';
+      decManifest = null;
+      if (/^(video|audio)\//.test(mm) && !hashModeOf(location.hash) &&
+          await startStreamDecode(targets, only.name, mm)) {
+        setResultHash(targets);
+        return;
+      }
+      const fetched = await fetchParts(targets, multi ? 'Downloading parts' : null);
+      if (fetched.error) { setDecStatus(fetched.error, 'error'); setDecProgress(-1); return; }
+      const payloads = [];
+      for (let i = 0; i < fetched.parts.length; i++) {
+        const payload = await codecPayload(fetched.parts[i]);
+        if (!payload) {
+          setDecStatus(`Part ${i + 1}/${targets.length} of ${only.name} is not an encoded PNG`, 'error');
+          setDecProgress(-1);
+          return;
+        }
+        payloads.push(payload);
+      }
+      setResultHash(targets);
+      setDecProgress(90);
+      await decodeBytes(payloads.length > 1 ? concatParts(payloads) : payloads[0]);
+      setDecStatus(`${only.name} — ${fmtBytes(payloads.reduce((n, b) => n + b.length, 0))} from its master file`, 'success');
+      return;
+    }
     // `(html)` on a master file means "show me the page it lists", not "save every file": fetch the
     // HTML member (the first one whose name says so, else the first file) and replace this document
 
@@ -2082,7 +2119,7 @@ async function handleDecodeUrl() {
 // Decode whatever bytes we ended up with: a codec PNG goes through the pixel decoder;
 // any other file (say a .txt URL) is shown raw rather than failing.
 async function decodeBytes(bytes, depth = 0) {
-  if (depth === 0) { decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; decTt2png = null; decPackage = null; decOversize = null; ttAutoFetched = null; ttFile = null; ttRawJson = ''; decStream = null; }
+  if (depth === 0) { masterFollowed = false; decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; decTt2png = null; decPackage = null; decOversize = null; ttAutoFetched = null; ttFile = null; ttRawJson = ''; decStream = null; }
   const mime = guessMime(bytes);
   if (mime === 'image/png') {
     // Exact path first: parse the PNG ourselves. Canvas getImageData() PREMULTIPLIES
