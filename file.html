@@ -35,11 +35,8 @@ try {
   .status { margin: 6px 0 0; font-size: 12px; }
   .status.error { color: #b42318; }
   img { max-width: 100%; }
-  body.notfound { background: #fff; color: #1b1b1f; margin: 0; min-height: 100vh;
-                  display: flex; align-items: center; justify-content: center; padding: 24px;
-                  font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  body.notfound p { margin: 6px 0; color: #1b1b1f; }
-  body.notfound a { color: #0645ad; font-weight: 600; text-decoration: none; }
+  /* `body.notfound` is styled by show404 itself, NOT from here: a media address removes this whole
+     stylesheet (`bareHead`), and the art page that follows must look the same either way. */
 </style>
 </head>
 <body>
@@ -60,7 +57,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-19T06:05';
+const BUILD = '2026-10-19T06:07';
 // ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
 // `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
@@ -446,7 +443,11 @@ async function partPayload(i) {
   const p = (async () => {
     const url = src.urls[i];
     const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
-    if (!res.ok) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
+    if (!res.ok) {
+      const err = new Error(`part ${i + 1}: HTTP ${res.status}`);
+      err.httpStatus = res.status;
+      throw err;
+    }
     const payload = await decodePngExact(new Uint8Array(await res.arrayBuffer()));
     if (!payload) throw new Error(`part ${i + 1} is not a bin2png PNG`);
     if (i < src.urls.length - 1 && payload.length !== CAPACITY) {
@@ -462,7 +463,11 @@ async function partPayload(i) {
 async function sourceSize() {
   if (src.direct) {
     const res = await fetch(src.urls[0], { method: 'HEAD' });
-    if (!res.ok) throw new Error(`HTTP ${res.status} for ${src.urls[0]}`);
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status} for ${src.urls[0]}`);
+      err.httpStatus = res.status;
+      throw err;
+    }
     return Number(res.headers.get('Content-Length')) || 0;
   }
   const last = await partPayload(src.urls.length - 1);
@@ -474,6 +479,11 @@ async function sourceRange(start, end) {
   if (end < start) return new Uint8Array(0);
   if (src.direct) {
     const res = await fetch(src.urls[0], { headers: { Range: `bytes=${start}-${end}` } });
+    if (res.status === 404 || res.status === 410) {
+      const err = new Error(`HTTP ${res.status} for ${src.urls[0]}`);
+      err.httpStatus = res.status;
+      throw err;
+    }
     if (res.status !== 206) {
       // A server that answers 200 ignores Range: the body is the whole file.
       const all = new Uint8Array(await res.arrayBuffer());
@@ -497,7 +507,11 @@ async function sourceRange(start, end) {
 async function wholeFile() {
   if (src.direct) {
     const res = await fetch(src.urls[0]);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.httpStatus = res.status;
+      throw err;
+    }
     return unpackPayload(new Uint8Array(await res.arrayBuffer()));
   }
   const parts = await Promise.all(src.urls.map((_, i) => partPayload(i)));
@@ -1235,22 +1249,46 @@ let dictFreshOnce = false;  // one forced dictionary re-read per page, never a l
 
 // The address earned nothing: white, centred, the art, one way home — the page 404.html shows. The
 // body is rebuilt first so a player or an index cannot sit underneath it.
+// The rules live HERE, not in the stylesheet: a media address strips <head> whole (`bareHead`),
+// and then a missing file used to paint in Times New Roman, hard against the left edge, with a
+// default blue link (his 2026-10-19 report: "the not found is on the left now … click me to go home
+// has not styled"). It is the SAME page 404.html shows: the art, then one way home.
+const NOTFOUND_CSS = `
+  html, body { margin:0; min-height:100%; background:#fff; color:#1b1b1f;
+    font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  body { display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px; text-align:center; }
+  p { margin:6px 0; }
+  a { color:#0645ad; text-decoration:none; font-weight:600; }
+  a:hover { text-decoration:underline; }
+  #home { font-size:15px; }
+`;
 function show404() {
   pendingVideo = null;
   resetPage('notfound');
+  // A media address left `html.media-address` (black) and a head with nothing in it. Rebuild both,
+  // so every route ends on the identical page.
+  document.documentElement.className = '';
+  document.documentElement.removeAttribute('style');
+  for (const n of [...document.head.childNodes]) n.remove();
+  const meta = document.createElement('meta');
+  meta.name = 'viewport';
+  meta.content = 'width=device-width, initial-scale=1';
+  const style = document.createElement('style');
+  style.textContent = NOTFOUND_CSS;
+  document.head.append(meta, style);
   document.title = '404 — not found';
   const img = document.createElement('img');
   img.src = siteUrl('404.png');
   img.alt = '404 — whatever you are looking for, it is not here';
   img.style.cssText = 'width:min(100%,420px);height:auto;display:block;margin:0 auto 8px';
-  const msg = document.createElement('p');
-  msg.textContent = 'not found';
   const home = document.createElement('p');
+  home.id = 'home';
   const a = document.createElement('a');
   a.href = siteUrl('bin2png');
   a.textContent = 'click me to go home';
   home.appendChild(a);
-  body.append(img, msg, home);
+  body.append(img, home);
 }
 
 // A player that IS the page: one element in <body>, the black window behind it, and the head and
@@ -1533,8 +1571,12 @@ async function run() {
     }
     binaryView(bytes);
   } catch (e) {
-    // A guessed pbs id that cannot even be fetched is a missing file, not a status line.
-    if (src.guess) show404(); else status(e.message, true);
+    // A 404 from the bytes IS a missing file, not a status line. His 2026-10-19 report:
+    // `/file/nothinghere` is a 11-character token, so it passes the pbs-id test, pbs answers 404,
+    // and the page printed "part 1: HTTP 404" instead of the art. The status line is left for
+    // failures that are NOT "it is not there" (a decode error, a CORS block, an offline fetch).
+    if (src.guess || e.httpStatus === 404 || e.httpStatus === 410) show404();
+    else status(e.message, true);
   }
 }
 
