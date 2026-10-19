@@ -26,6 +26,24 @@
   // document replaces this one, so the encoder UI must not paint first.
   if (/\((openfull|html)\)/i.test(h)) document.documentElement.className = 'result-only';
 })();
+(function checkBuild() {
+  // The service worker only answers `/__b2p/…`; THIS page comes from GitHub Pages' HTTP cache (a
+  // 10-minute max-age), so a deploy could sit behind it. Ask for the file with the cache bypassed
+
+  if (!/^https?:$/.test(location.protocol)) return;
+  const BUILD = '2026-10-19T04:05';
+  const key = 'b2p-build-' + location.pathname;
+  let seen = '';
+  try { seen = sessionStorage.getItem(key) || ''; } catch (e) {}
+  fetch(location.pathname + location.search, { cache: 'reload' }).then((r) => (r.ok ? r.text() : ''))
+    .then((t) => {
+      const m = t && t.match(/const BUILD = '([^']+)'/);
+      if (!m || m[1] === BUILD || seen === m[1]) return;
+      try { sessionStorage.setItem(key, m[1]); } catch (e) {}
+      location.reload();
+    }).catch(() => {});
+})();
+
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Twitter PNG Codec</title>
@@ -1730,13 +1748,15 @@ function ensureStreamWorker() {
       || !window.isSecureContext || location.protocol === 'file:') return Promise.resolve(null);
   streamWorker = (async () => {
     try {
+      // Register IMMEDIATELY and do not wait for `ready`: the worker is what makes the player
+      // possible, and blocking a page on it only delays the paint. A controller that arrives a
+      // moment later still answers the stream, because `clients.claim()` runs on activate.
       const reg = await navigator.serviceWorker.register(streamScriptUrl().href);
-      await navigator.serviceWorker.ready;
       if (!navigator.serviceWorker.controller) {
         // A worker only answers fetches from a page it CONTROLS. `clients.claim()` takes this
         // first load over; the event is the moment it did.
         await new Promise((res) => {
-          const t = setTimeout(res, 2500);
+          const t = setTimeout(res, 600);   // a short look, not a wait: the URL is valid either way
           navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(t); res(); }, { once: true });
         });
       }
