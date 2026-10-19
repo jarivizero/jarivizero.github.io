@@ -17,6 +17,12 @@
   body.plain > header, body.plain > #kind, body.plain > #meta, body.plain .status { display: none; }
   body.plain { margin: 0; }
   body.plain pre { padding: 0; margin: 0; }
+  /* The 404 page 404.html renders: white, centred, monospace. */
+  body.notfound { background: #fff; color: #1b1b1f; margin: 0; min-height: 100vh;
+                  display: flex; align-items: center; justify-content: center; padding: 24px;
+                  font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  body.notfound > header, body.notfound > #kind, body.notfound > #meta, body.notfound .status { display: none; }
+  body.notfound #stage { text-align: center; max-width: 560px; }
   body.media #stage { height: 100vh; margin: 0; }
   img { max-width: 100%; max-height: calc(100vh - 40px); }
   pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
@@ -32,6 +38,25 @@
 </main>
 <script>
 'use strict';
+// ─── is this page the one that is deployed? ────────────────────────────────────────────────────
+// The service worker only answers `/__b2p/…`; this page itself comes from GitHub Pages' HTTP cache,
+// so a deploy could sit behind a 10-minute `max-age`. Ask for the file with the cache bypassed and
+
+const BUILD = '2026-10-19T04:05';
+(function checkBuild() {
+  if (!/^https?:$/.test(location.protocol)) return;
+  const key = 'b2p-build-' + location.pathname;
+  let seen = '';
+  try { seen = sessionStorage.getItem(key) || ''; } catch (e) {}
+  fetch(location.pathname + location.search, { cache: 'reload' }).then((r) => (r.ok ? r.text() : ''))
+    .then((t) => {
+      const m = t && t.match(/const BUILD = '([^']+)'/);
+      if (!m || m[1] === BUILD || seen === m[1]) return;
+      try { sessionStorage.setItem(key, m[1]); } catch (e) {}
+      location.reload();
+    }).catch(() => {});
+})();
+
 // file.html — the renderer. No encoder, no tabs, no options: an address in, the thing rendered.
 //
 //   file#yakusoku.mp4      → the player is on screen at once; the service worker (b2p-stream.js)
@@ -420,11 +445,13 @@ function ensureStreamWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return Promise.resolve(null);
   streamWorker = (async () => {
     try {
+      // Register IMMEDIATELY and do not wait for `ready`: the worker is what makes the player
+      // possible, and blocking a page on it only delays the paint. A controller that arrives a
+      // moment later still answers the stream, because `clients.claim()` runs on activate.
       const reg = await navigator.serviceWorker.register(streamScriptUrl().href);
-      await navigator.serviceWorker.ready;
       if (!navigator.serviceWorker.controller) {
         await new Promise((res) => {
-          const t = setTimeout(res, 2500);
+          const t = setTimeout(res, 600);   // a short look, not a wait: the URL is valid either way
           navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(t); res(); }, { once: true });
         });
       }
@@ -489,10 +516,15 @@ async function renderMedia(mime) {
     }
   }
   const isVideo = mime.startsWith('video/');
-  const el = document.createElement(isVideo ? 'video' : 'audio');
+  // Stream into the player that is already on screen — that is what "looks like it is loading
+  // instantly, then plays" means. A fresh element would flash black a second time.
+  const reuse = pendingVideo && (isVideo === (pendingVideo.tagName === 'VIDEO'));
+  const el = reuse ? pendingVideo : document.createElement(isVideo ? 'video' : 'audio');
+  pendingVideo = null;
   el.controls = true;
   el.autoplay = true;
   el.playsInline = true;
+  if (reuse) stage.textContent = '';
 
   // Following a master lands here with NEW parts and no sniff of its own: check whether what it
   // names is PACKED before offering it to a player (a packed webm otherwise went black for 23 s).
@@ -1025,22 +1057,35 @@ let manifestDepth = 0;   // one hop only: a master that names a master is a bug,
 // A name that is NOT in the dictionary must end on the 404 art, not on a red status line — and a
 // name with a media extension should put the player up FIRST, because that is what the address
 
+// The SAME page 404.html shows: white, centred, the art, and one way home. A bare image on the
+// renderer's default background read as "a dark page with a picture on it" (his 2026-10-19 report).
 function show404() {
-  document.body.className = 'plain';
+  pendingVideo = null;
+  document.body.className = 'notfound';
+  document.title = '404 — not found';
   stage.textContent = '';
-  const a = document.createElement('a');
-  a.href = '/bin2png';
   const img = document.createElement('img');
   img.src = '/404.png';
-  img.alt = 'not found';
-  img.style.cssText = 'display:block;margin:0 auto;max-width:100vw;max-height:100vh';
-  a.appendChild(img);
-  stage.appendChild(a);
-  document.title = 'not found';
+  img.alt = '404 — whatever you are looking for, it is not here';
+  img.style.cssText = 'width:min(100%,420px);height:auto;display:block;margin:0 auto 8px';
+  const msg = document.createElement('p');
+  msg.textContent = 'not found';
+  msg.style.cssText = 'margin:6px 0;color:#1b1b1f';
+  const home = document.createElement('p');
+  home.style.cssText = 'margin:6px 0';
+  const a = document.createElement('a');
+  a.href = '/bin2png';
+  a.textContent = 'click me to go home';
+  a.style.cssText = 'color:#0645ad;font-weight:600;text-decoration:none';
+  home.appendChild(a);
+  stage.append(img, msg, home);
 }
+
+let pendingVideo = null;   // the placeholder player: the SAME element gets the real stream
 
 function optimisticMedia() {
   const el = document.createElement('video');
+  pendingVideo = el;
   el.controls = true;
   el.playsInline = true;
   el.style.cssText = 'display:block;width:100vw;height:100vh;object-fit:contain;background:#000';
