@@ -964,6 +964,9 @@ function hashToken(u) {
   const m = String(u || '').match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_\-]+)/);
   return m ? m[1] : String(u || '');
 }
+// True while the address being decoded started with a dot (`.id+id`): "the two ends are enough".
+let dotAddress = false;
+
 function setResultHash(urls) {
   // Opened by NAME: the address stays the name. Rewriting it to the bare id would throw away the
   // only part of the link a person can remember, and `#<id>` still works for whoever needs it.
@@ -973,7 +976,9 @@ function setResultHash(urls) {
   // A mode belongs to the ADDRESS, not to the payload: keep `(newtab)`/`(openfull)` when the hash
   // already carries one, or the second decode on the same page would lose it.
   const mode = hashModeOf(location.hash);
-  const want = body + (mode ? `(${mode})` : '');
+  // A dot address keeps its dot: the dot IS the instruction (read the ends, do not download), so a
+  // link copied from this page must still carry it.
+  const want = (dotAddress ? '.' : '') + body + (mode ? `(${mode})` : '');
   if (location.hash.replace(/^#/, '') === want) return;
   try { history.replaceState(null, '', '#' + want); } catch (e) { /* file:// or a sandbox can refuse */ }
 }
@@ -1871,11 +1876,34 @@ function streamTools(name, urls) {
   return tools;
 }
 
+// first part's HEAD through the worker — one byte range, decoded from a PNG prefix — and the file
+// is known without downloading a single part. The LAST part's end is read by the same worker when
+// it works out the total, which is what the player needs anyway.
+async function rangedProbe(targets) {
+  const first = targets[0] || '';
+  const name = (first.match(/media\/([A-Za-z0-9_-]+)/) || [])[1] ||
+               (first.match(/\.([A-Za-z0-9]+)(?:\?|$)/) || [])[1] || 'file';
+  const url = await streamUrlFor(name, targets, 'application/octet-stream');
+  if (!url) return null;
+  const res = await fetch(url, { headers: { Range: 'bytes=0-65535' } });
+  if (res.status !== 206) return null;
+  const head = new Uint8Array(await res.arrayBuffer());
+  if (!head.length) return null;
+  const mime = guessMime(isPacked(head) ? await unpackPayload(head) : head);
+  return { mime, name };
+}
+
 async function handleDecodeUrl() {
   // A NAME is resolved before anything else touches the input, so everything downstream — stitch,
   // history, modes like `(openfull)` — behaves exactly as if the id had been typed.
   idsOpenName = null;
-  const names = await resolveNameTokens(document.getElementById('dec-url').value);
+  // `.id+id+id` — the dot is the instruction, not part of the payload. Strip it before anything
+  // reads the input (a dot otherwise looks like a file name and goes hunting in IDSDICTIONARY).
+  const box = document.getElementById('dec-url');
+  let typedAddr = box.value.trim();
+  dotAddress = false;
+  while (typedAddr.startsWith('.') && typedAddr.length > 1) { dotAddress = true; typedAddr = typedAddr.slice(1); }
+  const names = await resolveNameTokens(typedAddr);
   if (names.error) { setDecStatus(names.error, 'error'); setDecProgress(-1); return; }
   if (names.resolved.length) idsOpenName = document.getElementById('dec-url').value.trim();
   const raw = names.raw;
@@ -1885,6 +1913,21 @@ async function handleDecodeUrl() {
     return;
   }
   const multi = targets.length > 1;
+  // A DOT address: find out what it is from a byte range, and if it is media, put the player up
+  // immediately — this is the whole point of the dot (his 2026-10-19 report: an unnamed id list
+  // downloaded every part before it would play).
+  if (dotAddress && !names.resolved.length) {
+    try {
+      const probe = await rangedProbe(targets);
+      if (probe && /^(video|audio)\//.test(probe.mime) && (!hashModeOf(location.hash) ||
+          hashModeOf(location.hash) === 'openfull')) {
+        if (await startStreamDecode(targets, `${probe.name}.${mimeExt(probe.mime)}`, probe.mime)) {
+          setResultHash(targets);
+          return;
+        }
+      }
+    } catch (e) { /* a failed probe leaves the ordinary decode path, which still works */ }
+  }
   // A NAME with a media extension says what the payload is before ANY byte is fetched
   // (`#yakusoku.mp4`), so the player goes up at once and the parts arrive as playback needs them.
   // `(download)` and `(html)` still take the whole-file path: they want the bytes, not a stream.
