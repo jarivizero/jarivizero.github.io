@@ -1005,7 +1005,11 @@ function followManifest(bytes) {
     if (!line || line.startsWith('#')) continue;
     const f = line.split('\t');
     if (f[0] === 'file' && f.length >= 4) files.push({ name: f[1], parts: [] });
-    else if (f[0] === 'part' && f.length >= 3 && files.length) files[files.length - 1].parts.push(f[3] || f[2]);
+    // Column 3 is the pbs url (or its hash); column 4 is the NUMERIC media id upload returned, which
+    // is NOT a pbs id — using it made `?format=png` 404 (his 2026-10-19: "not a valid image id").
+    else if (f[0] === 'part' && f.length >= 3 && files.length) {
+      files[files.length - 1].parts.push(f[2] || f[3]);
+    }
   }
   const first = files.find((f) => f.parts.length);
   if (!first) return null;
@@ -1017,6 +1021,34 @@ function followManifest(bytes) {
 
 // ─── the router ───────────────────────────────────────────────────────────────────────────────
 let manifestDepth = 0;   // one hop only: a master that names a master is a bug, not a file
+
+// A name that is NOT in the dictionary must end on the 404 art, not on a red status line — and a
+// name with a media extension should put the player up FIRST, because that is what the address
+
+function show404() {
+  document.body.className = 'plain';
+  stage.textContent = '';
+  const a = document.createElement('a');
+  a.href = '/bin2png';
+  const img = document.createElement('img');
+  img.src = '/404.png';
+  img.alt = 'not found';
+  img.style.cssText = 'display:block;margin:0 auto;max-width:100vw;max-height:100vh';
+  a.appendChild(img);
+  stage.appendChild(a);
+  document.title = 'not found';
+}
+
+function optimisticMedia() {
+  const el = document.createElement('video');
+  el.controls = true;
+  el.playsInline = true;
+  el.style.cssText = 'display:block;width:100vw;height:100vh;object-fit:contain;background:#000';
+  document.body.className = 'media';
+  stage.textContent = '';
+  stage.appendChild(el);
+  return el;
+}
 
 async function run() {
   const address = decodeURIComponent(location.hash.replace(/^#/, '')).trim();
@@ -1038,6 +1070,9 @@ async function run() {
       'file#something.zip.</p>';
     return;
   }
+  // A media name goes up at once; resolving it decides whether it stays or becomes the 404 art.
+  const mediaName = !/^https?:/i.test(raw) && !/^id:/i.test(raw) && /^(video|audio)\//.test(mimeFromName(raw));
+  if (mediaName) optimisticMedia();
   // `/file/<base>/<member>` — the address may point INSIDE a zip (bug.gif in a zip of a game).
   // Try the whole token first (a dictionary name can contain a slash), then split at the first one.
   let token, member = null;
@@ -1045,13 +1080,19 @@ async function run() {
     token = await resolveToken(raw);
   } catch (e) {
     const cut = raw.indexOf('/');
-    if (cut <= 0) { status(e.message, true); return; }
+    if (cut <= 0) {
+
+      console.warn('address not resolved:', e.message);
+      show404();
+      return;
+    }
     try {
       token = await resolveToken(raw.slice(0, cut));
       member = raw.slice(cut + 1);
-    } catch (e2) { status(e2.message, true); return; }
+    } catch (e2) { console.warn('address not resolved:', e2.message); show404(); return; }
   }
   document.body.className = '';
+  if (mediaName) { stage.textContent = ''; stage.appendChild(statusEl); }   // the placeholder player is done
   // `direct` means "an ordinary http url", where the browser's own Range requests work. A pbs url
   // is NEVER direct: its bytes are pixels, so every byte has to come through the codec.
   src = { name: token.name || 'file', urls: token.urls, ranged,
