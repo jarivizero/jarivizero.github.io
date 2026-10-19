@@ -440,6 +440,11 @@ const STREAM_SCRIPT = 'b2p-stream.js';
 let streamWorker = null;
 
 function streamScriptUrl() { return new URL(STREAM_SCRIPT, location.href); }
+
+// Install the worker on load, not on the first stream: it also answers "this path is not a file".
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register(streamScriptUrl().href).catch(() => {});
+}
 function ensureStreamWorker() {
   if (streamWorker) return streamWorker;
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return Promise.resolve(null);
