@@ -169,8 +169,11 @@ async function resolveToken(token) {
   if (/^https?:/i.test(t)) return { name: decodeURIComponent(t.split('/').pop().split('?')[0]) || 'file', urls: [t] };
   if (IDS_ID_PREFIX.test(t)) {
     const id = t.replace(IDS_ID_PREFIX, '').trim();
+    // `pbsUrls(id)`, never `pbsUrls(t)`: the token still carried the `id:` prefix, so every part
+    // failed the pbs-id test and `file#id:<anything>` answered "the record holds something that is
+    // not a pbs id: id:http:" — found 2026-10-19 by the dot-address check.
     if (PBS_ID.test(id)) return { name: id, urls: pbsUrls(id) };
-    return { name: t, urls: pbsUrls(t) };
+    return { name: id, urls: pbsUrls(id) };
   }
   if (isNameToken(t)) {
     const name = t.replace(IDS_NAME_PREFIX, '');
@@ -285,7 +288,7 @@ async function unpackPayload(bytes) {
 }
 
 // ─── the bytes: a part list, or one ordinary url (then HTTP ranges do the work) ───────────────
-let src = { name: '', urls: [], direct: false };
+let src = { name: '', urls: [], direct: false, ranged: false };
 const partCache = new Map();
 
 async function partPayload(i) {
@@ -595,6 +598,31 @@ function looksLikeZipTail(tail) {
   return entries > 0 && cdSize > 0;
 }
 
+// [start, end] of the PAYLOAD, answered by the service worker: it decodes only the PNG prefix that
+// carries those bytes. This is the read a `.`-prefixed address is for.
+async function streamRange(planUrl, start, end) {
+  if (end < start) return new Uint8Array(0);
+  const res = await fetch(planUrl, { headers: { Range: `bytes=${start}-${end}` } });
+  if (res.status !== 206) return null;
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+// The head of part 1 and the tail of the last part — the only two reads a `.`-address makes before
+// it knows what the payload is. The total comes from the worker's HEAD (it decodes the last part's
+// length, which it has to do once anyway to answer a range at all).
+async function rangedEnds() {
+  if (!src.urls.length) return null;
+  const planUrl = await streamUrlFor(src.name || 'file', src.urls, 'application/octet-stream');
+  if (!planUrl) return null;
+  const headRes = await fetch(planUrl, { method: 'HEAD' });
+  const total = Number(headRes.headers.get('Content-Length')) || 0;
+  if (!total) return null;
+  const head = await streamRange(planUrl, 0, Math.min(total - 1, 65535));
+  const tail = await streamRange(planUrl, Math.max(0, total - 65557), total - 1);
+  if (!head || !tail) return null;
+  return { head, tail, total };
+}
+
 async function sniffSource() {
   if (src.direct) {
     const total = await sourceSize();
@@ -606,6 +634,16 @@ async function sniffSource() {
     // enough for it, which it always is for a text-sized file.
     const unpacked = isPacked(head) ? await unpackPayload(head) : null;
     return { mime: sniffMime(unpacked || head) };
+  }
+  if (src.ranged) {
+    // A dot address: never fetch a part to find out what the payload is.
+    const ends = await rangedEnds().catch(() => null);
+    if (ends) {
+      if (looksLikeZipTail(ends.tail)) return { zip: true };
+      const unpacked = isPacked(ends.head) ? await unpackPayload(ends.head) : null;
+      return { mime: sniffMime(unpacked || ends.head) };
+    }
+    // No worker (a `file://` page, or one refusing service workers): fall back to the parts.
   }
   const tail = await partPayload(src.urls.length - 1);
   if (looksLikeZipTail(tail)) return { zip: true };
@@ -882,7 +920,14 @@ async function renderBytes(bytes, name, fromLabel) {
 
 // ─── the router ───────────────────────────────────────────────────────────────────────────────
 async function run() {
-  const raw = decodeURIComponent(location.hash.replace(/^#/, '')).trim();
+  const address = decodeURIComponent(location.hash.replace(/^#/, '')).trim();
+
+  // `file/.HU3ep_nXIAAa6AR+…` reads the FIRST part's start and the LAST part's end through the
+  // worker's byte ranges — the head says mp4/text/png, the tail says zip — instead of downloading
+  // each part to find out. The dot is not part of the name: the id list behind it is the address.
+  let ranged = false;
+  let raw = address;
+  while (raw.startsWith('.') && raw.length > 1) { ranged = true; raw = raw.slice(1); }
   clearStage();
   $('where').textContent = raw || 'file';
   $('kind').textContent = '';
@@ -910,14 +955,17 @@ async function run() {
   document.body.className = '';
   // `direct` means "an ordinary http url", where the browser's own Range requests work. A pbs url
   // is NEVER direct: its bytes are pixels, so every byte has to come through the codec.
-  src = { name: token.name || 'file', urls: token.urls,
+  src = { name: token.name || 'file', urls: token.urls, ranged,
           direct: /^https?:/i.test(raw) && token.urls.length === 1 && !/pbs\.twimg\.com\/media\//.test(raw) };
   // The part cache is keyed by PART NUMBER, so a hash change to a different file would read the
   // previous file's part 1 (measured here: `#hello.txt` then `#bundle.zip` listed the text's bytes
   // as the zip's first member). A new address starts with an empty cache.
   partCache.clear();
-  let mime = mimeFromName(src.name);
-  let zipByName = /\.(zip|apk|jar)$/i.test(src.name);
+  // A dot address decides by its BYTES, never by a name: the whole point is that nothing about the
+  // payload is known until the two ends have been read. (Without this, `#.id:<url>` inherited `.png`
+  // from the url and rendered an image instead of playing the video inside it.)
+  let mime = src.ranged ? '' : mimeFromName(src.name);
+  let zipByName = !src.ranged && /\.(zip|apk|jar)$/i.test(src.name);
   document.title = src.name;
   $('where').textContent = src.name;
   $('kind').textContent = mime || 'file';
@@ -939,7 +987,12 @@ async function run() {
         // has a useless one. The name is what a save will be called, so it should say what it is.
         if (ext && !mimeFromName(src.name)) src.name = `${src.name}.${ext}`;
       }
-    } catch (e) { status('', false); }   // a failed probe still leaves the whole-file path
+    } catch (e) {
+      // A failed probe still leaves the whole-file path — but say WHY on the console, or a broken
+      // probe is invisible (it only shows up as a slow page).
+      console.warn('probe failed:', e && e.message);
+      status('', false);
+    }
     document.title = src.name;
     $('where').textContent = src.name;
     $('kind').textContent = mime || (zipByName ? 'zip' : 'file');
