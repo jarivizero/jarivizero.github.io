@@ -44,6 +44,14 @@
     }).catch(() => {});
 })();
 
+// Install the range worker NOW, on any page load. It is what answers a stream address — and, since
+// 2026-10-19, any address that is not a file — so waiting for the first stream leaves the next
+// navigation to the server.
+(function bootWorker() {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator) || !window.isSecureContext) return;
+  navigator.serviceWorker.register('b2p-stream.js').catch(() => {});
+})();
+
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Twitter PNG Codec</title>
