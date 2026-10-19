@@ -54,6 +54,10 @@ const isRealPath = (p) => p === '/' || REAL_PATH.test(p);
 // no iframe, so nothing paints between the address and the player. The renderer reads the name from
 // the path, and the typed address is never rewritten.
 const FILE_PAGE = /(?:^|\/)file(?:\/.*)?$/;
+// The short form: an id at the site root, `/<id>` or `/<id>.mp4`. It is the same address as
+
+// id — every real path of this site is matched by `isRealPath` before this test is reached.
+const ROOT_ADDRESS = /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?$/;
 const PAGE_URL = new URL('file', self.location.href).href;
 
 async function serveFilePage() {
@@ -69,7 +73,8 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
   if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
-      FILE_PAGE.test(url.pathname)) {
+      (FILE_PAGE.test(url.pathname) ||
+       (ROOT_ADDRESS.test(url.pathname) && !isRealPath(url.pathname)))) {
     event.respondWith(serveFilePage());
     return;
   }
@@ -145,9 +150,20 @@ function planFromUrl(url) {
   };
 }
 
+// The name a save takes. "Save video as" reads the FILE NAME from here, not from the document that
+// hosts the player — his 2026-10-19 report: the page saved as `yakusoku.htm` even though the video's
+// own url ended in `.mp4`. `inline` keeps the bytes playing instead of turning the request into a
+// download; `filename*` carries the real name (a `?somevideo.mp4` address keeps its own name).
+function filenameHeader(name) {
+  const raw = String(name || 'file').replace(/[\r\n]/g, ' ').replace(/[\\/"]/g, '_').trim() || 'file';
+  const ascii = raw.replace(/[^\x20-\x7e]/g, '_');
+  return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(raw)}`;
+}
+
 function headersFor(plan) {
   return {
     'Content-Type': plan.mime || 'application/octet-stream',
+    'Content-Disposition': filenameHeader(plan.name),
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'no-store',
     'Access-Control-Allow-Origin': '*',
