@@ -4,8 +4,26 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>file</title>
+<script>
+// BEFORE THE FIRST PAINT. An address that names a media file must be the player from the very first
+// frame: no white page, no header line reading "file". The class is set while the head is parsed,
+// so the canvas is already black when the body is painted (his 2026-10-19 report: "will still load
+// a page, then a video loading …"). `mimeFromName` does not exist yet, so this is a plain extension
+// test on the hash, and nothing else depends on it.
+try {
+  const address = decodeURIComponent(location.hash.replace(/^#/, '')).replace(/^\.+/, '');
+  if (/\.(mp4|m4v|mov|webm|mkv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav)$/i.test(address)) {
+    document.documentElement.className = 'media-address';
+  }
+} catch (e) { /* a broken hash is handled by run() */ }
+</script>
 <style>
   /* No design. The browser's defaults are what an autoindex looks like, and a video is the page. */
+  html.media-address { background: #000; }
+  /* Before the player exists the stage still holds the "open a file by name" paragraph, and the
+     header holds its title: on a media address neither may paint for even one frame. */
+  html.media-address header, html.media-address #kind, html.media-address #meta,
+  html.media-address .empty { display: none; }
   body { margin: 8px; }
   body.media { margin: 0; background: #000; height: 100vh; overflow: hidden; }
   body.media video { display: block; width: 100vw; height: 100vh; object-fit: contain; background: #000; }
@@ -32,7 +50,7 @@
 </style>
 </head>
 <body>
-<header id="where">file</header><div id="kind"></div><div id="meta"></div>
+<header id="where"></header><div id="kind"></div><div id="meta"></div>
 <main id="stage">
   <p class="empty">Open a file by name: <code>file#yakusoku.mp4</code>, <code>file#notes.txt</code>, <code>file#something.zip</code>.</p>
 </main>
@@ -42,7 +60,7 @@
 // The service worker only answers `/__b2p/…`; this page itself comes from GitHub Pages' HTTP cache,
 // so a deploy could sit behind a 10-minute `max-age`. Ask for the file with the cache bypassed and
 
-const BUILD = '2026-10-19T04:05';
+const BUILD = '2026-10-19T04:52';
 (function checkBuild() {
   if (!/^https?:$/.test(location.protocol)) return;
   const key = 'b2p-build-' + location.pathname;
@@ -529,7 +547,8 @@ async function renderMedia(mime) {
   el.controls = true;
   el.autoplay = true;
   el.playsInline = true;
-  if (reuse) stage.textContent = '';
+  // Reuse in place: detaching a <video> and re-appending it comes back as a fresh black frame.
+  if (reuse && !el.isConnected) stage.appendChild(el);
 
   // Following a master lands here with NEW parts and no sniff of its own: check whether what it
   // names is PACKED before offering it to a player (a packed webm otherwise went black for 23 s).
@@ -987,11 +1006,15 @@ async function extractFrom(block, f) {
 // the same way (an HTML member becomes the document, an image is an image, text is text).
 async function renderBytes(bytes, name, fromLabel) {
   const mime = mimeFromName(name) || sniffMime(bytes);
+  const media = mime.startsWith('video/') || mime.startsWith('audio/');
+  const textLike = mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml';
   document.title = name;
+  // The body class decides whether any of these lines may be on screen at all, so it is set before
+  // the text nodes are: a video member used to flash "name video/mp4" on its way in.
+  document.body.className = media ? 'media' : (textLike ? 'plain' : '');
   $('where').textContent = name;
   $('kind').textContent = mime;
   $('meta').textContent = fmt(bytes.length);
-  document.body.className = '';
   clearStage();
   if (mime.startsWith('image/')) {
     const img = document.createElement('img');
@@ -1005,7 +1028,6 @@ async function renderBytes(bytes, name, fromLabel) {
     document.close();
     return;
   } else if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
-    document.body.className = 'plain';
     const pre = document.createElement('pre');
     pre.textContent = new TextDecoder().decode(bytes);
     stage.appendChild(pre);
@@ -1013,7 +1035,6 @@ async function renderBytes(bytes, name, fromLabel) {
     const el = document.createElement(mime.startsWith('video/') ? 'video' : 'audio');
     el.controls = true;
     el.src = URL.createObjectURL(new Blob([bytes], { type: mime }));
-    if (mime.startsWith('video/')) document.body.className = 'media';
     stage.appendChild(el);
   } else {
     const p = document.createElement('p');
@@ -1088,12 +1109,17 @@ function show404() {
 
 let pendingVideo = null;   // the placeholder player: the SAME element gets the real stream
 
-function optimisticMedia() {
-  const el = document.createElement('video');
+function optimisticMedia(mime) {
+  // The element has to match the type the ADDRESS promised, not "always a video": renderMedia
+  // reuses the placeholder only when the tag matches, so an `.mp3` name with a <video> on screen
+  // would leave the placeholder behind and add a second element.
+  const el = document.createElement(String(mime || '').startsWith('audio/') ? 'audio' : 'video');
   pendingVideo = el;
   el.controls = true;
   el.playsInline = true;
-  el.style.cssText = 'display:block;width:100vw;height:100vh;object-fit:contain;background:#000';
+  if (el.tagName === 'VIDEO') {
+    el.style.cssText = 'display:block;width:100vw;height:100vh;object-fit:contain;background:#000';
+  }
   document.body.className = 'media';
   stage.textContent = '';
   stage.appendChild(el);
@@ -1109,20 +1135,22 @@ async function run() {
   let ranged = false;
   let raw = address;
   while (raw.startsWith('.') && raw.length > 1) { ranged = true; raw = raw.slice(1); }
+  // A media name is the page from its FIRST frame: the player goes up before a single character is
+  // written, so the header never paints even for one frame (his 2026-10-19 report: "loading video,
+  // then switches to top left info, pumpernickel.mp4 video/mp4 — That's the text").
+  const mediaName = !/^https?:/i.test(raw) && !/^id:/i.test(raw) && /^(video|audio)\//.test(mimeFromName(raw));
   clearStage();
+  if (mediaName) optimisticMedia(mimeFromName(raw));
   $('where').textContent = raw || 'file';
   $('kind').textContent = '';
   $('meta').textContent = '';
-  stage.textContent = '';
-  stage.appendChild(statusEl);
   if (!raw) {
+    document.body.className = '';
     stage.innerHTML = '<p>Open a file by name: file#yakusoku.mp4, file#notes.txt, ' +
       'file#something.zip.</p>';
     return;
   }
-  // A media name goes up at once; resolving it decides whether it stays or becomes the 404 art.
-  const mediaName = !/^https?:/i.test(raw) && !/^id:/i.test(raw) && /^(video|audio)\//.test(mimeFromName(raw));
-  if (mediaName) optimisticMedia();
+  // Resolving decides whether the player stays or becomes the 404 art.
   // `/file/<base>/<member>` — the address may point INSIDE a zip (bug.gif in a zip of a game).
   // Try the whole token first (a dictionary name can contain a slash), then split at the first one.
   let token, member = null;
@@ -1141,8 +1169,14 @@ async function run() {
       member = raw.slice(cut + 1);
     } catch (e2) { console.warn('address not resolved:', e2.message); show404(); return; }
   }
-  document.body.className = '';
-  if (mediaName) { stage.textContent = ''; stage.appendChild(statusEl); }   // the placeholder player is done
+  // The placeholder player IS the page now. `media` stays on the body (it is what hides the header,
+  // the type line and the status line) and the element stays in the DOM — pulling it out to put it
+
+  if (!mediaName) {
+    document.body.className = '';
+    stage.textContent = '';
+    stage.appendChild(statusEl);
+  }
   // `direct` means "an ordinary http url", where the browser's own Range requests work. A pbs url
   // is NEVER direct: its bytes are pixels, so every byte has to come through the codec.
   src = { name: token.name || 'file', urls: token.urls, ranged,
