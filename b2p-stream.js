@@ -34,8 +34,10 @@ const PAGE_CACHE = 'b2p-page-v1';
 self.addEventListener('install', (event) => {
   // The 404 page is precached so an address that is not a file is answered BY THE WORKER — no round
 
+  // `/file` is the RENDERER, precached for the same reason: `/file/<name>` is answered with it, so
+  // the player is on screen in the first frame instead of after a server round trip.
   event.waitUntil(caches.open(PAGE_CACHE)
-    .then((c) => c.addAll(['/404.html', '/404.png']).catch(() => {}))
+    .then((c) => c.addAll(['/404.html', '/404.png', '/file']).catch(() => {}))
     .then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
@@ -48,9 +50,29 @@ const REAL_PATH = new RegExp('^/(?:' +
   ')$');
 const isRealPath = (p) => p === '/' || REAL_PATH.test(p);
 
+// `/file` and `/file/<name>`: the renderer, served from the precache. One document, no wrapper and
+// no iframe, so nothing paints between the address and the player. The renderer reads the name from
+// the path, and the typed address is never rewritten.
+const FILE_PAGE = /(?:^|\/)file(?:\/.*)?$/;
+const PAGE_URL = new URL('file', self.location.href).href;
+
+async function serveFilePage() {
+  const cache = await caches.open(PAGE_CACHE);
+  const hit = await cache.match(PAGE_URL);
+  // Refresh for the NEXT load; this answer never waits for the network.
+  fetch(PAGE_URL, { cache: 'reload' })
+    .then((r) => (r.ok ? cache.put(PAGE_URL, r.clone()) : null)).catch(() => {});
+  return hit || fetch(PAGE_URL);
+}
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
+  if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
+      FILE_PAGE.test(url.pathname)) {
+    event.respondWith(serveFilePage());
+    return;
+  }
   if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
       !isRealPath(url.pathname)) {
     event.respondWith((async () => {
