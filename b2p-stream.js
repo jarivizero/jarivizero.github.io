@@ -50,6 +50,48 @@ async function readPlan(id) {
   try { return await res.json(); } catch (e) { return null; }
 }
 
+const MIME_BY_EXT = {
+  mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+  mkv: 'video/x-matroska', mp3: 'audio/mpeg', m4a: 'audio/mp4', ogg: 'audio/ogg',
+  oga: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac',
+};
+function mimeFromName(name) {
+  const ext = (String(name || '').match(/\.([A-Za-z0-9]+)$/) || [])[1];
+  return (ext && MIME_BY_EXT[ext.toLowerCase()]) || '';
+}
+
+// A plan rebuilt from the ADDRESS — this is what makes a shared stream url, or one opened by
+// somebody who never visited the page, work at all. `p=` is a `+`-joined list of pbs media ids
+// (the normal case), `u=` a `|`-joined list of urls (encoded), `m=` the type, `c=` the capacity.
+// The page puts all of that in the url precisely so the worker does not need its cache entry.
+function planFromUrl(url) {
+  let parts = null;
+  const ids = url.searchParams.get('p');
+  if (ids) {
+    const list = ids.split('+').map((s) => s.trim()).filter(Boolean);
+    if (list.length && list.every((id) => /^[A-Za-z0-9_-]{10,}$/.test(id))) {
+      parts = list.map((id) => `https://pbs.twimg.com/media/${id}?format=png`);
+    }
+  }
+  const urls = url.searchParams.get('u');
+  if (!parts && urls) {
+    const list = urls.split('|').map((s) => decodeURIComponent(s)).filter(Boolean);
+    if (list.length) parts = list;
+  }
+  if (!parts) return null;
+  let name = 'file';
+  try { name = decodeURIComponent(url.pathname.split('/').pop() || 'file'); } catch (e) { /* keep it */ }
+  const cap = Number(url.searchParams.get('c')) || 2421906;
+  return {
+    id: null,                       // no cache entry: nothing to write a size back to
+    name,
+    mime: url.searchParams.get('m') || mimeFromName(name) || 'application/octet-stream',
+    cap,
+    parts,
+    total: Number(url.searchParams.get('t')) || 0,
+  };
+}
+
 function headersFor(plan) {
   return {
     'Content-Type': plan.mime || 'application/octet-stream',
@@ -80,7 +122,8 @@ async function serve(request, url) {
     return new Response('plan storage is the Cache API, not a request', { status: 405 });
   }
   const id = url.searchParams.get('id');
-  const plan = await readPlan(id);
+  // The cache entry first (it may already carry the total size), then the address itself.
+  const plan = (await readPlan(id)) || planFromUrl(url);
   if (!plan || !Array.isArray(plan.parts) || !plan.parts.length) {
     return new Response('no streaming plan for this address', { status: 410 });
   }
@@ -148,11 +191,14 @@ function streamRange(plan, start, end, total) {
 async function totalBytes(plan) {
   const last = await partBytes(plan, plan.parts.length - 1);
   plan.total = (plan.parts.length - 1) * plan.cap + last.length;
-  // Written back so the next request (and a restarted worker) knows the size without refetching.
-  const cache = await caches.open(PLAN_CACHE);
-  await cache.put(planKey(plan.id), new Response(JSON.stringify(plan), {
-    headers: { 'Content-Type': 'application/json' },
-  }));
+  // Written back so the next request (and a restarted worker) knows the size without refetching —
+  // only when this plan HAS an id; a plan rebuilt from the address has no entry to write to.
+  if (plan.id) {
+    const cache = await caches.open(PLAN_CACHE);
+    await cache.put(planKey(plan.id), new Response(JSON.stringify(plan), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+  }
   return plan.total;
 }
 
