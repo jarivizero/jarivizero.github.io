@@ -29,13 +29,44 @@ const PLAN_CACHE = 'b2p-plan-v1';
 const PART_CACHE = 'b2p-part-v1';
 const MARK = '/__b2p/';
 
-self.addEventListener('install', () => self.skipWaiting());
+const PAGE_CACHE = 'b2p-page-v1';
+
+self.addEventListener('install', (event) => {
+  // The 404 page is precached so an address that is not a file is answered BY THE WORKER — no round
+
+  event.waitUntil(caches.open(PAGE_CACHE)
+    .then((c) => c.addAll(['/404.html', '/404.png']).catch(() => {}))
+    .then(() => self.skipWaiting()));
+});
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+
+// The paths that really exist. Everything else is "not a file" and is answered from the precache:
+// the same bytes GitHub Pages would send, without waiting for GitHub Pages.
+const REAL_PATH = new RegExp('^/(?:' +
+  'index\.html|bin2png(?:\.html)?|file(?:\.html)?|404\.html|404\.png|b2p-stream\.js|' +
+  'IDSDICTIONARY\.txt|icons/.*|sitemap\.xml|robots\.txt|favicon\.ico' +
+  ')$');
+const isRealPath = (p) => p === '/' || REAL_PATH.test(p);
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  if (!url.pathname.includes(MARK)) return;              // an ordinary request: leave it alone
-  event.respondWith(serve(event.request, url));
+  if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
+  if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
+      !isRealPath(url.pathname)) {
+    event.respondWith((async () => {
+      const cache = await caches.open(PAGE_CACHE);
+      const hit = await cache.match('/404.html');
+      if (!hit) return fetch(event.request);        // first run before the precache landed
+      // Refresh in the background (no waitUntil: it must not delay the answer, and a lost refresh
+      // only means one more stale 404). The next one is the deployed page.
+      fetch('/404.html', { cache: 'reload' })
+        .then((r) => (r.ok ? cache.put('/404.html', r.clone()) : null)).catch(() => {});
+      return new Response(hit.body, {
+        status: 404,
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
+    })());
+  }
 });
 
 // Relative to THIS script, so a site served under a sub-path (project Pages) works the same as the
