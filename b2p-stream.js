@@ -30,15 +30,38 @@ const PART_CACHE = 'b2p-part-v1';
 const MARK = '/__b2p/';
 
 const PAGE_CACHE = 'b2p-page-v1';
+// What this worker answers from its OWN copy — so all of it has to be refreshable, including the
+// dictionary (a name that is not in a stale copy would 404 a file that exists). `sw-ver.txt` is a
+
+const PRECACHE = ['404.html', '404.png', 'file', 'IDSDICTIONARY.txt', 'sw-ver.txt'];
+const urlOf = (rel) => new URL(rel, self.location.href).href;
+const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
 self.addEventListener('install', (event) => {
   // The 404 page is precached so an address that is not a file is answered BY THE WORKER — no round
 
   // `/file` is the RENDERER, precached for the same reason: `/file/<name>` is answered with it, so
-  // the player is on screen in the first frame instead of after a server round trip.
-  event.waitUntil(caches.open(PAGE_CACHE)
-    .then((c) => c.addAll(['/404.html', '/404.png', '/file']).catch(() => {}))
-    .then(() => self.skipWaiting()));
+  // the player is on screen in the first frame instead of after a server round trip. The dictionary
+  // is precached so a NAME still resolves offline.
+  event.waitUntil(resync().then(() => self.skipWaiting()));
+});
+
+// Fetch every precached file past the HTTP cache and store it. One file failing (a first deploy
+// before sw-ver.txt exists, a network blip) must not stop the others.
+async function resync() {
+  const cache = await caches.open(PAGE_CACHE);
+  for (const rel of PRECACHE) {
+    try {
+      const res = await fetch(urlOf(rel), { cache: 'reload' });
+      if (res.ok) await cache.put(urlOf(rel), res.clone());
+    } catch (e) { /* keep the copy that is already there */ }
+  }
+}
+
+// The page asks for this after its own load event — never on the critical path.
+self.addEventListener('message', (event) => {
+  if (!event.data || event.data.type !== 'resync') return;
+  event.waitUntil(resync());
 });
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
@@ -69,8 +92,32 @@ async function serveFilePage() {
   return hit || fetch(PAGE_URL);
 }
 
+// The dictionary, cache-first and refreshed behind the answer. `?fresh=` is the page saying "this
+// name was NOT in the copy you gave me" — then the network is asked FIRST, and its answer becomes
+// the copy (a stale dictionary is the one reason a real file would come back 404 after a deploy).
+async function serveDictionary(url) {
+  const cache = await caches.open(PAGE_CACHE);
+  if (url.searchParams.has('fresh')) {
+    // `?fresh=1` on the network request too: it is what tells the server "do not answer from a
+    // cache" on the one path where a stale copy is the whole problem.
+    const fresh = await fetch(DICT_URL + '?fresh=' + Date.now(), { cache: 'reload' }).catch(() => null);
+    if (fresh && fresh.ok) {
+      cache.put(DICT_URL, fresh.clone());
+      return fresh;
+    }
+  }
+  const hit = await cache.match(DICT_URL);
+  fetch(DICT_URL, { cache: 'reload' })
+    .then((r) => (r.ok ? cache.put(DICT_URL, r.clone()) : null)).catch(() => {});
+  return hit || fetch(DICT_URL);
+}
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+  if (event.request.method === 'GET' && url.href.split('?')[0] === DICT_URL) {
+    event.respondWith(serveDictionary(url));
+    return;
+  }
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
   if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
       (FILE_PAGE.test(url.pathname) ||
