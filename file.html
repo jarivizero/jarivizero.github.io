@@ -61,11 +61,36 @@ const SITE_BASE = (() => {
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
 const BUILD = '2026-10-19T06:05';
+// ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
+// `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
+
+// loaded, never on the way. So this runs on `load`, tells the worker to re-cache, and does nothing
+// else: the page on screen is already the bytes it asked for.
+async function checkSiteVersion() {
+  if (!/^https?:$/.test(location.protocol)) return;
+  try {
+    const res = await fetch(siteUrl('sw-ver.txt'), { cache: 'no-store' });
+    if (!res.ok) return;
+    const live = (await res.text()).trim();
+    if (!live) return;
+    let seen = '';
+    try { seen = localStorage.getItem('b2p-sw-ver') || ''; } catch (e) {}
+    if (seen === live) return;
+    if ('serviceWorker' in navigator) {
+      const reg = await navigator.serviceWorker.getRegistration().catch(() => null);
+      const worker = reg && (reg.active || reg.waiting || reg.installing);
+      if (worker) worker.postMessage({ type: 'resync', ver: live });
+    }
+    try { localStorage.setItem('b2p-sw-ver', live); } catch (e) {}
+  } catch (e) { /* offline: the version is whatever is loaded */ }
+}
+window.addEventListener('load', () => { checkSiteVersion(); });
 (async function checkBuild() {
   if (!/^https?:$/.test(location.protocol)) return;
   const key = 'b2p-build-' + location.pathname;
-  let seen = '';
-  try { seen = sessionStorage.getItem(key) || ''; } catch (e) {}
+  let seen = '';  try {
+    seen = sessionStorage.getItem(key) || '';
+  } catch (e) {}
   try {
     // The REAL file, never the `/file` route: that one can be answered by the worker from its own
     // precache, which is exactly the copy this check has to see past.
@@ -212,9 +237,12 @@ async function idsDecrypt(name, payloadB64) {
   return new TextDecoder().decode(await idsXor(key, iv, ct));
 }
 let dictCache = null;
-async function dictionary() {
+// `force` asks the worker for the copy it has NOT given us yet (`?fresh=`): the worker answers the
+// dictionary cache-first, so a name added by a deploy is invisible until this runs.
+async function dictionary(force) {
+  if (force) dictCache = null;
   if (dictCache) return dictCache;
-  const url = siteUrl(IDS_DICT_FILE);
+  const url = siteUrl(IDS_DICT_FILE) + (force ? '?fresh=' + Date.now() : '');
   const res = await fetch(url);
   if (!res.ok) throw new Error(`no ${IDS_DICT_FILE} next to this page (HTTP ${res.status}) — looked at ${url}`);
   const map = new Map();
@@ -1153,6 +1181,7 @@ function followManifest(bytes) {
 // ─── the router ───────────────────────────────────────────────────────────────────────────────
 let manifestDepth = 0;    // one hop only: a master that names a master is a bug, not a file
 let pendingVideo = null;  // the optimistic player: the SAME element gets the real stream
+let dictFreshOnce = false;  // one forced dictionary re-read per page, never a loop
 
 // The address earned nothing: white, centred, the art, one way home — the page 404.html shows. The
 // body is rebuilt first so a player or an index cannot sit underneath it.
@@ -1313,15 +1342,27 @@ async function run() {
   } catch (e) {
     const cut = raw.indexOf('/');
     if (cut <= 0) {
+      // NOT FOUND — and a dictionary one deploy behind is the one fixable reason: re-read it ONCE
 
-      console.warn('address not resolved:', e.message);
-      show404();
-      return;
+      // loaded and it says 404, recache to check if video does actually exist").
+      if (isNameToken(raw) && !dictFreshOnce) {
+        dictFreshOnce = true;
+        try {
+          await dictionary(true);
+          token = await resolveToken(raw);
+        } catch (e2) { console.warn('address not resolved:', e2.message); show404(); return; }
+      } else {
+
+        console.warn('address not resolved:', e.message);
+        show404();
+        return;
+      }
+    } else {
+      try {
+        token = await resolveToken(raw.slice(0, cut));
+        member = raw.slice(cut + 1);
+      } catch (e2) { console.warn('address not resolved:', e2.message); show404(); return; }
     }
-    try {
-      token = await resolveToken(raw.slice(0, cut));
-      member = raw.slice(cut + 1);
-    } catch (e2) { console.warn('address not resolved:', e2.message); show404(); return; }
   }
   src = {
     name: where.hint || token.name || 'file',
