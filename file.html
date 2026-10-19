@@ -6,60 +6,43 @@
 <title>file</title>
 <script>
 // BEFORE THE FIRST PAINT. An address that names a media file must be the player from the very first
-// frame: no white page, no header line reading "file". The class is set while the head is parsed,
-// so the canvas is already black when the body is painted (his 2026-10-19 report: "will still load
-// a page, then a video loading …"). The address is the hash OR the path, because this page IS the
-// document of `/file/<name>` — the worker serves it there, and 404.html writes it into the same
-// document for the first visit. `mimeFromName` does not exist yet, so this is a plain extension
-// test, and nothing else depends on it.
+// frame: no white page, no header line, no "loading video" text (his 2026-10-19 report). The class is
+// set while the head is parsed, so the canvas is already black when the body is painted. `,<id>` is
+// the address that says "video" outright; a name with a media extension says it too, and so does the
+// `?name.mp4` that can ride along with an id.
 try {
-  const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1] || '';
-  const address = decodeURIComponent(location.hash.replace(/^#/, '') || fromPath).replace(/^\.+/, '');
-  if (/\.(mp4|m4v|mov|webm|mkv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav)$/i.test(address)) {
-    document.documentElement.className = 'media-address';
-  }
+  const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
+    || (/^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname) ? location.pathname.slice(1) : '')
+    || '';
+  const hash = location.hash.replace(/^#/, '');
+  const address = decodeURIComponent(hash || fromPath).trim();
+  let hint = location.search.replace(/^\?/, '');
+  try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
+  const name = hint && !hint.includes('=') ? hint : address;
+  const isMedia = address.startsWith(',') ||
+    /\.(mp4|m4v|mov|webm|mkv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav)$/i.test(name);
+  if (isMedia) document.documentElement.className = 'media-address';
 } catch (e) { /* a broken address is handled by run() */ }
 </script>
 <style>
-  /* No design. The browser's defaults are what an autoindex looks like, and a video is the page. */
-  html.media-address { background: #000; }
-  /* Before the player exists the stage still holds the "open a file by name" paragraph, and the
-     header holds its title: on a media address neither may paint for even one frame. */
-  html.media-address header, html.media-address #kind, html.media-address #meta,
-  html.media-address .empty { display: none; }
-  body { margin: 8px; }
-  
-  body.media { margin: 0; background: #000; height: 100vh; overflow: hidden; }
-  body.media #stage { position: fixed; inset: 0; display: flex;
-                      align-items: center; justify-content: center; }
-  body.media video { display: block; max-width: 100vw; max-height: 100vh; background: #000; }
-  body.media audio { display: block; width: min(720px, 90vw); }
-  body.media .status { display: none; }
-  
-  body.media > header, body.media > #kind, body.media > #meta { display: none; }
-  
-  body.plain > header, body.plain > #kind, body.plain > #meta, body.plain .status { display: none; }
-  body.plain { margin: 0; }
-  body.plain pre { padding: 0; margin: 0; }
-  /* The 404 page 404.html renders: white, centred, monospace. */
+  /* No design. The browser's defaults are what an autoindex looks like, and a file is the page. */
+  html.media-address, html.media-address body { background: #000; }
+  /* What this page BUILDS is all it styles: Apache's index table, a status line under it, the 404
+     art, a PDF's embed. A text, image or media view removes this stylesheet entirely (`bareHead`),
+     so what is left is exactly what a `file:///` tab has — nothing but the payload element. */
+  table { border-collapse: collapse; }
+  th, td { padding: 1px 6px 1px 0; vertical-align: top; text-align: left; }
+  .status { margin: 6px 0 0; font-size: 12px; }
+  .status.error { color: #b42318; }
+  img { max-width: 100%; }
   body.notfound { background: #fff; color: #1b1b1f; margin: 0; min-height: 100vh;
                   display: flex; align-items: center; justify-content: center; padding: 24px;
                   font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
-  body.notfound > header, body.notfound > #kind, body.notfound > #meta, body.notfound .status { display: none; }
-  body.notfound #stage { text-align: center; max-width: 560px; }
-  body.media #stage { margin: 0; }
-  img { max-width: 100%; max-height: calc(100vh - 40px); }
-  pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
-  table { border-collapse: collapse; }
-  .status { margin: 6px 0 0; font-size: 12px; }
-  .status.error { color: #b42318; }
+  body.notfound p { margin: 6px 0; color: #1b1b1f; }
+  body.notfound a { color: #0645ad; font-weight: 600; text-decoration: none; }
 </style>
 </head>
 <body>
-<header id="where"></header><div id="kind"></div><div id="meta"></div>
-<main id="stage">
-  <p class="empty">Open a file by name: <code>file#yakusoku.mp4</code>, <code>file#notes.txt</code>, <code>file#something.zip</code>.</p>
-</main>
 <script>
 'use strict';
 // ─── is this page the one that is deployed? ────────────────────────────────────────────────────
@@ -77,7 +60,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-19T05:40';
+const BUILD = '2026-10-19T06:05';
 (async function checkBuild() {
   if (!/^https?:$/.test(location.protocol)) return;
   const key = 'b2p-build-' + location.pathname;
@@ -125,8 +108,7 @@ const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wra
 const PACK_HEADER = 9;
 
 const $ = (id) => document.getElementById(id);
-const stage = $('stage');
-const statusEl = document.createElement('p');
+const body = document.body;
 
 function fmt(n) {
   if (!Number.isFinite(n)) return '—';
@@ -135,16 +117,48 @@ function fmt(n) {
   if (n < 1073741824) return (n / 1048576).toFixed(2) + ' MB';
   return (n / 1073741824).toFixed(2) + ' GB';
 }
-function status(text, bad) {
-  statusEl.className = 'status' + (bad ? ' error' : '');
-  statusEl.textContent = text || '';
-}
-function clearStage() {
-  stage.textContent = '';
-  stage.appendChild(statusEl);
-}
 function hex(n, w = 2) { return n.toString(16).padStart(w, '0'); }
 
+// ─── the page is the file, and nothing else ──────────────────────────────────────────────────
+// The document used to carry `<header id="where">`, `<div id="kind">`, `<div id="meta">` and
+// `<main id="stage">` around every payload. His 2026-10-19 report, verbatim: "a regular just contains
+// meta name viewport, and video html, does it need those? I'm pretty sure not". They are gone: each
+// view builds exactly the node it is — a <pre>, an <img>, a <video>, or Apache's table — directly in
+// the body, and a payload view strips the stylesheet and the script that built it.
+function resetPage(cls) {
+  for (const n of [...body.childNodes]) n.remove();
+  body.className = cls || '';
+  body.removeAttribute('style');
+  document.documentElement.removeAttribute('style');
+}
+// What a `file:///` tab has in its head for this kind of payload: one meta, no stylesheet, no script.
+
+// Brave: a .txt tab is `<head><meta name="color-scheme" content="light dark"></head>` with one <pre>
+// in the body; a .webm tab is `<head><meta name="viewport" content="width=device-width"></head>`
+// with one <video>.
+function bareHead(kind) {
+  for (const n of [...document.head.childNodes]) n.remove();
+  const meta = document.createElement('meta');
+  if (kind === 'media') { meta.name = 'viewport'; meta.content = 'width=device-width'; }
+  else { meta.name = 'color-scheme'; meta.content = 'light dark'; }
+  document.head.appendChild(meta);
+  // NOT `document.title = ''`: assigning a title INSERTS a <title> element, which is one node more
+  // than the tab has (measured: head came out `META:viewport,TITLE:`). A document with no title
+  // shows the url, exactly like the native media tab.
+}
+// A status line is the LAST resort: only an error earns one. Nothing on the way to a file says
+// "Fetching…" — the native tab is blank until the bytes are there.
+function status(text, bad) {
+  let el = $('b2p-status');
+  if (!el) {
+    el = document.createElement('p');
+    el.id = 'b2p-status';
+    body.appendChild(el);
+  }
+  el.className = 'status' + (bad ? ' error' : '');
+  el.textContent = text || '';
+  if (!text) el.remove();
+}
 // ─── the name keyring (same format as bin2png.html / idsdictionary.py) ────────────────────────
 async function sha256(bytes) {
   const d = await crypto.subtle.digest('SHA-256', bytes);
@@ -240,6 +254,9 @@ function pbsUrls(plain) {
 }
 
 // One token → { name, urls }. `name` is what the address called it (used as the file name).
+// One token → { name, urls, guess? }. `name` is what the address called it (used as the file name).
+// `guess` marks the one case where the address names a pbs id the dictionary has never heard of: the
+// player goes up on the strength of the extension, and pbs gets to say whether the id exists.
 async function resolveToken(token) {
   const t = String(token || '').trim();
   if (!t) throw new Error('empty address');
@@ -249,15 +266,21 @@ async function resolveToken(token) {
     // `pbsUrls(id)`, never `pbsUrls(t)`: the token still carried the `id:` prefix, so every part
     // failed the pbs-id test and `file#id:<anything>` answered "the record holds something that is
     // not a pbs id: id:http:" — found 2026-10-19 by the dot-address check.
-    if (PBS_ID.test(id)) return { name: id, urls: pbsUrls(id) };
     return { name: id, urls: pbsUrls(id) };
   }
   if (isNameToken(t)) {
     const name = t.replace(IDS_NAME_PREFIX, '');
     const hash = await sha256(new TextEncoder().encode(name));
     const record = (await dictionary()).get(hash);
-    if (!record) throw new Error(`${name} is not in ${IDS_DICT_FILE} (its hash starts ${hash.slice(0, 12)}…)`);
-    return { name, urls: pbsUrls(await idsDecrypt(name, record)) };
+    if (record) return { name, urls: pbsUrls(await idsDecrypt(name, record)) };
+    // NOT IN THE DICTIONARY. His 2026-10-19 case: `/file/HTuOfF1W4AA6UfM.mp4` — a pbs id with an
+    // extension on it. Strip the extension; if what is left is a pbs id, that IS the media id, so the
+    // player stays up and pbs answers. Only a 404 from pbs may end on the art.
+    const stem = name.replace(/\.[A-Za-z0-9]+$/, '');
+    if (stem && stem !== name && PBS_ID.test(stem)) {
+      return { name, urls: pbsUrls(stem), guess: true };
+    }
+    throw new Error(`${name} is not in ${IDS_DICT_FILE} (its hash starts ${hash.slice(0, 12)}…)`);
   }
   // Bare ids, `id1+id2`, or a pbs url — no name, so the address is only an id.
   const list = t.split('+').map((s) => s.trim()).filter(Boolean);
@@ -271,7 +294,6 @@ async function resolveToken(token) {
   }
   return { name, urls };
 }
-
 // ─── the codec ────────────────────────────────────────────────────────────────────────────────
 async function decodePngExact(bytes) {
   if (!(bytes && bytes.length > 33 && bytes[0] === 0x89 && bytes[1] === 0x50)) return null;
@@ -563,22 +585,15 @@ async function renderMedia(mime) {
       manifestDepth++;
       src = { ...src, name: master.name, urls: master.urls };
       partCache.clear();
-      stage.textContent = '';
-      stage.appendChild(statusEl);
       return renderMedia(mimeFromName(master.name) || '');
     }
   }
   const isVideo = mime.startsWith('video/');
-  // Stream into the player that is already on screen — that is what "looks like it is loading
-  // instantly, then plays" means. A fresh element would flash black a second time.
-  const reuse = pendingVideo && (isVideo === (pendingVideo.tagName === 'VIDEO'));
-  const el = reuse ? pendingVideo : document.createElement(isVideo ? 'video' : 'audio');
+  // The element IS the page: created in <body>, never wrapped, never moved. Its tag is the one the
+  // address promised, so a `.mp3` never ends up with a <video> on screen.
+  const el = pendingVideo && (isVideo === (pendingVideo.tagName === 'VIDEO'))
+    ? pendingVideo : bareMedia(isVideo ? 'video' : 'audio');
   pendingVideo = null;
-  el.controls = true;
-  el.autoplay = true;
-  el.playsInline = true;
-  // Reuse in place: detaching a <video> and re-appending it comes back as a fresh black frame.
-  if (reuse && !el.isConnected) stage.appendChild(el);
 
   // Following a master lands here with NEW parts and no sniff of its own: check whether what it
   // names is PACKED before offering it to a player (a packed webm otherwise went black for 23 s).
@@ -588,30 +603,31 @@ async function renderMedia(mime) {
   }
   if (src.direct) {
     // An ordinary url is already streamable by the browser: point at it and let it do the work.
-    el.src = src.urls[0];
-    status(`Playing ${src.urls[0]}`);
+    setMediaSource(el, src.urls[0], mime);
   } else {
     // A PACKED payload (B2PZ) is a deflate stream: byte N of the file is not at byte N of the
     // payload, so a player reading ranges gets compressed bytes and dies. Fetch and unpack instead.
     const url = src.packed ? null : await streamUrlFor(src.name, src.urls, mime);
-    if (url) {
-      el.src = url;
-      status(`${src.urls.length} part(s) — byte-range streaming: the player fetches only what it reads`);
-    } else {
-      status('Fetching every part, then playing (no range worker on this origin)…');
-      const bytes = await wholeFile();
-      el.src = URL.createObjectURL(new Blob([bytes], { type: mime }));
-      $('meta').textContent = fmt(bytes.length);
-      status(`${fmt(bytes.length)} — ${src.urls.length} part(s)`);
-    }
+    if (url) setMediaSource(el, url, mime);
+    else setMediaSource(el, URL.createObjectURL(new Blob([await wholeFile()], { type: mime })), mime);
   }
-  document.body.className = 'media';
-  el.addEventListener('loadedmetadata', () => {
-    if (Number.isFinite(el.duration) && el.duration) $('meta').textContent = `${Math.round(el.duration)}s`;
-    status('');
-  });
-  stage.appendChild(el);
+  // The one address that can still turn out not to exist: a pbs id guessed from `id.mp4`. The player
+
+  // the art). `run()` asks pbs first; this is the fallback when that request could not answer.
+  if (src.guess) {
+    el.addEventListener('error', () => { if (!el.readyState) show404(); }, { once: true });
+  }
   return el;
+}
+
+// The player's source, set the way a `file:///` media document carries it: a <source> child, not a
+// `src` attribute on the element (measured 2026-10-19 on Brave's own .webm tab).
+function setMediaSource(el, url, mime) {
+  let s = el.querySelector('source');
+  if (!s) { s = document.createElement('source'); el.appendChild(s); }
+  s.type = mime || '';
+  s.src = url;
+  el.load();
 }
 
 // ─── zip: the directory lives at the end, so only the tail is fetched ─────────────────────────
@@ -891,12 +907,22 @@ function apacheDate(d) {
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
          `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
-function indexOf(files, total, name) {
-  $('where').textContent = `Index of ${name}`;
-  $('kind').textContent = '';
-  $('meta').textContent = '';
-  document.title = `Index of ${name}`;
-  clearStage();
+// Apache 2.4's autoindex, copied: the same table, the same icon column, the same date and size
+// columns, and the `<address>` line at the bottom. The only change is the first data row: where
+// Apache puts "Parent Directory", this puts "Download Zip".
+//
+// The page is built BEFORE the directory is read, so a `.`-address shows "Index of …" at once and
+
+// offline and wait for the information to be decoded from server").
+function indexView(label, total) {
+  resetPage('');
+  const state = { label, total: total || 0 };
+  document.title = `Index of ${label}`;
+
+  const h1 = document.createElement('h1');
+  h1.id = 'where';
+  h1.textContent = `Index of ${label}`;
+  body.appendChild(h1);
 
   const table = document.createElement('table');
   const rule = () => {
@@ -915,11 +941,11 @@ function indexOf(files, total, name) {
   blank.alt = '[ICO]';
   iconTh.appendChild(blank);
   head.appendChild(iconTh);
-  for (const label of ['Name', 'Last modified', 'Size', 'Description']) {
+  for (const text of ['Name', 'Last modified', 'Size', 'Description']) {
     const th = document.createElement('th');
     const a = document.createElement('a');
     a.href = '#';
-    a.textContent = label;
+    a.textContent = text;
     th.appendChild(a);
     head.appendChild(th);
   }
@@ -961,38 +987,53 @@ function indexOf(files, total, name) {
     a.textContent = 'fetching…';
     try {
       const bytes = await wholeFile();
-      saveBytes(bytes, name, 'application/zip');
-      status(`saved ${name} — ${fmt(bytes.length)}`);
+      saveBytes(bytes, state.label, 'application/zip');
+      status(`saved ${state.label} — ${fmt(bytes.length)}`);
     } catch (err) { status(`could not fetch the archive: ${err.message}`, true); }
     a.textContent = 'Download Zip';
   }, '', '-');
   zipLink.id = 'download-zip';
-  zipLink.title = `Download ${name} (${fmt(total)})`;
+  zipLink.title = state.total ? `Download ${state.label} (${fmt(state.total)})` : `Download ${state.label}`;
 
-  for (const f of files) {
-    const [icon, alt] = iconFor(f.path, f.dir);
-    const label = f.path.replace(/\/$/, '') + (f.dir ? '/' : '');
-    const a = addRow(icon, alt, label, f.dir ? null : async (el) => {
-      el.textContent = label + ' …';
-      try {
-        const bytes = await memberBytes(f);
-        const base = f.path.replace(/^.*\//, '');
-        saveBytes(bytes, base, mimeFromName(base));
-        status(`saved ${base} — ${fmt(bytes.length)}`);
-      } catch (err) { status(`could not read ${f.path}: ${err.message}`, true); }
-      el.textContent = label;
-    }, apacheDate(f.modified), f.dir ? '-' : apacheSize(f.size));
-    if (!f.dir) {
-      a.className = 'member';
-      a.title = `${f.path} (${fmt(f.size)}) — only the bytes this member needs`;
-    }
-  }
-  rule();
-  stage.appendChild(table);
+  body.appendChild(table);
   const addr = document.createElement('address');
   addr.textContent = 'jarivizero.github.io';
-  stage.appendChild(addr);
-  status(`${files.length} entr${files.length === 1 ? 'y' : 'ies'} read from the end of the file`);
+  body.appendChild(addr);
+
+  return {
+    // The name can be learned later (an id has none): the heading follows it, nothing is rebuilt.
+    setLabel(next) {
+      state.label = next;
+      h1.textContent = `Index of ${next}`;
+      document.title = `Index of ${next}`;
+      zipLink.title = state.total ? `Download ${next} (${fmt(state.total)})` : `Download ${next}`;
+    },
+    addMember(f) {
+      const [icon, alt] = iconFor(f.path, f.dir);
+      const text = f.path.replace(/\/$/, '') + (f.dir ? '/' : '');
+      const a = addRow(icon, alt, text, f.dir ? null : async (el) => {
+        el.textContent = text + ' …';
+        try {
+          const bytes = await memberBytes(f);
+          const base = f.path.replace(/^.*\//, '');
+          saveBytes(bytes, base, mimeFromName(base));
+          status(`saved ${base} — ${fmt(bytes.length)}`);
+        } catch (err) { status(`could not read ${f.path}: ${err.message}`, true); }
+        el.textContent = text;
+      }, apacheDate(f.modified), f.dir ? '-' : apacheSize(f.size));
+      if (!f.dir) {
+        a.className = 'member';
+        a.title = `${f.path} (${fmt(f.size)}) — only the bytes this member needs`;
+      }
+    },
+  };
+}
+
+// The listing, once it arrives, into the page that is already on screen.
+function indexOf(files, total, label) {
+  const view = indexView(label, total);
+  for (const f of files) view.addMember(f);
+  return view;
 }
 
 // A member of an archive, rendered BY its own byte range. `/file/<base>/bug.gif` lands here.
@@ -1034,48 +1075,50 @@ async function extractFrom(block, f) {
 
 // Bytes with a name → the thing they are. One place, so a zip member and a plain payload render
 // the same way (an HTML member becomes the document, an image is an image, text is text).
+// Bytes with a name → the thing they are. One place, so a zip member and a plain payload render the
+// same way (an HTML member becomes the document, an image is an image, text is text) — and each of
+// them is BARE: no header, no type line, no meta line, exactly like opening the member from disk.
 async function renderBytes(bytes, name, fromLabel) {
   const mime = mimeFromName(name) || sniffMime(bytes);
-  const media = mime.startsWith('video/') || mime.startsWith('audio/');
-  const textLike = mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml';
-  document.title = name;
-  // The body class decides whether any of these lines may be on screen at all, so it is set before
-  // the text nodes are: a video member used to flash "name video/mp4" on its way in.
-  document.body.className = media ? 'media' : (textLike ? 'plain' : '');
-  $('where').textContent = name;
-  $('kind').textContent = mime;
-  $('meta').textContent = fmt(bytes.length);
-  clearStage();
-  if (mime.startsWith('image/')) {
-    const img = document.createElement('img');
-    img.src = URL.createObjectURL(new Blob([bytes], { type: mime }));
-    img.alt = name;
-    stage.appendChild(img);
-  } else if (mime === 'text/html') {
+  if (mime === 'text/html') {
     window.__fileHtml = name;
     document.open();
     document.write(new TextDecoder().decode(bytes));
     document.close();
     return;
-  } else if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
-    const pre = document.createElement('pre');
-    pre.textContent = new TextDecoder().decode(bytes);
-    stage.appendChild(pre);
-  } else if (mime.startsWith('video/') || mime.startsWith('audio/')) {
-    const el = document.createElement(mime.startsWith('video/') ? 'video' : 'audio');
-    el.controls = true;
-    el.src = URL.createObjectURL(new Blob([bytes], { type: mime }));
-    stage.appendChild(el);
-  } else {
-    const p = document.createElement('p');
-    const a = document.createElement('a');
-    a.href = '#';
-    a.textContent = `Download ${name} (${fmt(bytes.length)})`;
-    a.addEventListener('click', (e) => { e.preventDefault(); saveBytes(bytes, name, mime); });
-    p.appendChild(a);
-    stage.appendChild(p);
   }
-  status(`${name} — ${fmt(bytes.length)}${fromLabel ? ` from ${fromLabel}` : ''}`);
+  if (mime.startsWith('video/') || mime.startsWith('audio/')) {
+    const el = bareMedia(mime.startsWith('audio/') ? 'audio' : 'video');
+    setMediaSource(el, URL.createObjectURL(new Blob([bytes], { type: mime })), mime);
+    return;
+  }
+  if (mime.startsWith('image/')) return bareImage(bytes, mime, name);
+  if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
+    bareText(new TextDecoder().decode(bytes));
+    return;
+  }
+  if (mime === 'application/pdf') {
+    resetPage('');
+    document.title = name;
+    const embed = document.createElement('embed');
+    embed.src = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    embed.type = 'application/pdf';
+    embed.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;border:0';
+    document.documentElement.style.height = '100%';
+    body.setAttribute('style', 'margin:0;height:100%;background:#000');
+    body.appendChild(embed);
+    return;
+  }
+  // Unknown binary: it has to say what it is and offer the bytes.
+  resetPage('');
+  document.title = name;
+  const bar = document.createElement('div');
+  const btn = document.createElement('button');
+  btn.textContent = `⬇ Download ${name} (${fmt(bytes.length)})`;
+  btn.addEventListener('click', () => saveBytes(bytes, name, mime));
+  bar.appendChild(btn);
+  body.appendChild(bar);
+  status(`${mime || 'binary'} — this page cannot render it${fromLabel ? ` (from ${fromLabel})` : ''}.`);
 }
 
 // ─── a MASTER file ────────────────────────────────────────────────────────────────────────────
@@ -1108,91 +1151,160 @@ function followManifest(bytes) {
 }
 
 // ─── the router ───────────────────────────────────────────────────────────────────────────────
-let manifestDepth = 0;   // one hop only: a master that names a master is a bug, not a file
+let manifestDepth = 0;    // one hop only: a master that names a master is a bug, not a file
+let pendingVideo = null;  // the optimistic player: the SAME element gets the real stream
 
-// A name that is NOT in the dictionary must end on the 404 art, not on a red status line — and a
-// name with a media extension should put the player up FIRST, because that is what the address
-
-// The SAME page 404.html shows: white, centred, the art, and one way home. A bare image on the
-// renderer's default background read as "a dark page with a picture on it" (his 2026-10-19 report).
+// The address earned nothing: white, centred, the art, one way home — the page 404.html shows. The
+// body is rebuilt first so a player or an index cannot sit underneath it.
 function show404() {
   pendingVideo = null;
-  document.body.className = 'notfound';
+  resetPage('notfound');
   document.title = '404 — not found';
-  stage.textContent = '';
   const img = document.createElement('img');
-  img.src = '/404.png';
+  img.src = siteUrl('404.png');
   img.alt = '404 — whatever you are looking for, it is not here';
   img.style.cssText = 'width:min(100%,420px);height:auto;display:block;margin:0 auto 8px';
   const msg = document.createElement('p');
   msg.textContent = 'not found';
-  msg.style.cssText = 'margin:6px 0;color:#1b1b1f';
   const home = document.createElement('p');
-  home.style.cssText = 'margin:6px 0';
   const a = document.createElement('a');
-  a.href = '/bin2png';
+  a.href = siteUrl('bin2png');
   a.textContent = 'click me to go home';
-  a.style.cssText = 'color:#0645ad;font-weight:600;text-decoration:none';
   home.appendChild(a);
-  stage.append(img, msg, home);
+  body.append(img, msg, home);
 }
 
-let pendingVideo = null;   // the placeholder player: the SAME element gets the real stream
-
-function optimisticMedia(mime) {
-  // The element has to match the type the ADDRESS promised, not "always a video": renderMedia
-  // reuses the placeholder only when the tag matches, so an `.mp3` name with a <video> on screen
-  // would leave the placeholder behind and add a second element.
-  const el = document.createElement(String(mime || '').startsWith('audio/') ? 'audio' : 'video');
-  pendingVideo = el;
+// A player that IS the page: one element in <body>, the black window behind it, and the head and
+// body a `file:///` media tab has. Both routes call this, so the element never moves — moving a
+// <video> comes back as a fresh black frame (measured here).
+function bareMedia(tag) {
+  resetPage();
+  // The black belongs to the WINDOW, not to a rule in a stylesheet: bareHead is about to remove
+  // that stylesheet, and a transparent <html> is a frame that is not black (measured).
+  document.documentElement.style.height = '100%';
+  document.documentElement.style.background = '#000';
+  body.setAttribute('style', 'margin:0;height:100%;background:#000;display:flex;' +
+    'align-items:center;justify-content:center;overflow:hidden');
+  bareHead('media');
+  const el = document.createElement(tag);
   el.controls = true;
+  el.autoplay = true;
   el.playsInline = true;
-  if (el.tagName === 'VIDEO') {
-    // No forced width/height: the element takes the media's own size, exactly like the browser's
-    // media document. The CSS centres it on black.
-    el.style.cssText = 'display:block;max-width:100vw;max-height:100vh;background:#000';
-  }
-  document.body.className = 'media';
-  stage.textContent = '';
-  stage.appendChild(el);
+  el.setAttribute('name', 'media');
+  el.setAttribute('style', 'display:block;max-width:100vw;max-height:100vh;background:#000');
+  body.appendChild(el);
+  pendingVideo = el;
   return el;
+}
+
+// Text is ONE <pre>, with the inline style Brave's own text tab gives it (measured 2026-10-19):
+// `<pre style="word-wrap: break-word; white-space: pre-wrap;">`.
+function bareText(text) {
+  resetPage();
+  bareHead('text');
+  const pre = document.createElement('pre');
+  pre.setAttribute('style', 'word-wrap: break-word; white-space: pre-wrap;');
+  pre.textContent = text;
+  body.appendChild(pre);
+  return pre;
+}
+
+// An image tab in Brave is a dark canvas with the picture in the middle and its name and dimensions
+// in the title (measured: `<html style="height:100%">`, body #0e0e0e, `img { display:block; margin:auto }`).
+function bareImage(bytes, mime, name) {
+  resetPage();
+  bareHead('image');
+  document.documentElement.style.height = '100%';
+  body.setAttribute('style', 'margin:0;height:100%;background-color:#0e0e0e;' +
+    'display:flex;align-items:center;justify-content:center');
+  const img = document.createElement('img');
+  img.setAttribute('style', 'display:block;margin:auto;max-width:100%;max-height:100%;' +
+    '-webkit-user-select:none;cursor:zoom-in');
+  img.alt = name;
+  img.src = URL.createObjectURL(new Blob([bytes], { type: mime }));
+  body.appendChild(img);
+  img.addEventListener('load', () => {
+    document.title = `${name} (${img.naturalWidth}×${img.naturalHeight})`;
+  }, { once: true });
+  return img;
+}
+
+function barePdf(bytes) {
+  resetPage();
+  document.documentElement.style.height = '100%';
+  body.setAttribute('style', 'margin:0;height:100%;background:#000');
+  const embed = document.createElement('embed');
+  embed.src = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+  embed.type = 'application/pdf';
+  embed.style.cssText = 'display:block;width:100%;height:100%;border:0';
+  body.appendChild(embed);
+}
+
+// A type this page cannot render: say it, and offer the bytes. The only view that needs a button.
+function binaryView(bytes) {
+  resetPage('');
+  document.title = src.name;
+  const btn = document.createElement('button');
+  btn.textContent = `⬇ Download ${src.name} (${fmt(bytes.length)})`;
+  btn.addEventListener('click', () => saveBytes(bytes, src.name, mimeFromName(src.name)));
+  body.appendChild(btn);
+  status(`${mimeFromName(src.name) || 'binary'} — this page cannot render it.`);
 }
 
 // `/file#name` and `/file/name` are the same address, spelled differently: the second is what the
 // worker serves this page for (and what 404.html writes it into on a first visit), so the typed url
-// is never rewritten.
+// is never rewritten. The `?name.ext` form is an id plus the filename it should save as.
 function addressFromLocation() {
   const hash = location.hash.replace(/^#/, '');
-  if (hash) return decodeURIComponent(hash).trim();
-  const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1];
-  return fromPath ? decodeURIComponent(fromPath).replace(/\/+$/, '').trim() : '';
+  if (hash) return { raw: decodeURIComponent(hash).trim(), hint: '' };
+  // `/file/<id>` and a bare `/<id>` at the site root are the same address; the second is the short
+
+  const idAtRoot = /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
+  const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
+    || (idAtRoot ? location.pathname.slice(1) : '');
+  const raw = fromPath ? decodeURIComponent(fromPath).replace(/\/+$/, '').trim() : '';
+  let hint = location.search.replace(/^\?/, '');
+  try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
+  if (!raw || !hint || hint.includes('=') || /[?#]/.test(hint)) hint = '';
+  return { raw, hint };
 }
 
 async function run() {
-  const address = addressFromLocation();
-
-  // `file/.HU3ep_nXIAAa6AR+…` reads the FIRST part's start and the LAST part's end through the
-  // worker's byte ranges — the head says mp4/text/png, the tail says zip — instead of downloading
-  // each part to find out. The dot is not part of the name: the id list behind it is the address.
-  let ranged = false;
-  let raw = address;
-  while (raw.startsWith('.') && raw.length > 1) { ranged = true; raw = raw.slice(1); }
-  // A media name is the page from its FIRST frame: the player goes up before a single character is
-  // written, so the header never paints even for one frame (his 2026-10-19 report: "loading video,
-  // then switches to top left info, pumpernickel.mp4 video/mp4 — That's the text").
-  const mediaName = !/^https?:/i.test(raw) && !/^id:/i.test(raw) && /^(video|audio)\//.test(mimeFromName(raw));
-  clearStage();
-  if (mediaName) optimisticMedia(mimeFromName(raw));
-  $('where').textContent = raw || 'file';
-  $('kind').textContent = '';
-  $('meta').textContent = '';
+  const where = addressFromLocation();
+  let raw = where.raw;
+  // Prefix grammar, left to right: `.` = an archive (its index page is up before the bytes arrive),
+  // `,` = a video (its player is up before the bytes arrive). Both are his 2026-10-19 ask:
+  // `/file/,<id>` prepares like the worker checks for webm/mp4, `/file/.<id>` is an archive.
+  let ranged = false, forceMedia = false;
+  for (;;) {
+    if (raw.length > 1 && raw.startsWith('.')) { ranged = true; raw = raw.slice(1); continue; }
+    if (raw.length > 1 && raw.startsWith(',')) { forceMedia = true; raw = raw.slice(1); continue; }
+    break;
+  }
+  resetPage();
   if (!raw) {
-    document.body.className = '';
-    stage.innerHTML = '<p>Open a file by name: file#yakusoku.mp4, file#notes.txt, ' +
-      'file#something.zip.</p>';
+    document.title = 'file';
+    const p = document.createElement('p');
+    p.textContent = 'Open a file by name: file#yakusoku.mp4, file#notes.txt, file#something.zip.';
+    body.appendChild(p);
     return;
   }
-  // Resolving decides whether the player stays or becomes the 404 art.
+
+  // The first frame is decided by the ADDRESS alone: `,` says video, an extension in the path or in
+  // `?name` says which element, `.` says the index page. Nothing is fetched to find out.
+  const firstMime = where.hint ? mimeFromName(where.hint) : (ranged ? '' : mimeFromName(raw));
+  let index = null, indexLabel = '';
+  if (ranged) {
+    indexLabel = /\.[A-Za-z0-9]+$/.test(raw) ? raw : `${raw}.zip`;
+    index = indexView(indexLabel, 0);
+  }
+  let player = null;
+  if (forceMedia) player = bareMedia('video');
+  else if (/^(video|audio)\//.test(firstMime)) {
+    player = bareMedia(firstMime.startsWith('audio/') ? 'audio' : 'video');
+  }
+
+  // Resolving decides whether the player/index stays or becomes the 404 art.
   // `/file/<base>/<member>` — the address may point INSIDE a zip (bug.gif in a zip of a game).
   // Try the whole token first (a dictionary name can contain a slash), then split at the first one.
   let token, member = null;
@@ -1211,45 +1323,29 @@ async function run() {
       member = raw.slice(cut + 1);
     } catch (e2) { console.warn('address not resolved:', e2.message); show404(); return; }
   }
-  // The placeholder player IS the page now. `media` stays on the body (it is what hides the header,
-  // the type line and the status line) and the element stays in the DOM — pulling it out to put it
-
-  if (!mediaName) {
-    document.body.className = '';
-    stage.textContent = '';
-    stage.appendChild(statusEl);
-  }
-  // `direct` means "an ordinary http url", where the browser's own Range requests work. A pbs url
-  // is NEVER direct: its bytes are pixels, so every byte has to come through the codec.
-  src = { name: token.name || 'file', urls: token.urls, ranged,
-          direct: /^https?:/i.test(raw) && token.urls.length === 1 && !/pbs\.twimg\.com\/media\//.test(raw) };
+  src = {
+    name: where.hint || token.name || 'file',
+    urls: token.urls,
+    ranged,
+    guess: !!token.guess,
+    direct: /^https?:/i.test(raw) && token.urls.length === 1 && !/pbs\.twimg\.com\/media\//.test(raw),
+  };
   // The part cache is keyed by PART NUMBER, so a hash change to a different file would read the
-  // previous file's part 1 (measured here: `#hello.txt` then `#bundle.zip` listed the text's bytes
-  // as the zip's first member). A new address starts with an empty cache.
+  // previous file's part 1 (measured: `#hello.txt` then `#bundle.zip` listed the text's bytes as the
+  // zip's first member). A new address starts with an empty cache.
   partCache.clear();
-  // A dot address decides by its BYTES, never by a name: the whole point is that nothing about the
-  // payload is known until the two ends have been read. (Without this, `#.id:<url>` inherited `.png`
-  // from the url and rendered an image instead of playing the video inside it.)
   let mime = src.ranged ? '' : mimeFromName(src.name);
   let zipByName = !src.ranged && /\.(zip|apk|jar)$/i.test(src.name);
-  document.title = src.name;
-  $('where').textContent = src.name;
-  $('kind').textContent = mime || 'file';
-  status('');
+  // A media or index view owns its own title (none for media, "Index of …" for an archive).
+  // Assigning one here would insert a <title> INTO the bare head — measured: `META:viewport,TITLE:`.
+  if (!player && !index) document.title = src.name;
 
   // An id carries no extension. Read the two ENDS before deciding — the last part says "zip" when
   // its EOCD ends exactly at the last byte, the first part says video/text/image. Never the whole
 
-  if (!mime) {
-    status('Reading the start and the end of the file to see what it is…');
+  if (!mime && !zipByName) {
     try {
       const probe = await sniffSource();
-      if (probe.packed && /^(video|audio)\//.test(probe.mime || '')) {
-        // PACKED cannot stream: the player would read DEFLATE bytes. This page unpacks the whole
-        // file instead, and says why (his 2026-10-19 report: a packed webm showed "binary").
-        status(`${probe.mime} — stored packed (deflated), so it is fetched and unpacked in full ` +
-               'before it plays; a packed payload cannot be byte-ranged.');
-      }
       if (probe.packed) src.packed = true;
       if (probe.zip) zipByName = true;
       else if (probe.mime) {
@@ -1264,70 +1360,71 @@ async function run() {
       // A failed probe still leaves the whole-file path — but say WHY on the console, or a broken
       // probe is invisible (it only shows up as a slow page).
       console.warn('probe failed:', e && e.message);
-      status('', false);
     }
-    document.title = src.name;
-    $('where').textContent = src.name;
-    $('kind').textContent = mime || (zipByName ? 'zip' : 'file');
+    if (!player && !index) document.title = src.name;
+  }
+
+  // `id.mp4` where the id is not in the dictionary: pbs is the last word. One two-byte range says
+
+  // 2026-10-19: "if pbs also is 404, then you can go to the 404 page").
+  if (src.guess) {
+    try {
+      const res = await fetch(src.urls[0], {
+        headers: { Range: 'bytes=0-1' }, mode: 'cors', credentials: 'omit',
+      });
+      if (res.status === 404 || res.status === 410) { show404(); return; }
+    } catch (e) { /* offline or CORS: the player's own error handler decides */ }
   }
 
   try {
-    if (mime.startsWith('video/') || mime.startsWith('audio/')) {
+    if (/^(video|audio)\//.test(mime)) {
       await renderMedia(mime);
       return;
     }
     if (mime === 'application/zip' || zipByName) {
-      status('Reading the end of the file for its directory…');
+      if (player) player.remove();
+      // An id (or a `.bin`) has no archive suffix; the archive still saves as one.
+      const label = /\.(zip|apk|jar)$/i.test(src.name) ? src.name : `${src.name}.zip`;
       if (member) {
-        // An id has no extension; the archive still saves as an archive.
-        const label = /\.(zip|apk|jar)$/i.test(src.name) ? src.name : `${src.name}.zip`;
+        if (index) resetPage();
         await renderZipMember(label, member);
         return;
       }
+      // The page is already up for a `.` address; only the rows were missing.
+      if (index) index.setLabel(label);
+      else index = indexView(label, 0);
       let listing;
       try {
         listing = await readZipCentral();
       } catch (e) {
         // A packed payload has no byte-for-byte offsets: fall back to the whole file.
         status(`${e.message} — fetching the whole archive instead…`);
-        const bytes = await wholeFile();
-        listing = await zipFromMemory(bytes);
+        listing = await zipFromMemory(await wholeFile());
       }
-      // An id has no extension; the archive still saves as an archive.
-      const label = /\.(zip|apk|jar)$/i.test(src.name) ? src.name : `${src.name}.zip`;
-      indexOf(listing.files, listing.total, label);
+      for (const f of listing.files) index.addMember(f);
       return;
     }
     if (mime.startsWith('image/')) {
-      document.body.className = 'plain';
-      status('Fetching…');
-      const bytes = await wholeFile();
-      const img = document.createElement('img');
-      img.src = URL.createObjectURL(new Blob([bytes], { type: mime }));
-      $('meta').textContent = fmt(bytes.length);
-      stage.appendChild(img);
-      status(`${fmt(bytes.length)} — ${src.urls.length} part(s)`);
+      bareImage(await wholeFile(), mime, src.name);
       return;
     }
     // Text, and anything else that is small enough to read: the bytes, then the bytes as text.
-    status('Fetching…');
+    // NOTHING is printed while it loads — a native tab is blank until the file is there.
     const bytes = await wholeFile();
-
-    // `file/blindspots.webm` is the master, and it must render like the 4-part file it lists).
+    // A master file names parts; follow it once and render what it names.
     const master = manifestDepth < 1 ? followManifest(bytes) : null;
     if (master) {
       manifestDepth++;
       src = { name: master.name, urls: master.urls, direct: false, ranged: src.ranged };
       partCache.clear();
-      stage.textContent = '';
-      stage.appendChild(statusEl);
-      status(`master file — rendering ${master.name} (${master.urls.length} part(s))…`);
-      return run();
+      const masterMime = mimeFromName(master.name);
+      if (/^(video|audio)\//.test(masterMime)) return renderMedia(masterMime);
+      return renderBytes(await wholeFile(), master.name, '');
     }
-    $('meta').textContent = fmt(bytes.length);
-    // An HTML payload IS a page: render it as the document, not as its source. Same rule as
-    // bin2png's `(html)` mode — document.open()/write()/close() drops this page and lets the
-    // decoded page's own <style>/<script> run, with relative urls resolved against this directory.
+    document.title = src.name;
+    // An HTML payload IS a page: render it as the document, not as its source. document.open()/
+    // write()/close() drops this page and lets the decoded page's own <style>/<script> run, with
+    // relative urls resolved against this directory.
     if (mime === 'text/html') {
       window.__fileHtml = src.name;
       document.open();
@@ -1335,34 +1432,15 @@ async function run() {
       document.close();
       return;
     }
-    if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml'
-        || mime === 'application/pdf') {
-      if (mime === 'application/pdf') {
-        const embed = document.createElement('embed');
-        embed.src = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-        embed.type = 'application/pdf';
-        embed.style.cssText = 'width:100%;height:calc(100vh - 140px);border:0;border-radius:8px;';
-        stage.appendChild(embed);
-      } else {
-        const pre = document.createElement('pre');
-        pre.textContent = new TextDecoder().decode(bytes);   // textContent, never innerHTML
-        stage.appendChild(pre);
-      }
-      status(`${fmt(bytes.length)} — ${src.urls.length} part(s)`);
+    if (mime === 'application/pdf') { barePdf(bytes); return; }
+    if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
+      bareText(new TextDecoder().decode(bytes));
       return;
     }
-    // Unknown binary: say what it is and let a click save it.
-    const bar = document.createElement('div');
-    bar.className = 'toolbar';
-    const btn = document.createElement('button');
-    btn.className = 'primary';
-    btn.textContent = `⬇ Download ${src.name} (${fmt(bytes.length)})`;
-    btn.addEventListener('click', () => saveBytes(bytes, src.name, mimeFromName(src.name)));
-    bar.appendChild(btn);
-    stage.appendChild(bar);
-    status(`A ${mime || 'binary'} file — this page cannot render it.`);
+    binaryView(bytes);
   } catch (e) {
-    status(e.message, true);
+    // A guessed pbs id that cannot even be fetched is a missing file, not a status line.
+    if (src.guess) show404(); else status(e.message, true);
   }
 }
 
