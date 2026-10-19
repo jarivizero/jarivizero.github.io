@@ -441,8 +441,11 @@ async function streamUrlFor(name, urls, mime) {
   return new URL('__b2p/' + encodeURIComponent(name) + '?id=' + id, streamScriptUrl()).href;
 }
 
-async function renderMedia() {
-  const mime = mimeFromName(src.name) || 'application/octet-stream';
+// `mime` is the type the router already resolved — from the name, or from the probe when the
+// address had no extension. Re-deriving it here is what made `clip.dat` (a sniffed mp4) come out as
+// an <audio> element.
+async function renderMedia(mime) {
+  mime = mime || 'application/octet-stream';
   const isVideo = mime.startsWith('video/');
   const el = document.createElement(isVideo ? 'video' : 'audio');
   el.controls = true;
@@ -557,6 +560,65 @@ async function readZipCentralDirect() {
     at = cdOff;
   }
   return parseCentral(block, at, entries, cdSize, cdOff, total);
+}
+
+// ─── when the address says nothing: read the two ENDS, never the whole file ───────────────────
+// A name carries its type; an id does not. So for an unnamed payload the page reads the LAST part
+// (a zip's directory is there) and the FIRST part (a container's magic bytes). Two parts at most,
+// and neither is wasted: the tail is what the listing needs and the head is what the player
+// starts with.
+function sniffMime(head) {
+  const b = head;
+  const at = (i, ...sig) => sig.every((v, k) => b[i + k] === v);
+  if (b.length > 12 && at(4, 0x66, 0x74, 0x79, 0x70)) return 'video/mp4';       // …ftyp
+  if (at(0, 0x1a, 0x45, 0xdf, 0xa3)) return 'video/x-matroska';                 // EBML (webm/mkv)
+  if (at(0, 0x89, 0x50, 0x4e, 0x47)) return 'image/png';
+  if (at(0, 0xff, 0xd8, 0xff)) return 'image/jpeg';
+  if (at(0, 0x47, 0x49, 0x46, 0x38)) return 'image/gif';
+  if (at(0, 0x52, 0x49, 0x46, 0x46) && b.length > 11) return 'image/webp';
+  if (at(0, 0x25, 0x50, 0x44, 0x46)) return 'application/pdf';
+  if (at(0, 0x49, 0x44, 0x33)) return 'audio/mpeg';
+  if (at(0, 0x4f, 0x67, 0x67, 0x53)) return 'audio/ogg';
+  if (at(0, 0x66, 0x4c, 0x61, 0x43)) return 'audio/flac';
+  // Text: no control bytes in the first 4 KB (tab/newline/cr are fine) and something printable.
+  const sample = b.subarray(0, Math.min(4096, b.length));
+  let ctrl = 0, printable = 0;
+  for (const c of sample) {
+    if (c === 9 || c === 10 || c === 13) continue;
+    if (c < 32 || c > 126) { if (c < 128) ctrl++; } else printable++;
+  }
+  if (sample.length && ctrl / sample.length <= 0.02 && printable > 0) {
+    const s = new TextDecoder().decode(sample).trimStart();
+    if (/^<(!doctype|html|\?xml)/i.test(s)) return 'text/html';
+    if (/^[{[]/.test(s)) return 'application/json';
+    return 'text/plain';
+  }
+  return '';
+}
+
+// A zip is recognised by a STRUCTURAL test, not by a signature that happens to appear: the EOCD's
+// comment length has to end exactly at the last byte.
+function looksLikeZipTail(tail) {
+  const at = findEocd(tail);
+  if (at < 0) return false;
+  const comment = u16(tail, at + 20);
+  if (at + 22 + comment !== tail.length) return false;
+  const entries = u16(tail, at + 10);
+  const cdSize = u32(tail, at + 12);
+  return entries > 0 && cdSize > 0;
+}
+
+async function sniffSource() {
+  if (src.direct) {
+    const total = await sourceSize();
+    if (!total) return { mime: '' };
+    const tail = await sourceRange(Math.max(0, total - 65557), total - 1);
+    if (looksLikeZipTail(tail)) return { zip: true };
+    return { mime: sniffMime(await sourceRange(0, Math.min(total - 1, 65535))) };
+  }
+  const tail = await partPayload(src.urls.length - 1);
+  if (looksLikeZipTail(tail)) return { zip: true };
+  return { mime: sniffMime(await partPayload(0)) };
 }
 
 function parseCentral(block, at, entries, cdSize, cdOff, total) {
@@ -719,18 +781,41 @@ async function run() {
   // previous file's part 1 (measured here: `#hello.txt` then `#bundle.zip` listed the text's bytes
   // as the zip's first member). A new address starts with an empty cache.
   partCache.clear();
-  const mime = mimeFromName(src.name);
+  let mime = mimeFromName(src.name);
+  let zipByName = /\.(zip|apk|jar)$/i.test(src.name);
   document.title = src.name;
   $('where').textContent = src.name;
   $('kind').textContent = mime || 'file';
   status('');
 
+  // An id carries no extension. Read the two ENDS before deciding — the last part says "zip" when
+  // its EOCD ends exactly at the last byte, the first part says video/text/image. Never the whole
+
+  if (!mime) {
+    status('Reading the start and the end of the file to see what it is…');
+    try {
+      const probe = await sniffSource();
+      if (probe.zip) zipByName = true;
+      else if (probe.mime) {
+        mime = probe.mime;
+        const ext = { 'video/mp4': 'mp4', 'video/x-matroska': 'mkv', 'video/webm': 'webm',
+                      'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/flac': 'flac' }[mime] || '';
+        // Only when the existing suffix is not already a media type: an id has none, `clip.dat`
+        // has a useless one. The name is what a save will be called, so it should say what it is.
+        if (ext && !mimeFromName(src.name)) src.name = `${src.name}.${ext}`;
+      }
+    } catch (e) { status('', false); }   // a failed probe still leaves the whole-file path
+    document.title = src.name;
+    $('where').textContent = src.name;
+    $('kind').textContent = mime || (zipByName ? 'zip' : 'file');
+  }
+
   try {
     if (mime.startsWith('video/') || mime.startsWith('audio/')) {
-      await renderMedia();
+      await renderMedia(mime);
       return;
     }
-    if (mime === 'application/zip' || /\.(zip|apk|jar)$/i.test(src.name)) {
+    if (mime === 'application/zip' || zipByName) {
       status('Reading the end of the file for its directory…');
       let listing;
       try {
@@ -741,7 +826,9 @@ async function run() {
         const bytes = await wholeFile();
         listing = await zipFromMemory(bytes);
       }
-      indexOf(listing.files, listing.total, src.name);
+      // An id has no extension; the archive still saves as an archive.
+      const label = /\.(zip|apk|jar)$/i.test(src.name) ? src.name : `${src.name}.zip`;
+      indexOf(listing.files, listing.total, label);
       return;
     }
     if (mime.startsWith('image/')) {
