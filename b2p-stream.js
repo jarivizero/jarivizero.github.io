@@ -126,6 +126,14 @@ async function serve(request, url) {
   if (url.pathname.endsWith('/plan/') || url.pathname.includes('/plan/')) {
     return new Response('plan storage is the Cache API, not a request', { status: 405 });
   }
+  // What this worker actually pulled from the network, per part URL. It exists so "did the first
+  // frame really cost less than the whole file?" is answerable from outside the worker instead of
+  // being a claim in a comment — the verifier and any browser console can ask it directly.
+  if (url.pathname.endsWith('/__b2p/stats')) {
+    return new Response(JSON.stringify([...netBytes], null, 1), {
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    });
+  }
   const id = url.searchParams.get('id');
   // The cache entry first (it may already carry the total size), then the address itself.
   const plan = (await readPlan(id)) || planFromUrl(url);
@@ -234,6 +242,7 @@ function concatBytes(list) {
   return all;
 }
 
+const netBytes = new Map();    // part url -> bytes actually fetched from the network
 const prefixOf = new Map();    // part url -> { bytes, eof }: the PNG bytes in hand so far
 const payloadOf = new Map();   // part url -> Uint8Array: a part that has been read in full
 const partLocks = new Map();   // part url -> promise, so two ranges never grow one part at once
@@ -302,6 +311,7 @@ async function fetchPrefix(url, from, want) {
   });
   if (!res.ok) throw new Error(`part: HTTP ${res.status}`);
   const body = new Uint8Array(await res.arrayBuffer());
+  netBytes.set(url, (netBytes.get(url) || 0) + body.length);
   // 200 = the server ignored Range and sent the whole file, which is also a fine answer.
   return { bytes: body, whole: res.status !== 206 };
 }
