@@ -1101,8 +1101,58 @@ async function extractFrom(block, f) {
   throw new Error(`member uses compression method ${f.method}, which this page cannot unpack`);
 }
 
-// Bytes with a name → the thing they are. One place, so a zip member and a plain payload render
-// the same way (an HTML member becomes the document, an image is an image, text is text).
+// ─── a tt2png index ───────────────────────────────────────────────────────────────────────
+// `tiktokupload.py` stores a file as chunks on TikTok's CDN and posts a small JSON index naming them:
+//   {"tool":"tt2png","name":"1hour.webm","bytes":12302071,"sha256":"…","chunks":[{url,size,sha256}]}
+// Each chunk is a 1×1 PNG with the payload APPENDED after its IEND, so the index has to be followed to
+// see the file. His 2026-10-19 report is exactly this one — `.HU95H5ZWcAED4gK` showed the JSON, and the
+// video was one level down.
+function parseTt2png(bytes) {
+  let text = '';
+  try { text = new TextDecoder('utf-8', { fatal: false }).decode(bytes); } catch (e) { return null; }
+  if (!/^\s*\{/.test(text)) return null;
+  let j = null;
+  try { j = JSON.parse(text); } catch (e) { return null; }
+  if (!j || j.tool !== 'tt2png' || !Array.isArray(j.chunks) || !j.chunks.length) return null;
+  return j;
+}
+// The payload a chunk carries: everything after the PNG's own IEND. The chunk list is WALKED, not
+// searched — a payload may contain the letters "IEND" (the rule bin2png.html's decoder already has).
+function chunkPayload(bytes) {
+  if (!(bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50)) return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let off = 8;
+  while (off + 8 <= bytes.length) {
+    const len = dv.getUint32(off);
+    const type = String.fromCharCode(bytes[off + 4], bytes[off + 5], bytes[off + 6], bytes[off + 7]);
+    const end = off + 8 + len + 4;
+    if (type === 'IEND') return bytes.subarray(Math.min(end, bytes.length));
+    if (end > bytes.length) break;
+    off = end;
+  }
+  return null;
+}
+async function renderTt2png(index) {
+  const pieces = [];
+  for (let i = 0; i < index.chunks.length; i++) {
+    const c = index.chunks[i] || {};
+    if (!c.url) throw new Error(`chunk ${i + 1} of ${index.chunks.length} has no url`);
+    const res = await fetch(c.url, { mode: 'cors', credentials: 'omit' });
+    if (!res.ok) throw new Error(`chunk ${i + 1} of ${index.chunks.length}: HTTP ${res.status}`);
+    const payload = chunkPayload(new Uint8Array(await res.arrayBuffer()));
+    if (!payload) throw new Error(`chunk ${i + 1} of ${index.chunks.length} is not a tt2png PNG`);
+    pieces.push(payload);
+  }
+  const bytes = concat(pieces);
+  if (Number(index.bytes) && bytes.length !== Number(index.bytes)) {
+    throw new Error(`the chunks hold ${bytes.length} B, the index says ${index.bytes} B`);
+  }
+  if (index.sha256 && (await sha256(bytes)) !== index.sha256) {
+    throw new Error('the reassembled file does not hash to the index\u2019s sha256');
+  }
+  return renderBytes(bytes, index.name || 'file', '');
+}
+
 // Bytes with a name → the thing they are. One place, so a zip member and a plain payload render the
 // same way (an HTML member becomes the document, an image is an image, text is text) — and each of
 // them is BARE: no header, no type line, no meta line, exactly like opening the member from disk.
@@ -1463,6 +1513,9 @@ async function run() {
       return renderBytes(await wholeFile(), master.name, '');
     }
     document.title = src.name;
+    // A tt2png index names chunks on a CDN — follow it and render the FILE it describes.
+    const tt2png = parseTt2png(bytes);
+    if (tt2png) return renderTt2png(tt2png);
     // An HTML payload IS a page: render it as the document, not as its source. document.open()/
     // write()/close() drops this page and lets the decoded page's own <style>/<script> run, with
     // relative urls resolved against this directory.
