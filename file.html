@@ -278,6 +278,29 @@ async function inflate(comp, format) {
   return new Uint8Array(await new Response(
     new Blob([comp]).stream().pipeThrough(new DecompressionStream(format))).arrayBuffer());
 }
+// A PREFIX of a packed payload still inflates to a prefix of the file: every complete DEFLATE block
+// comes out before the truncation error, and the first 64 KB of the real file is all a sniff needs.
+// `unpackPayload` cannot be used for this — it wants the whole stream to prove the recorded length.
+async function unpackPrefix(bytes) {
+  if (!isPacked(bytes)) return null;
+  const chunks = [];
+  let total = 0;
+  try {
+    const reader = new Blob([bytes.subarray(PACK_HEADER)]).stream()
+      .pipeThrough(new DecompressionStream('deflate')).getReader();
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value && value.length) { chunks.push(value); total += value.length; }
+    }
+  } catch (e) { /* truncated: keep what came through */ }
+  if (!total) return null;
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.length; }
+  return out;
+}
+
 async function unpackPayload(bytes) {
   if (!isPacked(bytes)) return bytes;
   try {
@@ -561,7 +584,12 @@ function sniffMime(head) {
   const b = head;
   const at = (i, ...sig) => sig.every((v, k) => b[i + k] === v);
   if (b.length > 12 && at(4, 0x66, 0x74, 0x79, 0x70)) return 'video/mp4';       // …ftyp
-  if (at(0, 0x1a, 0x45, 0xdf, 0xa3)) return 'video/x-matroska';                 // EBML (webm/mkv)
+  // EBML covers BOTH .webm and .mkv, and the element will not play a blob labelled
+  // video/x-matroska even when the bytes are a webm. The DocType in the header says which it is.
+  if (at(0, 0x1a, 0x45, 0xdf, 0xa3)) {
+    const head = new TextDecoder('latin1').decode(b.subarray(0, Math.min(64, b.length)));
+    return /webm/i.test(head) ? 'video/webm' : 'video/x-matroska';
+  }
   if (at(0, 0x89, 0x50, 0x4e, 0x47)) return 'image/png';
   if (at(0, 0xff, 0xd8, 0xff)) return 'image/jpeg';
   if (at(0, 0x47, 0x49, 0x46, 0x38)) return 'image/gif';
@@ -640,16 +668,20 @@ async function sniffSource() {
     const ends = await rangedEnds().catch(() => null);
     if (ends) {
       if (looksLikeZipTail(ends.tail)) return { zip: true };
-      const unpacked = isPacked(ends.head) ? await unpackPayload(ends.head) : null;
-      return { mime: sniffMime(unpacked || ends.head) };
+      const packed = isPacked(ends.head);
+      const plain = packed ? await unpackPrefix(ends.head) : null;
+      return { mime: sniffMime(plain || ends.head), packed };
     }
     // No worker (a `file://` page, or one refusing service workers): fall back to the parts.
   }
   const tail = await partPayload(src.urls.length - 1);
   if (looksLikeZipTail(tail)) return { zip: true };
   const head = await partPayload(0);
-  const unpacked = isPacked(head) ? await unpackPayload(head) : null;
-  return { mime: sniffMime(unpacked || head) };
+  // Part 1 alone is not the whole deflate stream of a PACKED payload, so this is the tolerant
+  // prefix inflate, not unpackPayload — otherwise a 7.75 MB packed webm sniffed as "binary".
+  const packed = isPacked(head);
+  const unpacked = packed ? await unpackPrefix(head) : null;
+  return { mime: sniffMime(unpacked || head), packed };
 }
 
 function parseCentral(block, at, entries, cdSize, cdOff, total) {
@@ -918,7 +950,34 @@ async function renderBytes(bytes, name, fromLabel) {
   status(`${name} — ${fmt(bytes.length)}${fromLabel ? ` from ${fromLabel}` : ''}`);
 }
 
+// ─── a MASTER file ────────────────────────────────────────────────────────────────────────────
+// `x-draft.py` writes a payload that is not a file but a LIST of files:
+//   #bin2png-manifest v1
+//   file\t<name>\t<bytes>\t<parts>\t<sha256>
+//   part\t<n>\t<url>\t<id>
+// bin2png.js has resolved these since 2026-10-17; this page showed one as "binary". Render what it
+// names: the first entry, at the address the master was opened by.
+function followManifest(bytes) {
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(0, 262144));
+  if (!text.startsWith('#bin2png-manifest v1')) return null;
+  const files = [];
+  for (const line of text.split('\n')) {
+    if (!line || line.startsWith('#')) continue;
+    const f = line.split('\t');
+    if (f[0] === 'file' && f.length >= 4) files.push({ name: f[1], parts: [] });
+    else if (f[0] === 'part' && f.length >= 3 && files.length) files[files.length - 1].parts.push(f[3] || f[2]);
+  }
+  const first = files.find((f) => f.parts.length);
+  if (!first) return null;
+  return {
+    name: first.name || src.name,
+    urls: first.parts.map((p) => (/^https?:/i.test(p) ? p : `https://pbs.twimg.com/media/${p}?format=png`)),
+  };
+}
+
 // ─── the router ───────────────────────────────────────────────────────────────────────────────
+let manifestDepth = 0;   // one hop only: a master that names a master is a bug, not a file
+
 async function run() {
   const address = decodeURIComponent(location.hash.replace(/^#/, '')).trim();
 
@@ -978,6 +1037,12 @@ async function run() {
     status('Reading the start and the end of the file to see what it is…');
     try {
       const probe = await sniffSource();
+      if (probe.packed && /^(video|audio)\//.test(probe.mime || '')) {
+        // PACKED cannot stream: the player would read DEFLATE bytes. This page unpacks the whole
+        // file instead, and says why (his 2026-10-19 report: a packed webm showed "binary").
+        status(`${probe.mime} — stored packed (deflated), so it is fetched and unpacked in full ` +
+               'before it plays; a packed payload cannot be byte-ranged.');
+      }
       if (probe.zip) zipByName = true;
       else if (probe.mime) {
         mime = probe.mime;
@@ -1038,6 +1103,18 @@ async function run() {
     // Text, and anything else that is small enough to read: the bytes, then the bytes as text.
     status('Fetching…');
     const bytes = await wholeFile();
+
+    // `file/blindspots.webm` is the master, and it must render like the 4-part file it lists).
+    const master = manifestDepth < 1 ? followManifest(bytes) : null;
+    if (master) {
+      manifestDepth++;
+      src = { name: master.name, urls: master.urls, direct: false, ranged: src.ranged };
+      partCache.clear();
+      stage.textContent = '';
+      stage.appendChild(statusEl);
+      status(`master file — rendering ${master.name} (${master.urls.length} part(s))…`);
+      return run();
+    }
     $('meta').textContent = fmt(bytes.length);
     // An HTML payload IS a page: render it as the document, not as its source. Same rule as
     // bin2png's `(html)` mode — document.open()/write()/close() drops this page and lets the
