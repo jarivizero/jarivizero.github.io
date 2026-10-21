@@ -33,16 +33,18 @@ const PAGE_CACHE = 'b2p-page-v1';
 // What this worker answers from its OWN copy — so all of it has to be refreshable, including the
 // dictionary (a name that is not in a stale copy would 404 a file that exists). `sw-ver.txt` is a
 
+//
+// `404.html` is still refreshed here (a stale copy is a wrongly-styled art page after a deploy), but
+// the worker no longer SERVES it: unknown addresses now come from GitHub Pages itself — see the note
+// above REAL_PATH for why that branch had to go.
 const PRECACHE = ['404.html', '404.png', 'file', 'IDSDICTIONARY.txt', 'sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
 self.addEventListener('install', (event) => {
-  // The 404 page is precached so an address that is not a file is answered BY THE WORKER — no round
-
-  // `/file` is the RENDERER, precached for the same reason: `/file/<name>` is answered with it, so
-  // the player is on screen in the first frame instead of after a server round trip. The dictionary
-  // is precached so a NAME still resolves offline.
+  // `/file` is the RENDERER, precached so `/file/<name>` and `/<id>` are answered with it: the player
+  // is on screen in the first frame instead of after a server round trip. The dictionary is precached
+  // so a NAME still resolves offline, and the 404 art is kept fresh for GitHub's own 404 page.
   event.waitUntil(resync().then(() => self.skipWaiting()));
 });
 
@@ -65,8 +67,16 @@ self.addEventListener('message', (event) => {
 });
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
-// The paths that really exist. Everything else is "not a file" and is answered from the precache:
-// the same bytes GitHub Pages would send, without waiting for GitHub Pages.
+// The paths that really exist. They must never be mistaken for a media id, so they are tested
+// before the short root address below.
+//
+
+// and other similar urls"): it used to answer EVERY navigation to a path that was not on this list
+// with its precached 404 — including the rest of the site's pages, which are not on the list
+// either, and including every extensionless page through the `/<id>` form below. A worker with
+// `scope: '/'` sees the whole origin, and this one owns only its own addresses. A navigation it
+// does not own must fall through to the network (GitHub Pages already serves the same 404.html for
+// anything unknown, one round trip later).
 const REAL_PATH = new RegExp('^/(?:' +
   'index\.html|bin2png(?:\.html)?|file(?:\.html)?|404\.html|404\.png|b2p-stream\.js|' +
   'IDSDICTIONARY\.txt|icons/.*|sitemap\.xml|robots\.txt|favicon\.ico' +
@@ -79,8 +89,14 @@ const isRealPath = (p) => p === '/' || REAL_PATH.test(p);
 const FILE_PAGE = /(?:^|\/)file(?:\/.*)?$/;
 // The short form: an id at the site root, `/<id>` or `/<id>.mp4`. It is the same address as
 
-// id — every real path of this site is matched by `isRealPath` before this test is reached.
-const ROOT_ADDRESS = /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?$/;
+//
+// This is the ONE branch that can swallow somebody else's page, because a scope-`/` worker cannot
+// know what else the site holds. So it is as narrow as a pbs media id really is: EXACTLY 15
+// characters of `[A-Za-z0-9_-]` (`HU3i7XEWEAAav21`, `HU8rfVgXAAAIJm-`), optionally with one
+// extension. It used to accept `{10,}`, which ate `TwitterMP4Extractor` (19 chars) and
+// `randomfilename` (14) — measured 2026-10-20: the first came back as a blank renderer with status
+// 200, the second as the 404 art, while the server was serving the real page both times.
+const ROOT_ADDRESS = /^\/[A-Za-z0-9_-]{15}(?:\.[A-Za-z0-9]+)?$/;
 const PAGE_URL = new URL('file', self.location.href).href;
 
 async function serveFilePage() {
@@ -125,22 +141,9 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(serveFilePage());
     return;
   }
-  if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
-      !isRealPath(url.pathname)) {
-    event.respondWith((async () => {
-      const cache = await caches.open(PAGE_CACHE);
-      const hit = await cache.match('/404.html');
-      if (!hit) return fetch(event.request);        // first run before the precache landed
-      // Refresh in the background (no waitUntil: it must not delay the answer, and a lost refresh
-      // only means one more stale 404). The next one is the deployed page.
-      fetch('/404.html', { cache: 'reload' })
-        .then((r) => (r.ok ? cache.put('/404.html', r.clone()) : null)).catch(() => {});
-      return new Response(hit.body, {
-        status: 404,
-        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
-      });
-    })());
-  }
+  // No fallback branch on purpose: a navigation this worker does not own goes to the network.
+  // Pre-empting the server's 404 bought one round trip (~180 ms) on a mistyped address and cost
+  // every other page on the origin — a worker must never be the thing that decides a url is junk.
 });
 
 // Relative to THIS script, so a site served under a sub-path (project Pages) works the same as the
