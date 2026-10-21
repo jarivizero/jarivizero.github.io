@@ -91,9 +91,14 @@
 //    answers a byte range, and reloads — the reload is served by the worker and the video plays.
 //    The plan rides in the url (`p=` ids, `u=` urls, `m=` type), so nothing has to be cached here.
 // 3. anything else — the 404 art (catbox.moe's), and one way home.
-// Install the worker on ANY 404, not only a stream address: once it controls the site, a navigation
-// to a path that is not a file is answered by the worker from its precache instead of waiting for
+// Install the worker on ANY 404, not only a stream address: a file address (`/file/<name>`, `/<id>`)
+// reached later is then answered from the worker's own copy instead of waiting for this page again.
+// Fire and forget — nothing on this page waits for it.
+//
 
+// "broke" `/TwitterMP4Extractor` and other pages on this origin): this page IS GitHub's answer for
+// anything that is not a file, and a worker that guessed the same thing ate every page it did not
+// happen to know about.
 if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('/b2p-stream.js', { scope: '/' }).catch(() => {});
 }
