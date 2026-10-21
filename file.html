@@ -680,6 +680,19 @@ async function renderMedia(mime) {
       return renderMedia(mimeFromName(master.name) || '');
     }
   }
+  // The OTHER payload that wears a media name: a tt2png index. The FILE lives on TikTok's CDN and the
+  // payload is the JSON that names its chunks, so a player handed those 1 KB cannot decode anything.
+  // His 2026-10-19 report, verbatim: `/file/,HU95H5ZWcAED4gK` works and the same function should
+  // happen for `/HU95H5ZWcAED4gK?1hour.webm` and `/file/HU95H5ZWcAED4gK.webm`. It did for the comma
+  // form because run()'s SNIFF saw JSON and took the index path, while a `.webm` name went straight
+  // to a player. A media container never begins with `{`, so this cannot catch a real video.
+  if (head.plain) {
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(head.plain.subarray(0, 64)).trimStart();
+    if (text.startsWith('{') || text.startsWith('[')) {
+      const index = parseTt2png(await wholeFile());
+      if (index) return renderTt2png(index);
+    }
+  }
   const isVideo = mime.startsWith('video/');
   // The element IS the page: created in <body>, never wrapped, never moved. Its tag is the one the
   // address promised, so a `.mp3` never ends up with a <video> on screen.
