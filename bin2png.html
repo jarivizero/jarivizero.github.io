@@ -2602,6 +2602,7 @@ function showTt2pngPayload(bytes, mime, name) {
 // Decoding an index fetches it — ONCE. The index object itself is the key, so the second call
 // (the render, a retry from the canvas fallback) is a no-op rather than a second 8 MB download.
 let ttAutoFetched = null;
+let ttStreamShown = false;   // this index is already playing through the worker
 // The FILE an index resolved to, once it is here. `decodedBytes` is still the index JSON, so the
 // panel's own Download button must be pointed at this instead of saving 819 B of address.
 let ttFile = null;
@@ -2612,12 +2613,109 @@ async function tt2pngAutoFetch() {
   const t = decTt2png;
   if (!t || ttAutoFetched === t) return null;
   ttAutoFetched = t;
+  ttStreamShown = false;        // a NEW index has no stream yet (a Save click on the same one keeps it)
   return tt2pngFetchAll();
+}
+
+// ─── the #<id> panel plays the file as ONE worker stream ───────────────────────────────────────
+// `tt2pngFetchAll` used to pull every TikTok part, join them and hand the result over as a Blob,
+// which re-loads the media element whenever it runs out of bytes. `/file/<id>` stopped doing that on
+// 2026-10-23 (his "Fix the refresh"): the index goes into the service worker's plan cache and one
+// `<video src=/__b2p/stream/?id=…>` is never touched again. This is the same move for this page —
+// the worker streams the parts with real Range support, and the browser asks for windows as it plays.
+async function tt2pngStreamUrl(t, mime) {
+  if (!('serviceWorker' in navigator) || !navigator.serviceWorker) return '';
+  const swUrl = new URL('b2p-stream.js', location.href).href;
+  try { await navigator.serviceWorker.register(swUrl, { scope: new URL('./', swUrl).href }); }
+  catch (e) { return ''; }
+  await Promise.race([navigator.serviceWorker.ready, new Promise((ok) => setTimeout(ok, 2500))]);
+  if (!navigator.serviceWorker.controller) {
+    await Promise.race([
+      new Promise((ok) => navigator.serviceWorker.addEventListener('controllerchange', ok, { once: true })),
+      new Promise((ok) => setTimeout(ok, 1500)),
+    ]);
+  }
+  if (!navigator.serviceWorker.controller) return '';
+  const id = 'tt-' + (t.sha256 || '').slice(0, 16) + '-' + t.chunks.length;
+  const plan = {
+    id, name: t.name || 'file.mp4', mime,
+    cap: Number(t.chunk_size) || 5000000,
+    parts: t.chunks.map((c) => c.url),
+    total: Number(t.bytes) || 0,
+    tt: true,
+  };
+  const planHref = new URL('__b2p/plan/' + encodeURIComponent(id), swUrl).href;
+  await (await caches.open('b2p-plan-v1')).put(planHref, new Response(JSON.stringify(plan), {
+    headers: { 'Content-Type': 'application/json' },
+  }));
+  return new URL('__b2p/stream/?id=' + encodeURIComponent(id), swUrl).href;
+}
+
+function showTt2pngStream(t, mime, url) {
+  const body = document.getElementById('dec-body');
+  if (!body) return null;
+  let host = document.getElementById('tt-payload');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'tt-payload';
+    body.insertBefore(host, body.firstChild);
+  }
+  host.textContent = '';
+  const mimeEl = document.getElementById('dec-mime');
+  const sizeEl = document.getElementById('dec-size');
+  if (mimeEl) mimeEl.textContent = mime;
+  if (sizeEl) sizeEl.textContent = fmtBytes(t.bytes);
+  // Save is a click, and it costs the fetch: the stream never holds the file here, so a save is
+  // the only thing that still reads every part.
+  const save = document.createElement('button');
+  save.className = 'btn tt-save';
+  save.textContent = `⬇ Save ${t.name}`;
+  save.addEventListener('click', async () => {
+    save.disabled = true;
+    const bytes = await tt2pngFetchAll();
+    save.disabled = false;
+    if (bytes) saveBytes(bytes, t.name, mime);
+  });
+  const tools = document.createElement('div');
+  tools.className = 'hist-tools';
+  tools.appendChild(save);
+  host.appendChild(tools);
+  const el = document.createElement(mime.startsWith('audio/') ? 'audio' : 'video');
+  el.controls = true;
+  el.autoplay = true;
+  el.playsInline = true;
+  el.className = 'decode-media';
+  el.src = url;
+  host.appendChild(el);
+  el.play().catch(() => {
+    el.muted = true;
+    el.play().catch(() => {});
+    const hint = document.createElement('div');
+    hint.className = 'zip-note';
+    hint.textContent = 'Muted: the browser blocks sound without a click — use the speaker icon.';
+    host.appendChild(hint);
+  });
+  return el;
 }
 
 async function tt2pngFetchAll() {
   const t = decTt2png;
   if (!t) return null;
+  // A video or a song plays from the worker stream: one source, no per-part reload. Only a type the
+  // page has to hand over (or the Save button) reads every part.
+  const early = mimeFromName(t.name) || '';
+  if (/^(video|audio)\//.test(early) && !ttStreamShown) {
+    const url = await tt2pngStreamUrl(t, early);
+    if (url) {
+      ttStreamShown = true;
+      const el = showTt2pngStream(t, early, url);
+      setDecStatus(`tt2png — ${t.name}, ${fmtBytes(t.bytes)} streamed from ${t.chunks.length} TikTok part(s)` +
+                   (el ? ' — playing below, no reloads' : ''), 'success');
+      renderHistory();
+      return null;
+    }
+    ttStreamShown = false;
+  }
   const urls = t.chunks.map((c) => c.url);
   setDecStatus(`tt2png — fetching ${urls.length} part(s) from TikTok, ${fmtBytes(t.bytes)} to assemble`, 'info');
   let got = await fetchParts(urls, `Fetching ${t.name} from TikTok`);
