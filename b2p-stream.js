@@ -108,24 +108,23 @@ async function serveFilePage() {
   return hit || fetch(PAGE_URL);
 }
 
-// The dictionary, cache-first and refreshed behind the answer. `?fresh=` is the page saying "this
-// name was NOT in the copy you gave me" — then the network is asked FIRST, and its answer becomes
-// the copy (a stale dictionary is the one reason a real file would come back 404 after a deploy).
+// The dictionary is read ONCE for the life of this origin: install() already fetched it into
+// PAGE_CACHE, and every page read is answered from there. It is NOT refreshed behind the answer.
+//
+
+// only be updated if a file name is 404". So `?fresh=` is the ONLY path that touches the network,
+// and only a page that looked up a NAME (a value with a dot) sends it. An id never gets here — it
+// goes straight to pbs, and a 404 there must not spend a dictionary request.
 async function serveDictionary(url) {
   const cache = await caches.open(PAGE_CACHE);
   if (url.searchParams.has('fresh')) {
-    // `?fresh=1` on the network request too: it is what tells the server "do not answer from a
-    // cache" on the one path where a stale copy is the whole problem.
     const fresh = await fetch(DICT_URL + '?fresh=' + Date.now(), { cache: 'reload' }).catch(() => null);
     if (fresh && fresh.ok) {
       cache.put(DICT_URL, fresh.clone());
       return fresh;
     }
   }
-  const hit = await cache.match(DICT_URL);
-  fetch(DICT_URL, { cache: 'reload' })
-    .then((r) => (r.ok ? cache.put(DICT_URL, r.clone()) : null)).catch(() => {});
-  return hit || fetch(DICT_URL);
+  return (await cache.match(DICT_URL)) || fetch(DICT_URL);
 }
 
 self.addEventListener('fetch', (event) => {
