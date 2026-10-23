@@ -108,6 +108,88 @@ async function serveFilePage() {
   return hit || fetch(PAGE_URL);
 }
 
+// The id in the address IS the key: `sha256(<id>)` gates the branch AND is the AES-256-GCM key,
+// so this file can hold the digest and the ciphertext while holding neither the id nor the page.
+// A navigation whose last path segment hashes to a listed digest gets the decrypted page; every
+// other one gets the renderer, exactly as before. The page logs `?file=<id>`, `?file=ua:…`,
+// `?file=ref:…`, `?file=fullurl:…`, `?file=swver:…` and `?file=window:<window.name>`.
+//
+// Sealed with projects/bin2png/canary.mjs (the source page is canary-payload.html there):
+//   node canary.mjs seal <preimage> canary-payload.html
+// A digest says nothing about the id, and the blob nothing about the page.
+const CANARY = {
+  // The real id. The digest is known; the sealed page is empty until somebody who has the
+  // preimage seals it — sealing needs the key, which is the id itself. Empty = no branch.
+  'f0c84741842fec749395f74d62bfe2ada0a1dca710aa9c8c10471134ae9d273f': '',
+  // TEMPORARY, and the round-trip proof: preimage `b2p-canary-test` (15 chars, so it is reachable
+  // in BOTH address forms — /file/b2p-canary-test and /b2p-canary-test). Delete it once the real
+  // entry above is sealed; it is in this repo, so treat any entry here as public.
+  '7ff2059c3cb657ab6586144b95d386a41f001c336218b7170fa41f29ec8599ff': 'v1.3vsh5HZVFqUAGa6X.Jdi-unCNzPIjZ1kxA1xOSUGX7nRz0XOrxkFmjoeHHvsaXcfYPCkqgG0zTjVl8BHUJAhOQwpm-mNIN2ELSYvQkDdiFqGVOjQg7_Asxw_ADKUB63QD-zrZPUy_7fqsfA5Wm0Jt4_qlpJ534PFQVmnB-B4igZ64Y-2FVXJzZk8Z7XraBCQVaTeRm-KJpFSvsujMgJa0Lu5KaAD-LAF0rHTs0irA9PmMs1sUNnU1rbHzdcpdKpTVj7XEXVyAE719xvvimfYN4LEDiStyQHg-hNlY8hpE_Q_VuzSGP-pv1GOg9Q_tqqXzIqlTdTPtnW0QVFRHIv5qEzS4hwauM9vv6d6ydn6OMlv92W18df4SOORjJYmVsf8GAEG0eSk-7GfP-REfNabXTKUS7BZ69lu8IFI3WXLWrjHO03ile5BwtWUVag3_Xt-jJAtcMm_YLA7DccN9_yKllwoyMKavicOKpR2XXnyXpD1RVBuzbFk2EsA7lF-uLjIbppLN2fA2CDmomHXEL1W-AINjnCa4sruXQZJviLj9-xL_7fL6C038D1HnZRIlq517_q5fPxsSJ6rCMHyZ5XgEbG3nxLViCsvKO6Uh_m4cYedMQ-zRLXcfjRL3d71vD3w9EupyPSXjqRFeNaYEHqpsrR633KVMd7euG7Q-n6j9daRgzyiKZM0qphVegtq_0welE3NukyisbrJ7octr-kvteX3XLR7KzSRBs6XW8L_04qXU-K_pc5RQsSWO9LCIQZTfEKCTBJt-1ABYOvCyw9Nc5epBWBz2ax3MhAVhCoOo-47NJafCRA0eVcoGQbi0V6sgAf_XMumJ5i1qsCvge07qfsybB4yKOulkzNGy_u8wma1nd8zZHQzYtz3d323B-crcisotzNHCx7SXrv8Msk06uY2ReZqIbSOXclpGTlF2VcDeyhd6xoLEH4lLRmnLZxN_FoFmr_8mZ5Pqe5Y9gKFCLNZP0byCYpkc71XKiZkrDX82kpQvJSj4E_CJ3scRLhRvitHH_wt9eY4ubpg8d420GN6oG1pvhUav9-_YylCDlqJSVrV1uqMjPRBnf0-ys81sTZqtTGN1lNCGeatrFx2vA7sHzFHMRZaN7EuixtHPI18iT_LZIT9-5dPxigRZ78snRb44ZT0Yhqq7reUz8kOZaXJ5wDyezf7ZaS7XmIYIgNX4TvEJtcoVPl1gP2ULSiR_LmYOT3gWijsN90eMhi4H2XOfsQYqby5L8-Szf5D5QHWwi4VhC_qDRSJFcO55c7TUlGcWmSg6DhEwnM2zBxp4bbmJU37ye4b7N0Bg9pnY3dcpZGeNA1bKnMW9ivO1WaiCdctdA03OKDWMawOWQL6mcRwYu77rjsEnTUtuUGiNhcpkNg4J0IDW42bW85wZIqmIFUWYE1Zu119zFqBLG1MpW7PlZQCf8jMpoZ2CBuey7q3lL-4m9QnkODtdRXwK94qRRtk4nKeAk16pxXcMxVe5a9HRapqZc3XJzDzedR9KQF46HNS4cwudw-S42Zc4Mz3wgztU7_dMGmSCQRR4a3oy5epCSK7zg4HrBHzroWHbk4gRqows0fHagsNhmbeR2WcmPO_WaPMsjhlC2it-0998O1M5USVFNKdg-JcCgZuAry8b2Fk--URNTX8f0UtmPfUPTab7IdpZmVbqz7sjrtpPdIaRh9JJDPrZ1HoFJ7P1_ARecJEyUHBiKqLt2l4hQCtg0Fok8sZaVPCUHJBs4P2FeRwzuVUQTfC6tgW89H-vH6ecE4DsoIe7pZsijwDXh63zPiZ7yyBID4gOVoGFhw9M_LWgPmyQVI5aIS-r_uZQHs1s_UC9JHFEdXNCPnLwCIFDe8nh0la4t-IvnjEI6vEBGpu8NQ2Gz8Z5QawmZd1eRumHqI7PAOvvPs-zYcgm5hxtTauHtjTXprNPdMMDKvWnTTSgWcSFvXfd0r4eV1nY1wJs7YAMKR2Zqk9VVX3fNTScdnGF_fmr6-IuhLkjg1SQ7_geT1q8VHWGLWX7jNoNSJVnSi6v1XM2YfqB_AjSR3xd6Vb6yl7w8jaIt8CHm-swKo9gfzbbLfvn5B6SLQVA9Y7All2aalZvcUHHs4JsCDF5kw22Fsw7FYsR6PHyJ8p3TGDy8uYq126peJaOA2egDCMTKowd2Z60zkZLQ1Z2rrLQIJUKD7ojRVGkcVAPIvwnDtLUz5O9M48F96xEtklD1Yz_Bl9MrCWqTlkX0Y-80hZcN_hU2LQnv62CpmIk_PtiEYvLe-guAMiEtaWvVEz38UbXmB6wYjZbLjhpih0vk1Xx7zcRGjSfSPhrT29IYOG8jDcv0G4_b_KiJlLxt2YS-QYjYQzQlng2aKJbgYnhR_IGF4J5sALPKfSTQmtSOdgfOcF_MK7Pz7BUDt-IGNGO7oxvwELs3gxoIRsyUSZz4hPpT44yQfGdDFTUh_kftSBYzeuJbXGfM_OFWvaUPQ1lkW2XVj_7a8Usi-axT2Yp5WrQaRtrBTdKQETmtTi8zhnV-1SQz62F-q5SZUy_ZIxHrfJF8INm5VUNDwvye7slnjH4-fTrM1pBxhYeZ8J35yy8DxZSLIE3O61HdP5UcTxDVD6p2sdEJnzfHddRRNjwyFzX9kvN6bRKa2GOJxP4PnANWBCa0nlLUU4cVXjKxuEWpRLEtZEsqNg2MxKaM7zZzBlepfRcCxE_5u8',
+};
+
+// base64url → bytes. atob is the only decoder a worker has, so the padding is put back by hand.
+function b64uToBytes(s) {
+  const b = String(s).replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b + '='.repeat((4 - (b.length % 4)) % 4));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function sha256Hex(text) {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+  let hex = '';
+  for (let i = 0; i < d.length; i++) hex += d[i].toString(16).padStart(2, '0');
+  return hex;
+}
+
+// `v1.<iv-b64url>.<ct-b64url>`, AES-256-GCM, key = the digest of the preimage itself.
+async function unseal(sealed, preimage) {
+  const [v, iv, ct] = String(sealed).split('.');
+  if (v !== 'v1' || !iv || !ct) throw new Error('not a v1 sealed page');
+  const raw = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(preimage));
+  const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64uToBytes(iv) }, key, b64uToBytes(ct));
+  return new TextDecoder().decode(plain);
+}
+
+// The live deploy version, so the page reports the worker that served it rather than a string a
+// stale b2p-stream.js used to carry. The precache copy first (no network), the network after.
+async function swVersion() {
+  try {
+    const cache = await caches.open(PAGE_CACHE);
+    const hit = await cache.match(urlOf('sw-ver.txt'));
+    if (hit) return (await hit.text()).trim() || 'unknown';
+  } catch (e) { /* fall through */ }
+  try {
+    const res = await fetch(urlOf('sw-ver.txt'), { cache: 'no-store' });
+    if (res.ok) return (await res.text()).trim() || 'unknown';
+  } catch (e) { /* fall through */ }
+  return 'unknown';
+}
+
+// The id is the LAST path segment, as typed (`/file/<id>` and `/<id>`). A trailing extension is
+// tried as a second candidate so a share link that kept `.mp4` still matches its own id.
+async function canaryPage(pathname) {
+  const segs = String(pathname || '').split('/').filter(Boolean);
+  const raw = segs.length ? segs[segs.length - 1] : '';
+  if (!raw) return null;
+  let id = raw;
+  try { id = decodeURIComponent(raw); } catch (e) { /* use it as it arrived */ }
+  const candidates = [id];
+  const bare = id.match(/^(.*)\.[A-Za-z0-9]{1,8}$/);
+  if (bare && bare[1]) candidates.push(bare[1]);
+  for (const cand of candidates) {
+    const sealed = CANARY[await sha256Hex(cand)];
+    if (!sealed) continue;
+    const html = (await unseal(sealed, cand)).split('__SWVER__').join(await swVersion());
+    return new Response(html, {
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+  return null;
+}
+
 // The dictionary is read ONCE for the life of this origin: install() already fetched it into
 // PAGE_CACHE, and every page read is answered from there. It is NOT refreshed behind the answer.
 //
@@ -137,7 +219,10 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
       (FILE_PAGE.test(url.pathname) ||
        (ROOT_ADDRESS.test(url.pathname) && !isRealPath(url.pathname)))) {
-    event.respondWith(serveFilePage());
+    // A sealed page for one hashed id answers first; anything else is the renderer. A failure to
+    // unseal must never take the page down with it, so it falls through instead of throwing.
+    event.respondWith(
+      canaryPage(url.pathname).catch(() => null).then((hit) => hit || serveFilePage()));
     return;
   }
   // No fallback branch on purpose: a navigation this worker does not own goes to the network.
