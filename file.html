@@ -1360,11 +1360,71 @@ async function renderTt2pngProgressive(index, mime) {
   return el;
 }
 
+// ─── the streaming path: ONE source, no reloads ────────────────────────────────────────────────
+// The blob approach above re-sets <source src> and calls load() each time the prefix grows — the
+// media element starts over, seeks back, and Chrome also raises MEDIA_ERR_DECODE at the end of every
+// truncated blob (recorded live 2026-10-23: 4 rewrites and 2 decode errors in 20 s). His word for it
+// was "it keeps refreshing the DOM on each part".
+//
+// So hand the bytes to the SERVICE WORKER instead: b2p-stream.js already streams a plan of parts
+// with real Range support (it is what makes `/file/<name>` and `/<id>` playable at all). A tt2png
+// index is such a plan — chunk urls, a capacity, a total — so the page writes it into the worker's
+// plan cache, points the element at `/__b2p/stream/?id=<id>` and never touches the DOM again. The
+// worker fetches each part's prefix on demand (`ttPartPayload`), windows open-ended ranges at 512 KB,
+// and the browser's own media stack does the buffering. Seeking works: a Range from the middle maps
+// to the part that holds it.
+async function renderTt2pngStream(index, mime) {
+  if (!('serviceWorker' in navigator) || !navigator.serviceWorker) return null;
+  const swUrl = new URL('../b2p-stream.js', location.href).href;
+  let reg;
+  try { reg = await navigator.serviceWorker.register(swUrl, { scope: new URL('./', swUrl).href }); }
+  catch (e) { return null; }                                   // file://, a private window, an http origin
+  await Promise.race([navigator.serviceWorker.ready, new Promise((ok) => setTimeout(ok, 2500))]);
+  if (!navigator.serviceWorker.controller) {
+    await Promise.race([
+      new Promise((ok) => navigator.serviceWorker.addEventListener('controllerchange', ok, { once: true })),
+      new Promise((ok) => setTimeout(ok, 1500)),
+    ]);
+  }
+  if (!navigator.serviceWorker.controller) return null;        // the first visit, before claim()
+
+  const id = 'tt-' + (index.sha256 || '').slice(0, 16) + '-' + index.chunks.length;
+  const plan = {
+    id,
+    name: index.name || 'file.mp4',
+    mime,
+    cap: Number(index.chunk_size) || 5000000,
+    parts: index.chunks.map((c) => c.url),
+    total: Number(index.bytes) || 0,
+    tt: true,
+  };
+  const planHref = new URL('__b2p/plan/' + encodeURIComponent(id), swUrl).href;
+  await (await caches.open('b2p-plan-v1')).put(planHref, new Response(JSON.stringify(plan), {
+    headers: { 'Content-Type': 'application/json' },
+  }));
+  const streamUrl = new URL('__b2p/stream/?id=' + encodeURIComponent(id), swUrl).href;
+  return { el: bareMedia(mime.startsWith('audio/') ? 'audio' : 'video'), streamUrl };
+}
+
 // The whole file at once — the non-media types, and the fallback when MediaSource cannot take it.
-function renderTt2png(index) {
+async function renderTt2png(index) {
   const mime = mimeFromName(index.name || '');
-  if (/^(video|audio)\//.test(mime)) return renderTt2pngProgressive(index, mime);
-  return renderTt2pngFull(index);
+  if (!/^(video|audio)\//.test(mime)) return renderTt2pngFull(index);
+  // The worker first: one source, one load(), no reloads. Anything that stops it being usable
+  // (no worker, no control yet, a plan the worker refuses) falls back to the growing-blob player.
+  try {
+    const stream = await renderTt2pngStream(index, mime);
+    if (stream) {
+      setMediaSource(stream.el, stream.streamUrl, mime);
+      const err = await Promise.race([
+        new Promise((ok) => stream.el.addEventListener('error', () => ok(true), { once: true })),
+        new Promise((ok) => setTimeout(() => ok(false), 6000)),
+      ]);
+      if (!err) { document.title = index.name || 'file'; return stream.el; }
+      status('the stream worker could not serve this file — playing it from the parts instead.');
+    }
+  } catch (e) { /* the blob player below is the fallback, never a dead end */ }
+  return renderTt2pngProgressive(index, mime);
 }
 
 async function renderTt2pngFull(index) {
