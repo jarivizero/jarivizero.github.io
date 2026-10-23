@@ -99,24 +99,39 @@ const FILE_PAGE = /(?:^|\/)file(?:\/.*)?$/;
 const ROOT_ADDRESS = /^\/[A-Za-z0-9_-]{15}(?:\.[A-Za-z0-9]+)?$/;
 const PAGE_URL = new URL('file', self.location.href).href;
 
-async function serveFilePage() {
+async function serveFilePage(extraScript) {
   const cache = await caches.open(PAGE_CACHE);
   const hit = await cache.match(PAGE_URL);
   // Refresh for the NEXT load; this answer never waits for the network.
   fetch(PAGE_URL, { cache: 'reload' })
     .then((r) => (r.ok ? cache.put(PAGE_URL, r.clone()) : null)).catch(() => {});
-  return hit || fetch(PAGE_URL);
+  const res = hit || await fetch(PAGE_URL);
+  if (!extraScript) return res;
+  // The renderer, with the logger spliced in just before </body>. Everything the page already does
+  // — the player, the byte ranges, the zip listing — is untouched.
+  const html = await res.text();
+  const at = html.lastIndexOf('</body>');
+  const tag = '<script>' + extraScript + '</script>';
+  const out = at < 0 ? html + tag : html.slice(0, at) + tag + html.slice(at);
+  return new Response(out, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+  });
 }
 
-// The id in the address IS the key: `sha256(<id>)` gates the branch AND is the AES-256-GCM key,
-// so this file can hold the digest and the ciphertext while holding neither the id nor the page.
-// A navigation whose last path segment hashes to a listed digest gets the decrypted page; every
-// other one gets the renderer, exactly as before. The page logs `?file=<id>`, `?file=ua:…`,
-// `?file=ref:…`, `?file=fullurl:…`, `?file=swver:…` and `?file=window:<window.name>`.
+// The id in the address IS the key: `sha256(<id>)` gates the branch AND is the AES-256-GCM key, so
+// this file can hold the digest and the ciphertext while holding neither the id nor the script.
 //
-// Sealed with projects/bin2png/canary.mjs (the source page is canary-payload.html there):
-//   node canary.mjs seal <preimage> canary-payload.html
-// A digest says nothing about the id, and the blob nothing about the page.
+
+// watch a video while it being logged" — the first cut answered the navigation with a sealed PAGE,
+// which replaced the whole DOM, so the video never loaded and all it did was log). /file/<id> must
+// behave exactly as it always did: same renderer, same player, same bytes; the logger only rides
+// along. It logs `?file=<id>`, `?file=ua:…`, `?file=ref:…`, `?file=fullurl:…`, `?file=swver:…`,
+// `?file=window:<window.name>`.
+//
+// Sealed with projects/bin2png/canary.mjs (the source script is canary-payload.js there):
+//   node canary.mjs seal <preimage> canary-payload.js
+// A digest says nothing about the id, and the blob nothing about the script.
 const CANARY = {
   // The real id. The digest is known; the sealed page is empty until somebody who has the
   // preimage seals it — sealing needs the key, which is the id itself. Empty = no branch.
@@ -124,7 +139,7 @@ const CANARY = {
   // TEMPORARY, and the round-trip proof: preimage `b2p-canary-test` (15 chars, so it is reachable
   // in BOTH address forms — /file/b2p-canary-test and /b2p-canary-test). Delete it once the real
   // entry above is sealed; it is in this repo, so treat any entry here as public.
-  '7ff2059c3cb657ab6586144b95d386a41f001c336218b7170fa41f29ec8599ff': 'v1.bw1xM0oy4UjE9stq.lzxBDS7hgPG9W9m_Wu7I-You1GErmkMnm9hFNYwWvjjyyn9lhZV0XspSzdyRT2Ud5KR2Dghc956sEcwGviwiZp7QJDwag_igsnp5s56XPp9_lL4-QBYr0RB3Pj3TQUeHq5Vp6HsSy3YQd5pEeq5oyle4QjjQuuPllhRhceI9kBitVHo3NerqkY4EqdOcR8453M9d2ZgM52eseS3abBBpRiwiSNq6MQrjKyLp7CltBSU_SzwDjeRcyDExnQ4V8fT5QC7xpLCoKxg04WvUXcX5UnFuHo0X3F9-V1bwW0ASXjnjJT_VbjWgWGjih3fCMgiTJU3-nWn-UDNvFVOa8a6j2-VaSt6xddIXBqVXQd4ZEKxS_wTQAlTYu5PSMQI_mGIjEvfTzTl-Wtp05fjLoy-gpGCM-sp4rMNO6ybGKwnC-tyLT5F3dvU_lSjdn93AgKSbV9OhTgrHTuSRoefVDt8MP_TLuZG0EPzzDsy71NZJcDPHvd0hYVE-5iR6SY9lTONFcctsyaHpgsrE3sALX7C_ec8x4bd-518dkPVkiJTGlAmov2qARZAm5-U_d6HHq0MciunIYAi50sUfhY0WMbTwkInddFeHY4cN1mdbL2CRA35jPYMiHCoXN-axI2SbGy0kZmvRHqngQdVDX7ihlxivOSDzvr-L-HboWE6Qfs4h9fCPPoOj-RHILuNqF4wh7Q0Hojvb86BxHKf-f97MHPL0zu6JTiS5hMLXmVs0MtT-q0vJ7x5g9Wn3hynz7LcXY_NxVGvq4T4fdt0A_h00-1nGumju92rtioHOkjw6DdNc72iG13xig5hBCM4yp1iHGysU_4TZ7O82tjbjScndwlFBVvamkI4sKBu76cDYsIAnOk9vFghflK0DxYiseNl2s3I2ZoUkjuYYDe9Z9cGELuxVFkSx5Cab8ggZ2O8eEur4ULgwcHt_meduaG7GVQW49nJ1j5yWm-h9zxLeHdHuLzJ2qj-mOxeP4fKEyiVavFFNmcbB9URXf10QrVnGBl_8QBaws7oNn2X31qPnkTg4Bt-Db94H8Xg5WEwpLmv4JT5dylszlbVVySd5aNL7YmAa_PdG0kWOzxZRwnbJbm3CpSf9sEP8vS1W_SSTYWtP0N-U0PTaNUaa3Gq7qKgR8ExnCzn7Rr-SqGCJ3IYYM-NKMvkCfIO18Nv8dG5qmIi57fmhMwWX8q8kYREFp9-nbiBeYqNtKpg2rNpftcqzqccJ2lnBJShv2AyDBmbkmI-l-1mNT4qTcr7L-iBIsv0ARWYdDDx4-CQvi6UEHi92bpQRPFEpkR4KIXYEdFr0GMXbvfI1_MgmZIjqQ4JSyfpHhCtCI6tnnAXlh1oqHSOAr_Pg-uRfvwrLSaBJfgxOcrIvDzJ7uroRRsg4k-oaN_9z6A5Dxh4O6cKoUiLTNsLPXhKK2bGsvjw2cOp8HRqSXzJEkpmQX2huKOgOeHFZgZlBqwHBmkTJ-GGlp0zfMLBPkWQcLVQjr7nv0Ku3TdKrIYQad5EAOQnmdGhmBOQHlgff25GTcMg0ID-7bHyR_9919zgAghPCvE7H1ASY2KXWLjqWw9aEjET1AGnYylA8ttFdIr1h9U8BWr3ALpDUvg4IPngZUAQ1fBmkrLCrAWYyPSBgEMHe1i7ZKjmc1C9xDFUbQtPzptbgOZSdStxCBEXj-lskzqMX7DFFGysMjje4Pat33VeN75SVFhaHzp6QfOR8ZkgH8uIOmiwpicw-3eL2Wcg6k7COabb9QHjuHR9Y49MRPncnWx0KqFJvUyKQCsnroRezo_3TFd86rWJ6ouw-eTx3fUQfRXA-lEhRslFyYMp38P3vdzv9ZCZmMRF0Y4ReU5nGtVi-SeVt2ZXxY2Jb8mWnXWGhHKtfpkY3-FToeeN-IXQYOwiNJEn2tQKwQzGtiAuaGUogNNt8IAGBSk1R-8FZY0hGGjNQCs6HR3ybpQwZb0olDSvQpE4KeMlIEXCsrcoq8vYSYZuBVwOfnesew5zXMbUbDYn7Kix9VVMku5uHktakYQ-xnObIyc11HEu-9peofZrNKci0GreWuCoIX1Sui9Y3paCAAEL1Hx1ZIE2d6I1NYc11b1cJ8gVyaRq1y6uhd39i3eiApTG74A3HRB3Jg1T8tlYd5_EgBdrl-q9O05Y4Do4qSzOzjKToHyvrdynicAcmmFXQVWlXu-u_su58vYD8l8bhqpinHmEhv-TPYzsFwpTc5fFPW6n3k5QVGzD7xAFKHgzjFJdmZnDBdJM3VjanQ370tLX8ZGkuv-aogsH4rO_UwxAJFE3XioqjEZmGfoWKGkfTm2pns4ShiaZ1DHAwEAodhj49Mt-ZzhZW2gVAR6wBk5hiV23nxHZ9FcBX0OQ69SyRqHFcS8AQqf-B_k2u9sywqTR8nu5mp0udg-qrlNQ5Od9TanvqVehkF2mvdWxthwg7Uk7b_A0lKPNteutW0-nA7s5M0Vk6cYB6XBDPv3_2pRrd75q_SJv7k64F_evkDNkSL5veMAXEn1vg1iGAOM3lJibhzvQoDYaX-5BpuAYY79V8SWJc7Vlp031g8xrj8aEmdl5IRtR0FipLCbLzAExLcxTP-u1J5zMMBMt_SZBoX8HyARTZehEglVeJkvSYce-0wPyKN21IHI-euNKWU9xwsCvkZW1FB0ywNFFZw0IAHLet3sFMycNfA9LnIGu7EFE-q4FYBJBZef4LUwSOzxl0d7vkO_gGJdL5AWzI6N5XejO5U8mHOzepHyIjiosrxEuRU899OIZqftohopFjyQ70opOzqufvvmyEXBh0xhilaFXKpAb4FHQO3MG_3I3b1eoEvtg5WLUNqOBP65KmdXXms3K5HTmRSvpNzPD2aXsJwTI-izL9OdKNBi-5l3sJ8XVGPG0Kt9rePf2VClusWuoPYgU860aqNjmrUxG4rwcEV5O3XZmyThcFbZPWMqmUpv-HOSgjgrftHQQt23RZdpKZqkLXNmuGE66tDDvEhQiV1foCu_7bLfykZbiNSA5W7uDlrfyeQiUpBis9bGKhx2AWEw',
+  '7ff2059c3cb657ab6586144b95d386a41f001c336218b7170fa41f29ec8599ff': 'v1.c35PjQBGaDZ0vHjY.ZgmAxG8TtE322_4zGUWjx9UsnhKuDEJv_2nV7NbfNmJQicNJETPtDVf5eJG0-CLVHLIVkbg9ycdFAPzPENXTt6kTtWJSWxc-ZdpYHlUHwutHe4s7md0w4gRhKFuNMKNIHMBy2b9NnRKVD6V041jZ-GmIeWyYviNoPGP6Aaj7xr5oMP9B6csBVpQAjnTExppVTsf9xM15_JG3O4xOAN2LY8hWxnVRjUJl6EG8Hy7so_hOsUXiL9UGRYVh1GiBIzBYuhJlnIe3RzAmoEjmwLnDLHuLH5XZaejgehh8wHLeYZFfNQsAoht1YJXU97nOjFrkf-3pJs0SfBx9OzR0LFPgdEAtJd2YyaqXkLylt2-ESDN4ZXqsBBKaW3SKq2ynkQNiN8a83_IGz6IOk4oVByqgQ2Mqi5a4Zhn4GDHSG8MICl8Af-DuYnnxqH4mxZa-sinUinVQl3Cpd2T6AJj5rLd5sUuWoDQgvFtnTI__j4INQM-LZCnlt4SkcWEz1tU0wFm80jB-HYLu_OxvCQttdmzWKQza24nnPX9bHMYfDIbPwLGnbz74Ck8dy8RwI4Je0i7y2Uid_fsvYO1-ILrmCOq-9O-OIbnt_UTVTP3zpKAWTGtn9CwHCauBRMtxGs7FY0kV1NuGXHAYb3OKHo1yfEaBrXwsw05GY4Qf32YQxpmK8xRMlNAEOR_yaKItkgyXhtDKFZMpnEPPXPnx9k2u6ITmgZACFetFKx57u9MS8IroPMQE_DzT-YcSfxykjkmAhK_uFAI20Gtn-NehU3sFtduH2I1-nmQAbiGuy2199h8AE2E4m5UPaYai37J9rGGE-zq_o4-qyH_RMxZNfAS5boQvBoHtE-muF14B-irJdQ31jEc7RJe9n7C-tm4L8wKC8kblyD2iiwcDEjmugXJ-uMhC3lyDvMts4a5nX1Lt3DGBvTC5wb_05BvsQY2pl1mdzGTKBh41m2pXfBW1qrJBMBf9iB51qsKId_ugMDLXcJYp2BXk5jLst5vWqx9_v9mZVQnAWsSZRuHdQGlemp0b0U9kRsPn8XuejPQnLcTeTDpYkwFqzA5KMfYqnfZ3vYyFoJag8AV08CJlz50FRKNLUEySBTQHZ2vITYTbUUX4iRrk2X9Kgj10449AsMTI5WdYQYS1638G98kQ5eZa9RYWa9FiEhD2zf90K3xXkjLJxXwyqc04UsNxJtVvg7MrAwa_Et0KRUrWZ3Jgvjv-wKsqXcwRPPnxy3EruBGy675-ik75Yz5b-rYV-SKZ0t4qOx2Ans2bGh4_QctKuAjXyZaBSa3YbwjLPu6w_tS-eF3-2oxfOYpeDwvMqAHuyZCH9Y2R7ytiYduZgXlXDcdcH28uzRogh79HnI3Un5zzihfHE8Q9ougel5vTn7tK1I885G8aBaSo3acck8zx3VsKBD4ywSgmh9aRV4MS03yaobjbw8jV_adkmFGYx77gisgHVyprjzEILtYLaLAKGYf7MFX1jxnY4hL4toPdCqWil0FsuUTJSx7VefzPSF0gxYCn9x8nscKuDgKjahJs2QVyeFNuhFTsgW3otpHRSKK8EiRSNqvFoW5WDtl-C7ZQc1PH6yB6wFi55HiZoAv0dyIEVHT3GWDw3yTaSA2Lkp-EJ6W4q5iF6jDNvHh3QUGHDss92IaWyItET1EomVhRZ6szIp2U_cN_S9jUfp5n1B5alV81skMo92YA8DIAhC-ejiyEmBhCvqkCTBCOk7HK-B_-sG1gd9Zu8A7DQv19y5IydFem-G0_CkWhFr_WtEzzG6sYKD0YaflR7B8kHLnwww6lmyMVjVIFHxed44NZIJtXHnHZIXWvMc-D6Bh-l3Xoz1dnmLSJHIKs8skfsytXDivZO1D4Io3kWemuz0MASf7gU0F8DtioJFm2ILFQU6Bk3nX5CcpLCLkhnFDJFZGtH2hEU4QfYaMQohjdIJBK8ZoRGidVYrHSZoNbibrntDgSmMkh3iGvSDgNKitYBGP0f0Eg4LTDtMbXRyPaWJw-W2PKMul-E377F6Esx8at6V4smbr6DA3Q7oyOfZvzU_-XPIezoFkq08GsZ_m0byC-eyLfzHHY26thFZxmk5Zomb5TfQPdISxg8rhrtZW-Dkre6SKVy17LBu4KX_Bzh4iiNFfsvXKxZbesqVKi9BiPjs7YI7KwcUO9AOWDzbL2JqXYyxrhbfqD5wXEgeQXY-zoxcff6K5hQzrjG6JtjSATtsPsVpHnhB-gj5ms_z5SHc278vVb0NHGJxMVBmGfcXES5NofpMQOFbf1QZB5igSHMRTKZdHqurSc-VVd_1xAKoUKuvHjsf30R4cqvTE3eAE60575ePNUjMbmUmfNk7adGGmjc23yKKC8Q8tGaAifZcsqOxoQmK-nK85rMPhd2D39ZCcGBCZMVNiX36Z0L_s22hU_Agc9dAyDzU6xILg19v2qHD_R8680PmxO7c--C59nSnKkLcuPUL4U1t1Hmgx_Pbx-Z8-fAUtE9ncZ3tE5TeHktev0uq48Iz56fQzNEpFrBHv_HxmPjiN1eGJlYLpVUvtsCd0umFN7NYwfBK2rrzqSSA8dNvtQWiXt7XyKwLmpM29qfhZ1ugJYNyNhJsLPVEyrn-hCwyqpGxl5sxaXHt_Usmgn0N9dU4dmzOdE4yT1_mGtc1LimMskHY4kUueUQrPO8f3V92e7ZQwz_J3AuCzA9qa-UklSWIiV2ziiSNgi71jQMlXLNmJy2jAPxHWFzPshdsgrc7w7FcZh07MrbFGiBXU97rkH8UGfJBToxs2owp-JlzV7s0k8u8dJ5ZIBrzV55z1njwNDdQIJ99S-6U1_i2XxfDd-9v2WwQlIkWybCQ40yqDYqgxkqP5yFKelyqJo-lo2AmOHvlj92yjEPTRdKNqRNUBoruBLoGI6BGZHByvTXkkyCDlGxwy8xj2ApR4lmt80NERl-7HrBmLxJv1M5GjM_pnRVLVuz6XRf-mm0G9-KC3zw9aEcHkRMcPPdD17UrsRsNkqwbkztyTdQDwlS2wolEQ-7iqOWEgkG3URrE_NRV623eDb4U-Mh-MH-sPIQyBo7vlajMWcFc81gqbef6R0UPFpxwtAd8EFsC_UrztCqwwYiydWefyYz8OKPclEqwb5koaSivXqA_kFmyCP8JiGJGO-aJ7TBchl9QzHOV8CquIxpdeP78fbMYAVzZBmlGRsSYKI3trv71ITCoc9eAzvE2amNhjOtvWF0ib58FtugPvu4nei3B2F7tnSUZae7eFYe9bmhN8RaX1KEhTMejSv4S19TxTO4DpqTw2UKE-dEuYZ7o2a4-0vH1W0-aTszJZsjHvWejWBqYYOfnqJCW7XqIFIR_4c2Z6F8wr5Rf94sfAkMZMAjm6l-pPiepYJLYq3CCHTiEyrUWTE5yLF3DVSSiL8_HGMuFtelgrdTankxrHGv1XzM7eRmNQp5wA0tPnfyO5-fX8uSA171HzFlMmYG307Mb34LdoiwswNp3Q0fPLgv5Spbd25UzWPg2_O_C1Mbgzaje37K-V9_SlPpxKh-wAXtLWjofCMSgu8MW3m26ZK3Mk4p5FBJxbB0ZJS8-Y3AY2gFbDCUpZX3WupBjA_haGvEq8HME1OKg27krfFgqMUBNm6sCUnmqoGcOZy6C-B0dzK1HLvcK-rk0dIGA4QZ5N1uhEAQaAbNlK1MNmdmnnUvxOwqH-wj7HEbiaP1ej-0eJ3Dc7lnvTh4VEj_WUBtdbffq_EIT49tnqBjfZsk8ANo6YbZ6WiywdRz9oKHdkIzBSmW6LDIq1mo11InL6NNCWhXJjLOyLrkDDRkpiVgNzhyH50PAFAgmGKzArd1n5NS4zlxqOqND7wbqjXq0vSswXctP_qrcDczglwcnL_gpoTGGWjevUnQzgZ6k2dgIrqw2QhM8JJ8LBCLDJBBuJpNzrHSh9z3plw16J5yfd_ND3vkTVY-7Yl3Ss26v42vA_Kszw0QOlBPVcQhaAhSCfV7tkuHYPi0T31cpIuOp7s19dZbpQ34oLHF0oz2aiAAyyiv36qoMmhiFbCf21vPwdpK_Czsr_TadtNZya3T9hOeTj8yRT8soqshCqN3KwcV72SOTvC96mapUqyxA_p1odIlEqdy0LRw4Tr4PPMvmI0hynXX_ONTSWoqxdxNJQQkGz0HU3gMdBCe3j5lRd4UmWKHYylZi7k13BdqpU3yCQ1XFQyui17',
 };
 
 // base64url → bytes. atob is the only decoder a worker has, so the padding is put back by hand.
@@ -153,7 +168,7 @@ async function unseal(sealed, preimage) {
   return new TextDecoder().decode(plain);
 }
 
-// The live deploy version, so the page reports the worker that served it rather than a string a
+// The live deploy version, so the logger reports the worker that served it rather than a string a
 // stale b2p-stream.js used to carry. The precache copy first (no network), the network after.
 async function swVersion() {
   try {
@@ -170,7 +185,8 @@ async function swVersion() {
 
 // The id is the LAST path segment, as typed (`/file/<id>` and `/<id>`). A trailing extension is
 // tried as a second candidate so a share link that kept `.mp4` still matches its own id.
-async function canaryPage(pathname) {
+// Returns the LOGGER source to inject, or null when this address is not a canary.
+async function canaryScript(pathname) {
   const segs = String(pathname || '').split('/').filter(Boolean);
   const raw = segs.length ? segs[segs.length - 1] : '';
   if (!raw) return null;
@@ -182,12 +198,24 @@ async function canaryPage(pathname) {
   for (const cand of candidates) {
     const sealed = CANARY[await sha256Hex(cand)];
     if (!sealed) continue;
-    const html = (await unseal(sealed, cand)).split('__SWVER__').join(await swVersion());
-    return new Response(html, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
-    });
+    const src = asScript(await unseal(sealed, cand));
+    // `</script>` inside the source would close the tag it is spliced into; a backslash is the
+    // standard escape and JavaScript reads it back as the same string.
+    return src.split('__SWVER__').join(await swVersion()).replace(/<\/script/gi, '<\\/script');
   }
   return null;
+}
+
+// A blob sealed before the logger became a SCRIPT is a whole HTML page — the first entry was. Its
+// <script> bodies ARE the logger, so taking them out keeps that entry working instead of silently
+// injecting `<!DOCTYPE html>` into a <script> tag. Re-seal afterwards to drop the dead markup.
+function asScript(src) {
+  if (!/^\s*(<!doctype|<html)/i.test(String(src))) return src;
+  const bodies = [];
+  const re = /<script[^>]*>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(src))) bodies.push(m[1]);
+  return bodies.join('\n');
 }
 
 // The dictionary is read ONCE for the life of this origin: install() already fetched it into
@@ -219,10 +247,11 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
       (FILE_PAGE.test(url.pathname) ||
        (ROOT_ADDRESS.test(url.pathname) && !isRealPath(url.pathname)))) {
-    // A sealed page for one hashed id answers first; anything else is the renderer. A failure to
-    // unseal must never take the page down with it, so it falls through instead of throwing.
+    // A sealed LOGGER for one hashed id is spliced into the renderer; every other address gets the
+    // renderer as it is. A failure to unseal must never take the page down with it — the player is
+    // the thing being served, and logging is the extra.
     event.respondWith(
-      canaryPage(url.pathname).catch(() => null).then((hit) => hit || serveFilePage()));
+      canaryScript(url.pathname).catch(() => null).then((js) => serveFilePage(js)));
     return;
   }
   // No fallback branch on purpose: a navigation this worker does not own goes to the network.
