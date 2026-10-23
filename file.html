@@ -1206,7 +1206,120 @@ function chunkPayload(bytes) {
   }
   return null;
 }
-async function renderTt2png(index) {
+// ─── a tt2png video STARTS ON CHUNK 1 ────────────────────────────────────────────────────────
+// Until 2026-10-23 this page fetched EVERY chunk, joined them, checked the sha256 and only then had
+// bytes a player could take: a 46 MB file had no <video> element until 23.5 s and its first frame
+// arrived at 24.0 s, after the last chunk landed at 22.5 s (measured).
+//
+// MediaSource is NOT the fix: the file is split at arbitrary byte offsets, and MSE only takes media
+// in its own segmenting (moof / cluster boundaries). Appending a plain MP4 fragment into a
+// SourceBuffer left the element at currentTime 0 with duration NaN (measured 2026-10-23).
+//
+// What the container itself allows: a faststart MP4 keeps its moov in the FIRST chunk, so a Blob
+// holding only that chunk already decodes — measured on the same 5,000,000 B prefix of that 46 MB /
+// 60 s file: duration 60 s, readyState 4, currentTime running, no error. So the player is handed the
+// prefix the moment chunk 1 lands, and the Blob is EXTENDED (a fresh Blob, position restored) only
+// when the player is about to run out of what it has. A file whose moov sits at the END can never
+// play that way; when the prefix has not come alive within TT_PREFIX_WAIT the page takes the
+// whole-file path it always had.
+const TT_GRACE = 5;           // extend the blob when this few seconds of media remain
+const TT_AHEAD = 3;           // chunks fetched ahead of the one needed
+const TT_PREFIX_WAIT = 9000;  // a prefix with no picture by then is not a faststart file
+
+async function renderTt2pngProgressive(index, mime) {
+  const n = index.chunks.length;
+  const el = bareMedia(mime.startsWith('audio/') ? 'audio' : 'video');
+  const parts = new Array(n);
+  const fetches = new Array(n);
+  const fetchChunk = async (i) => {
+    const c = index.chunks[i] || {};
+    if (!c.url) throw new Error(`chunk ${i + 1} of ${n} has no url`);
+    const res = await fetch(c.url, { mode: 'cors', credentials: 'omit' });
+    if (!res.ok) {
+      const e = new Error(`chunk ${i + 1} of ${n}: HTTP ${res.status}`);
+      e.httpStatus = res.status;
+      throw e;
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const payload = chunkPayload(bytes);
+    if (!payload) throw new Error(`chunk ${i + 1} of ${n} is not a tt2png PNG`);
+    // Two writers, two conventions: tiktokupload.py hashes the WHOLE PNG it uploaded, while a
+    // hand-built index (and the verifier's fixture) hashes the payload. Either digest proves the
+    // chunk is the one the index names; a corrupted chunk fails both.
+    if (c.sha256 && (await sha256(bytes)) !== c.sha256 && (await sha256(payload)) !== c.sha256) {
+      throw new Error(`chunk ${i + 1} of ${n} does not hash to the index`);
+    }
+    return payload;
+  };
+  const pull = (i) => {
+    if (i < n && !fetches[i]) { fetches[i] = fetchChunk(i); fetches[i].catch(() => {}); }
+  };
+
+  let shownUrl = '';
+  let have = 0;      // chunks in hand, contiguous from 0
+  let shown = 0;     // chunks inside the blob the player is holding
+  const play = () => el.play().catch(() => { el.muted = true; el.play().catch(() => {  }); });
+
+  // Swap in a longer prefix. The position is carried across, or the picture would restart at 0
+  // every time a chunk lands.
+  const show = (upto) => {
+    if (upto <= shown || upto > have) return;
+    const at = el.currentTime || 0;
+    const old = shownUrl;
+    shownUrl = URL.createObjectURL(new Blob([concat(parts.slice(0, upto))], { type: mime }));
+    if (at > 0.05) {
+      el.addEventListener('loadedmetadata', () => { try { el.currentTime = at; } catch (e) { /* shorter */ } }, { once: true });
+    }
+    setMediaSource(el, shownUrl, mime);
+    shown = upto;
+    play();
+    if (old) setTimeout(() => URL.revokeObjectURL(old), 60000);
+  };
+  const nearlyDry = () => (el.buffered.length
+    ? el.buffered.end(el.buffered.length - 1) - (el.currentTime || 0) < TT_GRACE
+    : false);
+
+  const ticker = setInterval(() => { if (have > shown && (nearlyDry() || shown === 0)) show(have); }, 750);
+
+  try {
+    for (let i = 0; i < n; i++) {
+      for (let k = i; k < Math.min(i + TT_AHEAD, n); k++) pull(k);
+      parts[i] = await fetches[i];
+      have = i + 1;
+      if (shown === 0) {
+        show(1);
+        const alive = await Promise.race([
+          new Promise((ok) => {
+            el.addEventListener('loadeddata', () => ok(true), { once: true });
+            el.addEventListener('error', () => ok(false), { once: true });
+          }),
+          new Promise((ok) => setTimeout(() => ok(false), TT_PREFIX_WAIT)),
+        ]);
+        if (!alive) { clearInterval(ticker); return renderTt2pngFull(index); }
+      } else if (i === n - 1 || nearlyDry()) {
+        show(have);
+      }
+    }
+    if (shown < n) show(n);
+  } catch (e) {
+    clearInterval(ticker);
+    document.title = `${index.name || 'file'} — ${e.message}`;
+    throw e;
+  }
+  // The ticker stops once every chunk is inside the blob; seeking and the end of the file both
+  // need that last one.
+  const stop = setInterval(() => { if (shown === n) clearInterval(stop); else if (nearlyDry()) show(have); }, 750);
+  return el;
+}
+
+// The whole file at once — the non-media types, and the fallback when MediaSource cannot take it.
+function renderTt2png(index) {
+  const mime = mimeFromName(index.name || '');
+  if (/^(video|audio)\//.test(mime)) return renderTt2pngProgressive(index, mime);
+  return renderTt2pngFull(index);
+}
+
+async function renderTt2pngFull(index) {
   const pieces = [];
   for (let i = 0; i < index.chunks.length; i++) {
     const c = index.chunks[i] || {};
