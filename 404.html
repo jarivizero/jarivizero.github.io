@@ -141,6 +141,31 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
       document.body.textContent = '';
       document.body.appendChild(v);
     }
+    // On a PHONE, `document.write` after an await is not dependable: WebKit can drop the document
+
+    // "it just shows the 404 page" on mobile. So the WORKER serves this same address instead: it
+    // already answers `/file/<name>` from its own copy of the renderer (`serveFilePage`), and a
+    // reload keeps `/file/<id>` exactly as typed. One reload per visit, guarded in sessionStorage,
+    // so a browser where the worker never takes control cannot loop.
+    // MOBILE ONLY: the desktop path below is proved by the browser verifier and stays exactly as it
+    // is; a phone is where `document.write` after an await is unreliable.
+    const touchFirst = window.matchMedia('(pointer: coarse)').matches ||
+                       /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent || '');
+    if (touchFirst && 'serviceWorker' in navigator && window.isSecureContext && !sessionStorage.getItem('b2p404')) {
+      try {
+        sessionStorage.setItem('b2p404', '1');
+        await navigator.serviceWorker.register('/b2p-stream.js', { scope: '/' });
+        await navigator.serviceWorker.ready;
+        if (!navigator.serviceWorker.controller) {
+          await new Promise((res) => {
+            const t = setTimeout(res, 4000);
+            navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(t); res(); }, { once: true });
+          });
+        }
+        if (navigator.serviceWorker.controller) { location.reload(); return; }
+      } catch (e) { /* fall through to writing the document */ }
+    }
+
     // Then the renderer takes THIS document over — same url, same document, no iframe to paint first.
     // It reads the name from the path, and its own pre-paint script keeps the window black.
     const root = location.pathname.slice(0, location.pathname.lastIndexOf('/file') + 1);
