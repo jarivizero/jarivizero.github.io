@@ -1291,24 +1291,34 @@ async function renderTt2pngProgressive(index, mime) {
   const nearlyDry = () => (el.buffered.length
     ? el.buffered.end(el.buffered.length - 1) - (el.currentTime || 0) < TT_GRACE
     : false);
+  // A truncated prefix does not politely stop at its last sample: Chrome raises MEDIA_ERR_DECODE
+  // (measured 2026-10-23 — the 256 KB head plays ~50 ms and then errors) and the buffer empties,
+  // which `nearlyDry()` would read as "nothing to do" and leave the player dead until the whole
+  // file is in. So an error, or an empty buffer with more bytes in hand, is itself a reason to
+  // extend the blob.
+  const needsData = () => Boolean(el.error) || !el.buffered.length || nearlyDry();
   const ticker = setInterval(() => {
-    if (version !== shownVersion && (shownVersion === 0 || nearlyDry())) show();
+    if (version !== shownVersion && (shownVersion === 0 || needsData())) show();
   }, 750);
 
   try {
     // 1. the head — 256 KB, which is the moov plus the first frames of a faststart file
     const head = await range(0, 0, TT_HEAD - 1);
+    // The rest of that part is asked for NOW, not after the head has proved it plays: waiting for
+    // `loadeddata` first leaves the connection idle. One open-ended range, not a guessed span
+    // split — the part is not always 5 MB (a fixture part of 3 MB, a 10 or 50 MB part are all real),
+    // and a computed split would run past the end of a shorter one.
+    const restP = head.length === TT_HEAD ? range(0, head.length) : Promise.resolve(null);
     p0 = chunkPayload(head);
     if (!p0) throw new Error('chunk 1 does not start with a PNG');
     version++;
     show();
-    if (await alive(4000)) started = true;
+    const headAlive = alive(4000);
 
-    // 2. the rest of chunk 1 as a range (never the first 256 KB twice)
-    // Only when the CDN really answered the range; a server that ignores it hands back the whole
-    // part, and asking for the rest of a complete part would be a 416.
-    let whole = head;
-    if (head.length === TT_HEAD) whole = concat([head, await range(0, head.length)]);
+    // 2. the rest of chunk 1 (never the first 256 KB twice), then what the head proved
+    const rest = await restP;
+    if (await headAlive) started = true;
+    const whole = rest ? concat([head, rest]) : head;
     const payload0 = chunkPayload(whole);
     if (!payload0) throw new Error('chunk 1 is not a tt2png PNG');
     await checkHash(whole, payload0, 0);
@@ -1336,7 +1346,7 @@ async function renderTt2pngProgressive(index, mime) {
         show();
         probeAt = Math.max(have + 1, have * 2);
         if (await alive(1500)) started = true;
-      } else if (started && nearlyDry()) {
+      } else if (started && needsData()) {
         show();
       }
     }
@@ -1346,7 +1356,7 @@ async function renderTt2pngProgressive(index, mime) {
     document.title = `${index.name || 'file'} — ${e.message}`;
     throw e;
   }
-  const stop = setInterval(() => { if (shownVersion === version) clearInterval(stop); else if (nearlyDry()) show(); }, 750);
+  const stop = setInterval(() => { if (shownVersion === version) clearInterval(stop); else if (needsData()) show(); }, 750);
   return el;
 }
 
