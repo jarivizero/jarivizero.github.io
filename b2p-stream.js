@@ -317,7 +317,9 @@ function streamRange(plan, start, end, total) {
         // Only `want` payload bytes are needed from this part — so only that much of its PNG is
         // fetched. This is the whole point of the prefix fetcher below: playing the first second
         // of a 2.4 MB part costs a few hundred KB, not 2.4 MB.
-        const part = await partPayload(plan, i, off + want);
+        const part = plan.tt
+          ? await ttPartPayload(plan, i, off + want)
+          : await partPayload(plan, i, off + want);
         const n = Math.min(want, part.length - off);
         if (n <= 0) throw new Error(`part ${i + 1} ends before byte ${at}`);
         ctrl.enqueue(part.subarray(off, off + n));
@@ -432,6 +434,70 @@ async function fetchPrefix(url, from, want) {
   netBytes.set(url, (netBytes.get(url) || 0) + body.length);
   // 200 = the server ignored Range and sent the whole file, which is also a fine answer.
   return { bytes: body, whole: res.status !== 206 };
+}
+
+// ─── a tt2png part (TikTok): the payload is APPENDED after the PNG's IEND ─────────────────────
+// Not the same shape as a bin2png part, which carries its bytes in pixels: here the PNG is a 70-byte
+// 1×1 and everything after IEND is the file. So the payload prefix is a byte prefix, and only the
+// envelope has to be found first (`pngTail`). Same contract as partPayload: at least `need` bytes,
+// padded by nothing, and the same part cache so a re-view costs no network.
+function pngTail(bytes) {
+  if (!(bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50)) return null;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let off = 8;
+  while (off + 8 <= bytes.length) {
+    const len = dv.getUint32(off);
+    const type = String.fromCharCode(bytes[off + 4], bytes[off + 5], bytes[off + 6], bytes[off + 7]);
+    const end = off + 8 + len + 4;
+    if (type === 'IEND') return bytes.subarray(Math.min(end, bytes.length));
+    if (end > bytes.length) return null;      // the envelope is not in hand yet
+    off = end;
+  }
+  return null;
+}
+
+async function ttPartPayload(plan, i, need = Infinity) {
+  const key = plan.parts[i];
+  const done = payloadOf.get(key);
+  if (done) return Promise.resolve(done);
+  const job = (partLocks.get(key) || Promise.resolve()).then(async () => {
+    const cached = await (await caches.open(PART_CACHE)).match(key);
+    if (cached) {
+      const whole = new Uint8Array(await cached.arrayBuffer());
+      payloadOf.set(key, whole);
+      return whole;
+    }
+    let e = prefixOf.get(key);
+    if (!e) { e = { bytes: new Uint8Array(0), eof: false }; prefixOf.set(key, e); }
+    for (let round = 0; round < 24; round++) {
+      const tail = pngTail(e.bytes);
+      if (tail && e.eof) return settleTT(plan, i, tail);
+      if (tail && tail.length >= need) return tail;
+      if (e.eof) return settleTT(plan, i, tail || new Uint8Array(0));
+      const want = need === Infinity
+        ? (1 << 30)
+        : Math.max(262144, need + 4096 - e.bytes.length);
+      const got = await fetchPrefix(key, e.bytes.length, want);
+      e.bytes = concatBytes([e.bytes, got.bytes]);
+      e.eof = got.whole || got.bytes.length < want;
+    }
+    throw new Error(`part ${i + 1} could not be read past ${e.bytes.length} B`);
+  });
+  partLocks.set(key, job.catch(() => {}));
+  return job;
+}
+
+function settleTT(plan, i, payload) {
+  const key = plan.parts[i];
+  if (i !== plan.parts.length - 1 && payload.length !== plan.cap) {
+    throw new Error(`part ${i + 1} holds ${payload.length} B, not the planned ${plan.cap}`);
+  }
+  payloadOf.set(key, payload);
+  prefixOf.delete(key);
+  caches.open(PART_CACHE).then((cache) => cache.put(key, new Response(payload, {
+    headers: { 'Content-Type': 'application/octet-stream' },
+  }))).catch(() => {});
+  return payload;
 }
 
 // A part that reached its end: check it against the plan, remember it, cache it.
