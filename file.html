@@ -1206,8 +1206,8 @@ function chunkPayload(bytes) {
   }
   return null;
 }
-// ─── a tt2png video STARTS ON CHUNK 1 ────────────────────────────────────────────────────────
-// Until 2026-10-23 this page fetched EVERY chunk, joined them, checked the sha256 and only then had
+// ─── a tt2png video STARTS ON A BYTE RANGE, not on a whole part ───────────────────────────────
+// Until 2026-10-23 this page fetched every chunk, joined them, checked the sha256 and only then had
 // bytes a player could take: a 46 MB file had no <video> element until 23.5 s and its first frame
 // arrived at 24.0 s, after the last chunk landed at 22.5 s (measured).
 //
@@ -1215,100 +1215,138 @@ function chunkPayload(bytes) {
 // in its own segmenting (moof / cluster boundaries). Appending a plain MP4 fragment into a
 // SourceBuffer left the element at currentTime 0 with duration NaN (measured 2026-10-23).
 //
-// What the container itself allows: a faststart MP4 keeps its moov in the FIRST chunk, so a Blob
-// holding only that chunk already decodes — measured on the same 5,000,000 B prefix of that 46 MB /
-// 60 s file: duration 60 s, readyState 4, currentTime running, no error. So the player is handed the
-// prefix the moment chunk 1 lands, and the Blob is EXTENDED (a fresh Blob, position restored) only
-// when the player is about to run out of what it has. A file whose moov sits at the END can never
-// play that way; when the prefix has not come alive within TT_PREFIX_WAIT the page takes the
-// whole-file path it always had.
-const TT_GRACE = 5;           // extend the blob when this few seconds of media remain
-const TT_AHEAD = 3;           // chunks fetched ahead of the one needed
-const TT_PREFIX_WAIT = 9000;  // a prefix with no picture by then is not a faststart file
+// What the container itself allows: a faststart MP4 keeps its moov at the FRONT, so a Blob holding
+// only the head of the file already decodes. His 2026-10-23 follow-up — "it waits for the full 5mb
+// part, that's not needed" — was right, and the CDN answers ranges (`206 bytes 0-262143/5000070`,
+// measured), so the head is a RANGE REQUEST, not a chunk:
+//   moov ends 65,446 B into that 46 MB file, so 64 KB and 128 KB prefixes fail (MEDIA_ERR_DECODE)
+//   and 256 KB plays — measured, that is where TT_HEAD comes from.
+// Playback starts on those 256 KB; the rest of chunk 1 is fetched as `Range: bytes=262144-` (so no
+// byte is fetched twice), then chunks 2..n three ahead. The blob is rebuilt only when the player is
+// about to run dry, and every completed chunk is checked against its own sha256 as it lands — the
+// same guarantee as before, since a file whose every chunk matches is the file that was uploaded.
+const TT_HEAD = 262144;      // 256 KB: the measured floor for a faststart MP4 (128 KB fails)
+const TT_GRACE = 5;          // extend the blob when this few seconds of media remain
+const TT_AHEAD = 3;          // chunks fetched ahead of the one needed
 
 async function renderTt2pngProgressive(index, mime) {
   const n = index.chunks.length;
   const el = bareMedia(mime.startsWith('audio/') ? 'audio' : 'video');
   const parts = new Array(n);
-  const fetches = new Array(n);
-  const fetchChunk = async (i) => {
+  let p0 = null;             // chunk 1's payload, as much of it as has arrived
+  let have = 0;              // chunks fully in hand, contiguous from 0
+  let version = 0;           // bumped whenever p0 or `have` grows
+  let shownVersion = 0;      // the version the player is holding
+  let shownUrl = '';
+  let started = false;       // the element has decoded something at least once
+
+  const range = async (i, from, to) => {
     const c = index.chunks[i] || {};
     if (!c.url) throw new Error(`chunk ${i + 1} of ${n} has no url`);
-    const res = await fetch(c.url, { mode: 'cors', credentials: 'omit' });
+    const headers = {};
+    if (from || to !== undefined) headers.Range = `bytes=${from}-${to === undefined ? '' : to}`;
+    const res = await fetch(c.url, { mode: 'cors', credentials: 'omit', headers });
     if (!res.ok) {
       const e = new Error(`chunk ${i + 1} of ${n}: HTTP ${res.status}`);
       e.httpStatus = res.status;
       throw e;
     }
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    const payload = chunkPayload(bytes);
-    if (!payload) throw new Error(`chunk ${i + 1} of ${n} is not a tt2png PNG`);
-    // Two writers, two conventions: tiktokupload.py hashes the WHOLE PNG it uploaded, while a
-    // hand-built index (and the verifier's fixture) hashes the payload. Either digest proves the
-    // chunk is the one the index names; a corrupted chunk fails both.
+    return new Uint8Array(await res.arrayBuffer());
+  };
+  const checkHash = async (bytes, payload, i) => {
+    const c = index.chunks[i] || {};
+    // Two writers, two conventions: tiktokupload.py hashes the WHOLE PNG it uploaded, a hand-built
+    // index hashes the payload. Either digest proves the chunk is the one the index names.
     if (c.sha256 && (await sha256(bytes)) !== c.sha256 && (await sha256(payload)) !== c.sha256) {
       throw new Error(`chunk ${i + 1} of ${n} does not hash to the index`);
     }
-    return payload;
   };
-  const pull = (i) => {
-    if (i < n && !fetches[i]) { fetches[i] = fetchChunk(i); fetches[i].catch(() => {}); }
+  const bytesNow = () => {
+    if (have <= 1) return p0;
+    return concat([p0, ...parts.slice(1, have)]);
   };
-
-  let shownUrl = '';
-  let have = 0;      // chunks in hand, contiguous from 0
-  let shown = 0;     // chunks inside the blob the player is holding
   const play = () => el.play().catch(() => { el.muted = true; el.play().catch(() => {  }); });
-
-  // Swap in a longer prefix. The position is carried across, or the picture would restart at 0
-  // every time a chunk lands.
-  const show = (upto) => {
-    if (upto <= shown || upto > have) return;
+  // Swap in whatever is in hand. The position is carried across, or the picture would restart at 0
+  // every time the prefix grows.
+  const show = () => {
+    if (!p0 || version === shownVersion) return;
     const at = el.currentTime || 0;
     const old = shownUrl;
-    shownUrl = URL.createObjectURL(new Blob([concat(parts.slice(0, upto))], { type: mime }));
+    shownUrl = URL.createObjectURL(new Blob([bytesNow()], { type: mime }));
     if (at > 0.05) {
       el.addEventListener('loadedmetadata', () => { try { el.currentTime = at; } catch (e) { /* shorter */ } }, { once: true });
     }
     setMediaSource(el, shownUrl, mime);
-    shown = upto;
+    shownVersion = version;
     play();
     if (old) setTimeout(() => URL.revokeObjectURL(old), 60000);
   };
+  const alive = (ms) => Promise.race([
+    new Promise((ok) => {
+      el.addEventListener('loadeddata', () => ok(true), { once: true });
+      el.addEventListener('error', () => ok(false), { once: true });
+    }),
+    new Promise((ok) => setTimeout(() => ok(false), ms)),
+  ]);
   const nearlyDry = () => (el.buffered.length
     ? el.buffered.end(el.buffered.length - 1) - (el.currentTime || 0) < TT_GRACE
     : false);
-
-  const ticker = setInterval(() => { if (have > shown && (nearlyDry() || shown === 0)) show(have); }, 750);
+  const ticker = setInterval(() => {
+    if (version !== shownVersion && (shownVersion === 0 || nearlyDry())) show();
+  }, 750);
 
   try {
-    for (let i = 0; i < n; i++) {
+    // 1. the head — 256 KB, which is the moov plus the first frames of a faststart file
+    const head = await range(0, 0, TT_HEAD - 1);
+    p0 = chunkPayload(head);
+    if (!p0) throw new Error('chunk 1 does not start with a PNG');
+    version++;
+    show();
+    if (await alive(4000)) started = true;
+
+    // 2. the rest of chunk 1 as a range (never the first 256 KB twice)
+    // Only when the CDN really answered the range; a server that ignores it hands back the whole
+    // part, and asking for the rest of a complete part would be a 416.
+    let whole = head;
+    if (head.length === TT_HEAD) whole = concat([head, await range(0, head.length)]);
+    const payload0 = chunkPayload(whole);
+    if (!payload0) throw new Error('chunk 1 is not a tt2png PNG');
+    await checkHash(whole, payload0, 0);
+    p0 = parts[0] = payload0;
+    have = 1;
+    version++;
+    if (!started) { show(); if (await alive(2500)) started = true; }
+
+    // 3. chunk 2..n, three ahead. A file whose moov is deep inside only starts once the prefix has
+    //    reached it, so while nothing has decoded the blob is re-shown at 1, 2, 4, 8… chunks — one
+    //    rebuild per doubling instead of one per chunk.
+    const fetches = new Array(n);
+    const pull = (i) => { if (i < n && !fetches[i]) { fetches[i] = range(i); fetches[i].catch(() => {}); } };
+    let probeAt = 2;
+    for (let i = 1; i < n; i++) {
       for (let k = i; k < Math.min(i + TT_AHEAD, n); k++) pull(k);
-      parts[i] = await fetches[i];
+      const bytes = await fetches[i];
+      const payload = chunkPayload(bytes);
+      if (!payload) throw new Error(`chunk ${i + 1} of ${n} is not a tt2png PNG`);
+      await checkHash(bytes, payload, i);
+      parts[i] = payload;
       have = i + 1;
-      if (shown === 0) {
-        show(1);
-        const alive = await Promise.race([
-          new Promise((ok) => {
-            el.addEventListener('loadeddata', () => ok(true), { once: true });
-            el.addEventListener('error', () => ok(false), { once: true });
-          }),
-          new Promise((ok) => setTimeout(() => ok(false), TT_PREFIX_WAIT)),
-        ]);
-        if (!alive) { clearInterval(ticker); return renderTt2pngFull(index); }
-      } else if (i === n - 1 || nearlyDry()) {
-        show(have);
+      version++;
+      if (!started && have >= probeAt) {
+        show();
+        probeAt = Math.max(have + 1, have * 2);
+        if (await alive(1500)) started = true;
+      } else if (started && nearlyDry()) {
+        show();
       }
     }
-    if (shown < n) show(n);
+    show();                                  // the whole file, so seeking and the end are real
   } catch (e) {
     clearInterval(ticker);
     document.title = `${index.name || 'file'} — ${e.message}`;
     throw e;
   }
-  // The ticker stops once every chunk is inside the blob; seeking and the end of the file both
-  // need that last one.
-  const stop = setInterval(() => { if (shown === n) clearInterval(stop); else if (nearlyDry()) show(have); }, 750);
+  const stop = setInterval(() => { if (shownVersion === version) clearInterval(stop); else if (nearlyDry()) show(); }, 750);
   return el;
 }
 
