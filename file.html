@@ -1873,9 +1873,6 @@ async function zipFromMemory(bytes) {
   return parseCentral(block, at, entries, cdSize, cdOff, block.length);
 }
 
-// The 404 page sets this before asking the worker to serve this address; clearing it here is what
-// keeps that one reload from ever becoming a loop.
-try { sessionStorage.removeItem('b2p404'); } catch (e) { /* private mode */ }
 window.addEventListener('hashchange', run);
 run();
 </script>
