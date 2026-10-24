@@ -120,6 +120,16 @@ window.addEventListener('load', () => { checkSiteVersion(); });
   try {
     // The REAL file, never the `/file` route: that one can be answered by the worker from its own
     // precache, which is exactly the copy this check has to see past.
+    //
+
+    // comparing the BUILD constant costs the first 8 KB, and only a REAL change then pays for the
+    // whole file — which is still fetched with `reload` below, because that copy is what gets put
+    // back into the worker's cache.
+    const head = await fetch(siteUrl('file.html'),
+                             { cache: 'no-store', headers: { Range: 'bytes=0-8191' } });
+    if (!head.ok) return;
+    const seenBuild = (await head.text()).match(/const BUILD = '([^']+)'/);
+    if (!seenBuild || seenBuild[1] === BUILD || seen === seenBuild[1]) return;
     const res = await fetch(siteUrl('file.html'), { cache: 'reload' });
     if (!res.ok) return;
     const text = await res.text();
