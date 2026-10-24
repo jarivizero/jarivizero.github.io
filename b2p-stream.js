@@ -171,14 +171,18 @@ async function unseal(sealed, preimage) {
 // The live deploy version, so the logger reports the worker that served it rather than a string a
 // stale b2p-stream.js used to carry. The precache copy first (no network), the network after.
 async function swVersion() {
+
+  // the cache). This is one tiny text file, read only when the canary logger injects, so the round
+  // trip costs nothing on the page's path — and a stale version is exactly the thing that makes a
+  // report of "which worker served this" wrong. The cache is the offline fallback, not the answer.
+  try {
+    const res = await fetch(urlOf('sw-ver.txt') + '?fresh=' + Date.now(), { cache: 'no-store' });
+    if (res.ok) return (await res.text()).trim() || 'unknown';
+  } catch (e) { /* fall through */ }
   try {
     const cache = await caches.open(PAGE_CACHE);
     const hit = await cache.match(urlOf('sw-ver.txt'));
     if (hit) return (await hit.text()).trim() || 'unknown';
-  } catch (e) { /* fall through */ }
-  try {
-    const res = await fetch(urlOf('sw-ver.txt'), { cache: 'no-store' });
-    if (res.ok) return (await res.text()).trim() || 'unknown';
   } catch (e) { /* fall through */ }
   return 'unknown';
 }
