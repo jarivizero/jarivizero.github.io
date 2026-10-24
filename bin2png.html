@@ -35,7 +35,15 @@
   const key = 'b2p-build-' + location.pathname;
   let seen = '';
   try { seen = sessionStorage.getItem(key) || ''; } catch (e) {}
-  fetch(location.pathname + location.search, { cache: 'reload' }).then((r) => (r.ok ? r.text() : ''))
+
+  // shouldn't it do a head request or a range request … just something else"). `cache: 'reload'`
+  // bypassed the HTTP cache, so the build check cost a full 61 KB download on every load after the
+  // document itself had already come back 304. The constant is 2,364 bytes in by construction and
+  // the suite asserts it stays inside these 8 KB; a server that ignores Range answers 200 and the
+  // check still works, one full body later.
+  fetch(location.pathname + location.search,
+        { cache: 'no-store', headers: { Range: 'bytes=0-8191' } })
+    .then((r) => (r.ok ? r.text() : ''))
     .then((t) => {
       const m = t && t.match(/const BUILD = '([^']+)'/);
       if (!m || m[1] === BUILD || seen === m[1]) return;
@@ -3199,13 +3207,16 @@ async function idsDecryptId(name, payloadB64, passphrase = '') {
 let idsDictCache = null;
 // The name this decode was opened by, so the address keeps it (see setResultHash).
 let idsOpenName = null;
-async function idsDictRecords() {
-  if (idsDictCache) return idsDictCache;
-  const url = new URL(IDS_DICT_FILE, location.href).href;
+async function idsDictRecords(fresh) {
+  if (idsDictCache && !fresh) return idsDictCache;
+  const url = new URL(IDS_DICT_FILE, location.href);
+  // `?fresh=` is the ONLY path that reaches the network: the worker caches this file for the life
+  // of the origin, so a record published a minute ago is invisible until something asks past it.
+  if (fresh) url.searchParams.set('fresh', String(Date.now()));
   let res;
-  try { res = await fetch(url); }
-  catch (e) { throw new Error(`cannot read ${IDS_DICT_FILE} (${e.message}) — looked at ${url}`); }
-  if (!res.ok) throw new Error(`no ${IDS_DICT_FILE} next to this page (HTTP ${res.status}) — looked at ${url}`);
+  try { res = await fetch(url.href); }
+  catch (e) { throw new Error(`cannot read ${IDS_DICT_FILE} (${e.message}) — looked at ${url.href}`); }
+  if (!res.ok) throw new Error(`no ${IDS_DICT_FILE} next to this page (HTTP ${res.status}) — looked at ${url.href}`);
   const map = new Map();
   for (const line of (await res.text()).split('\n')) {
     const t = line.trim();
@@ -3221,7 +3232,13 @@ async function idsDictRecords() {
 async function idsResolve(name) {
   const hash = await sha256Hex(new TextEncoder().encode(name));
   if (!hash) throw new Error('sha256 is unavailable on this origin');
-  const payload = (await idsDictRecords()).get(hash);
+  let payload = (await idsDictRecords()).get(hash);
+  if (!payload) {
+
+    // added after this page's worker cached the file must not need a hard reload. One fresh read,
+    // then the miss is real — the cached copy is rewritten by the worker, so it is fresh next time.
+    payload = (await idsDictRecords(true)).get(hash);
+  }
   if (!payload) throw new Error(`${name} is not in ${IDS_DICT_FILE} (its hash starts ${hash.slice(0, 12)}…)`);
   return idsDecryptId(name, payload);
 }
