@@ -458,7 +458,11 @@ function streamRange(plan, start, end, total) {
         if (i >= plan.parts.length) { ctrl.close(); return; }
         const off = at - i * plan.cap;
         const want = Math.min(end - at + 1, plan.cap - off);
-        if (wide && i + 1 < plan.parts.length) {
+        // Only when the range really goes on into the NEXT chunk. `wide` alone said "this is a long
+        // range" and the prefetch then fetched one part past its end — measured 2026-10-25 on his
+        // 32 MB member read: chunk 7 for a range that ended in chunk 6, a whole 5 MB nobody asked for.
+        const reachesNext = at + want - 1 < end;
+        if (wide && reachesNext && i + 1 < plan.parts.length) {
           // A tt2png chunk is addressed by exact bytes, so the prefetch must ask for the WINDOW the
           // loop will ask for next — not the whole chunk. `ttPartPayload(…, Infinity)` pulled the
           // chunk's entire PNG and the sequential read then fetched its slice AGAIN: measured on
