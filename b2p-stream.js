@@ -855,13 +855,41 @@ function ttWinPut(key, off, bytes) {
   TTWIN.set(key, list.slice(0, TTWIN_PER_URL));
   while (TTWIN.size > TTWIN_MAX) TTWIN.delete(TTWIN.keys().next().value);
 }
-async function ttWindow(plan, i, off, want) {
+// ONE request per (chunk, window), shared by every caller waiting on it. The "one part ahead"
+// prefetch and the read that follows it ask for the SAME window; without this they both miss the
+// cache (neither has finished) and the chunk is fetched twice — measured 2026-10-25 on his 267 MB
+// index: 10 chunk reads for 7 chunks, 52.5 MiB instead of 32.3 MiB. Same for the 512-byte probe,
+// which two racing callers both ran.
+const TTLOCK = new Map();       // "<url>@<off>+<want>" -> promise
+function ttWindow(plan, i, off, want) {
+  const lock = plan.parts[i] + '@' + off + '+' + want;
+  const cur = TTLOCK.get(lock);
+  if (cur) return cur;
+  const job = ttWindowNow(plan, i, off, want).finally(() => TTLOCK.delete(lock));
+  TTLOCK.set(lock, job);
+  return job;
+}
+async function ttWindowNow(plan, i, off, want) {
   const key = plan.parts[i];
   // The whole chunk is already in hand: answer from it, whatever window was asked for.
   const known = payloadOf.get(key);
   if (known) return known.subarray(off, off + want);
   let hdr = TTHDR.get(key);
   if (hdr === undefined) {
+    hdr = await ttHeader(plan, i, key);
+  }
+  const res = await fetch(key, { mode: 'cors', credentials: 'omit',
+                                 headers: { Range: `bytes=${hdr + off}-${hdr + off + want - 1}` } });
+  if (!res.ok && res.status !== 416) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
+  return finishWindow(plan, i, key, off, want, res);
+}
+// The payload's byte offset inside the chunk PNG, once per chunk and once only however many readers
+// ask at the same time.
+async function ttHeader(plan, i, key) {
+  const lock = key + '#head';
+  const cur = TTLOCK.get(lock);
+  if (cur) return cur;
+  const job = (async () => {
     const res = await fetch(key, { mode: 'cors', credentials: 'omit',
                                    headers: { Range: 'bytes=0-511' } });
     if (!res.ok) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
@@ -870,12 +898,14 @@ async function ttWindow(plan, i, off, want) {
     noteReq('probe', key, 0, 512, head.length);
     const tail = pngTail(head);
     if (!tail) throw new Error(`part ${i + 1} is not a tt2png PNG`);
-    hdr = head.length - tail.length;
+    const hdr = head.length - tail.length;
     TTHDR.set(key, hdr);
-  }
-  const res = await fetch(key, { mode: 'cors', credentials: 'omit',
-                                 headers: { Range: `bytes=${hdr + off}-${hdr + off + want - 1}` } });
-  if (!res.ok && res.status !== 416) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
+    return hdr;
+  })().finally(() => TTLOCK.delete(lock));
+  TTLOCK.set(lock, job);
+  return job;
+}
+async function finishWindow(plan, i, key, off, want, res) {
   const body = new Uint8Array(await res.arrayBuffer());
   netBytes.set(key, (netBytes.get(key) || 0) + body.length);
   noteReq('win:' + String(plan.name || plan.id || '?').slice(0, 12), key, off, want, body.length);
