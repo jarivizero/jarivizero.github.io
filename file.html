@@ -1639,7 +1639,7 @@ async function resolveArchivePath(rawPath) {
       const getBytes = once(() => reader(entry.path));
       // Only the address's OWN archive has offsets `sourceRange` can use; deeper levels are already
       // in memory, so they keep the whole-bytes path.
-      const stored = reader === rootRead ? await storedSpan(entry) : null;
+      const stored = reader === rootRead ? await storedSpan(await withOffsets(entry)) : null;
       const indexed = src.tt && src.tt.archives && src.tt.archives[at];
       const inner = await openInnerArchive(getBytes, entry.path, at, stored, indexed);
       deepest = getBytes;
@@ -1727,7 +1727,7 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
     // to the listing we are on, `base` is that listing's own path.
     const at = (base ? base + '/' : '') + entry.path;
     const getBytes = once(() => read(entry.path));
-    const stored = read === rootRead ? await storedSpan(entry) : null;
+    const stored = read === rootRead ? await storedSpan(await withOffsets(entry)) : null;
     const indexed = src.tt && src.tt.archives && src.tt.archives[at];
     const inner = await openInnerArchive(getBytes, entry.path, at, stored, indexed);
     // `entry.path` is relative to the listing we are on (`rest`, which already holds the folders
@@ -1899,6 +1899,20 @@ async function zipReadRanged(range, f) {
   if (f.method === 0) return comp;
   if (f.method === 8) return inflate(comp, 'deflate-raw');
   throw new Error(`member uses compression method ${f.method}, which this page cannot unpack`);
+}
+
+// A row from the INDEX has no offsets (a name, a size, a date). The outer archive's own directory
+// does, so a stored archive is located there once and the row is completed from it — without this,
+// `storedSpan` saw `method: undefined` and the nested listing fell back to reading the whole member
+// (measured 2026-10-25: `…/Robomaid.zip/` 7,297 KB with the ranged path already in place).
+async function withOffsets(f) {
+  if (Number.isFinite(f.localOff) && f.method !== undefined) return f;
+  try {
+    const dir = await centralListing();
+    const hit = dir.files.find((e) => e.path === f.path)
+      || dir.files.find((e) => e.path === String(f.path).replace(/\/$/, ''));
+    return hit ? { ...hit, path: f.path } : f;
+  } catch (e) { return f; }
 }
 
 // The span of a STORED member of the address's own archive, as a `range(a, b)` over the file.
