@@ -86,7 +86,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-25T09:14';
+const BUILD = '2026-10-25T09:23';
 // ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
 // `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
@@ -2361,11 +2361,12 @@ function addressFromLocation() {
   const idAtRoot = /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
   const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
     || (idAtRoot ? location.pathname.slice(1) : '');
+  const trailing = /\/$/.test(fromPath);
   const raw = fromPath ? decodeURIComponent(fromPath).replace(/\/+$/, '').trim() : '';
   let hint = location.search.replace(/^\?/, '');
   try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
   if (!raw || !hint || hint.includes('=') || /[?#]/.test(hint)) hint = '';
-  return { raw, hint };
+  return { raw, hint, trailing };
 }
 
 async function run() {
@@ -2396,6 +2397,18 @@ async function run() {
 
   const typedToken = raw.split('/')[0];
   let index = null;
+  // A PATH inside an archive puts the empty `Index of /` up IMMEDIATELY, the way a `.` address does
+
+  // already says so: there is a segment after the archive name, and a folder link always ends in `/`
+  // (our own rows write it that way). A last segment with an extension is a FILE — those keep their
+  // own blank tab and get no listing shell.
+  if (!ranged && !forceMedia) {
+    const inside = raw.includes('/');
+    const lastSeg = raw.split('/').filter(Boolean).pop() || '';
+    if (inside && (where.trailing || !/\.[A-Za-z0-9]{1,6}$/.test(lastSeg))) {
+      index = indexView('/', 0, { base: typedToken });
+    }
+  }
   if (ranged) {
     // `.` says archive, the way `,` says video: an EMPTY `Index of /` is on screen before a byte is
     // read — the heading a file manager opens with — and the rows arrive when the directory does.
@@ -2530,7 +2543,8 @@ async function run() {
       const label = /\.(zip|apk|jar)$/i.test(src.name) ? src.name : `${src.name}.zip`;
       // A path INSIDE the archive: `/file/<archive>/docs/readme.txt` or `/file/<archive>/docs/`.
       if (member) {
-        if (index) resetPage();
+        // No resetPage() here: the folder page replaces the shell by building its own, and clearing
+        // first is the white flash this whole change exists to remove.
         await renderZipPath(label, member, typedToken);
         return;
       }
