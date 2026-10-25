@@ -30,40 +30,73 @@ const PART_CACHE = 'b2p-part-v1';
 const MARK = '/__b2p/';
 
 const PAGE_CACHE = 'b2p-page-v1';
-// What this worker answers from its OWN copy — so all of it has to be refreshable, including the
-// dictionary (a name that is not in a stale copy would 404 a file that exists). `sw-ver.txt` is a
+// What this worker answers from its OWN copy — so all of it has to be refreshable. `sw-ver.txt` is a
+// hash of the page, the 404 art and the DICTIONARY: when it moves, the page asks for a resync (his
+// ask 2026-10-19) and this worker asks itself the same question on install.
+//
+// The DICTIONARY is deliberately NOT in this list: deploy bakes it into this very file (see
+// DICT_INLINE), so an ordinary visit fetches no dictionary at all and the .txt only goes over the
 
 //
 // `404.html` is still refreshed here (a stale copy is a wrongly-styled art page after a deploy), but
 // the worker no longer SERVES it: unknown addresses now come from GitHub Pages itself — see the note
 // above REAL_PATH for why that branch had to go.
-const PRECACHE = ['404.html', '404.png', 'file', 'IDSDICTIONARY.txt', 'sw-ver.txt'];
+const PRECACHE = ['404.html', '404.png', 'file', 'sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
+// ONE copy of the records is baked here at deploy time, together with the sw-ver it was built from,
+// so every reader — this worker's own handler, bin2png.html and file.html all go through it — gets
+// the list with NO request. Three copies of the same list (one per published file) could disagree
+// with each other; this is one.
+//
+// An empty pair means "not baked" (the workspace copy, a local server): then the worker falls back
+// to fetching the .txt exactly as it used to.
+const BUILT_VER = "d4210b38f30263cc";
+const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
+// A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
+// update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
+const dictKey = DICT_URL + '?cache=' + BUILT_VER;
+
 self.addEventListener('install', (event) => {
   // `/file` is the RENDERER, precached so `/file/<name>` and `/<id>` are answered with it: the player
-  // is on screen in the first frame instead of after a server round trip. The dictionary is precached
-  // so a NAME still resolves offline, and the 404 art is kept fresh for GitHub's own 404 page.
+  // is on screen in the first frame instead of after a server round trip. The 404 art is kept fresh
+  // for GitHub's own 404 page.
   event.waitUntil(resync().then(() => self.skipWaiting()));
 });
 
 // Fetch every precached file past the HTTP cache and store it. One file failing (a first deploy
 // before sw-ver.txt exists, a network blip) must not stop the others.
-async function resync() {
+//
+// `dictChanged` is tri-state: true forces the dictionary, false skips it, and undefined means "ask
+// sw-ver.txt" — which is fetched here anyway, so the answer is free. That is the whole rule: the
+// dictionary goes over the wire only when the deploy has moved past the copy baked into this file.
+async function resync(dictChanged) {
   const cache = await caches.open(PAGE_CACHE);
   for (const rel of PRECACHE) {
     try {
       const res = await fetch(urlOf(rel), { cache: 'reload' });
-      if (res.ok) await cache.put(urlOf(rel), res.clone());
+      if (!res.ok) continue;
+      if (rel === 'sw-ver.txt' && dictChanged === undefined) {
+        const live = (await res.clone().text()).trim();
+        dictChanged = !BUILT_VER || (!!live && live !== BUILT_VER);
+      }
+      await cache.put(urlOf(rel), res.clone());
     } catch (e) { /* keep the copy that is already there */ }
+  }
+  if (dictChanged) {
+    try {
+      const res = await fetch(DICT_URL, { cache: 'reload' });
+      if (res.ok) await cache.put(dictKey, res.clone());
+    } catch (e) { /* the baked list is still there */ }
   }
 }
 
-// The page asks for this after its own load event — never on the critical path.
+// The page asks for this after its own load event — never on the critical path. It only asks when
+// IT saw sw-ver.txt move, so the dictionary is part of what it means by "changed".
 self.addEventListener('message', (event) => {
   if (!event.data || event.data.type !== 'resync') return;
-  event.waitUntil(resync());
+  event.waitUntil(resync(true));
 });
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
@@ -119,22 +152,31 @@ async function serveFilePage(extraScript) {
   });
 }
 
-// The id in the address IS the key: `sha256(<id>)` gates the branch AND is the AES-256-GCM key, so
-// this file can hold the digest and the ciphertext while holding neither the id nor the script.
+// The id in the address IS the key: `sha256(<id>)` gates the branch AND unwraps the AES-256-GCM
+// key, so this file holds digests and ciphertext while holding neither an id nor the script.
+//
+
+// wrapped with the id's own digest, 80 characters instead of a 4 KB copy each. Two consequences
+
+// every existing id keeps working, because a wrap is about the key, not about the payload.
+//
+
 //
 
 // `?file=window:<window.name>`.
 //
 
 // A digest says nothing about the id, and the blob nothing about the script.
+
+const BLOB = 'v1.J3uBft0IJa2i7umz.N88U95IcmOb0Cx2S-4BIdYYE1TLYrdg7k1-c1EgX_aogcjsH1MopLtuPCzRwjqFcE0BycuWIduddRQvl8__TEa1oEi17CYamNguF7WgV30VwcrKBK3vwEPVcCZ-sNafZsjCMBHginWQB-iOFzjvYYV5k1yXacwAN7ennHMhldwpOsCdYIRhXk6HAkKfXN009enzU8JVWWCMPnwCnvGBp9iceCcmwtWcAgrSs5DlHqKtZQipooNxjk7paGJzZiSdSpm22Zjo3svuyFWwd6SXP_GU3vvk_c6eOJULIRtmVLiA0dFibl6DicFdGUx6ujKNYijA3ENX3NHWIUZ04oO13CAvL3blaIhg1N71A0Vy6TifwHG7UvU14nxSR7XQwSmWLhhDdcwnwOYNdXWhN44SbWZ-f2BoNusYwe6TUpakhHXkyAkG6Z-qXxEeUSVrM9ONCI0a4Yy_idGwgKfVXG9vEKYb-KDV8npZ3U2xO5dLGmHrXjDvGVtfkVEo0rOsOfcJITyPwv6d7hFieo0s_etAq57Y-ajEuFrv4dpsjwZDnx6JqHbL9B0gGzAwO9lkE-fstWjPnqyLh_a0ijldVpQZErHpwYtdInjAEd2yqA8y6-5YDZrOeQkI1-VNoOrwgQMA1ATY4tRdyi2l0P9zMpbsC42GOOXfaZnIfM4HXPUm_6F25I3h9OIJIwye93cvEC_1VEmpGW6Ni5JV-SmVpLig4x7OkSUK_JlsJUuDmOAmbc9kO_o2MXoQ8clco2wBIRBDVMmDfycs4L-I7iNGz2B5GHJVhQn8pS-voC7T3CQ3CDx0l5JHfhClcwHxXM3iV4KiSja0YeoqwtiM8Co6PlxQeZk4oOG-ATrWAfGwzcpp85rSxnA9NAX_2wsuVC9xsUf4Bas6YqyEohnUrok-ttjEhxrIfFN86Le4rS6GApEiRB9hUykoXYhxGaX2FsGBgB2S1kCYkI4cGzMw1f06gX4CxtSZt4YU3som_5mhi-tkIlcmhEMjtXWANG9R5cd0ylHfbEuIH7z41BleUym6HR34mTEfn01jfMRce-zf46J4oE778h0M7EvDct_XYwNeRHCs8hIJasOy5HTcS1V2zOiRz0g-QYekB-YzMr17sVLInPaoB3Cky-PXsdbt5ko3preBTB5MJGGnjn2i_Bhr0XjopYX_lCPqN7u9U94REGHU3MPQL8jZ_SJzN6QMEs6rPD757Q_7bk4wfFSKDOsCO26LTp_oe-i1pEvwZF9aq3WJyjVj0KITfvgDO-GdQBkvoFDEu3p43i8Koe-6u8jKE-_HysUUwt48FaxMxi2YPLTQHCR5Fx9keUQROub30kxLBbbud6F3ljgA_wYjZnoBBVCfjUc4HIqVrV5rUMVi0AIM32QqGsRhEGWSHGGhn5u5FUuvTkU3xt0jlHa_eq_y2YttTZ5doMYsByAOyIj2fQIRLJgNE-7USlqbMtoTsIkQkgQzA4xsDJWtv0GmSTBo5ScXKQ7iK_UKR8b1ekBcFNH9qyISMxPOqRwmoEVg4tsKPvIbZK85msAVs8hHgP8gomyqQ8uV4KJ6wtlfG44bbORu01_bUxEs-A9KnW46NPz1ZzlA47wYOjV0lTCsOQKYmFPCT7RhZdhNNDBXIOt2_j5lIxy8Bk1t_SMSyFEqmt_j8SFbXfAETklOUEzCEo7rXiWDdexL4Sn8TC73SiOOk08xpAzoVymtZ7kr4c0AQ3H1KLkKRUKJNgm7q8KD-jWCCWItWABNxnyZhJad8qN-vPrdablIflx7xcda82O_PUUQVv3uO5pNrekJS6TvWSMqWC-Yjt_QU7JEyt3n_vQdX6WTRwyItHT-U9wqFtkunfGrmF6JVECDoUma5XnjJOJuuqtezuBEud43Ily4mgIfExt9jpyZcD69uRUuFkn4yIxPUlwpXVcMhuoIkIGWs7f8Dz-ML1tAbCv4Iwg23guATraJUG0DCJITbHxZ2HUEaxuroTvH6p-4uzlsRPINewk8yOzsYbu_VBwyJw7J1l6NV7vAkX5kp5IlBdnmALc9pAGynR6r0WzrcoEAgypQgpCTb_rKfIFa4dtGi7B9YwmM0-CrArTS1iM49vZj2ueZHaOslNh6JxmkjafZf4jzlxtlRVH6hNPPg4RyBRxCz3CiUkkM5C8zJd9bapB4mnajm-HR0XHQWIAiG5RliteR4jkDinFDNExGd1rDaGxsE5Fsk3TdDK1TK1Cvfn9a5iMHN0Dck6NhC8qOv5mBhftGejvsmV91gXB8E8A1rIoiHZwJPKWhSACOQU5vlhieluscCWHE6DDhw3ObsnMzVgAxtEZMfT1KlCsRQSqU18SGHy0uPh7UtEH3N3BbtcAuojojo35pES0lNooo4UDpyaBaxxzD4qacX6X2Fv3rXzqorI9FmNtvk4PvzMJ6r7tWZjTiKQCeBWP0te5qmIp5Eef_fWCmlzpy9Psx3dTHM2jBaK1bn7jg2gu5_Y8_HJKkfVmcWkvGJ6q7a_1CN13r2nCDYu0MtHkHQNnr8Z939kwAqdc0Ww3sIGBkRBJYEBnZ90l9JlkR5FH31Ig3tkItkRmk8JQDa1FS8lU10w7CCfxzS7XFZr1KJVuZh1dYlUf-2U-8ruXRYDkgFuh2d8jk-v2ymWmr4oeTTB_drK3uxkrfk9NzzlSefS_X94cvtSPRBiRTExVtEWDNuR0fVnjami-aP2dop09I0Cv82A0HUDMOaHWOZU5SCOlM4vq3Z7v8Ip-ZRcHmAZiB9a_JBaykjFP_THCn4Oss4uVNOKSYYh4KQ4_YRVSfwR2MkqGZ0mUQrvN2QE0FI2aVuXqJahqnF_sd2O3aFolTDs4EhgK30cAqI3xTxdX_onCtnIo3LTaUiNd9LWCTvPwA65dtuj3-X1KYKRxD_dSCe0xwllbcKuq-or8NvqUmcwktgJBlooTWedrUSh3VF0NrMBi19XQd6blLyGNx21jCmdMNJbruSOcOwm1qdhaFFn78X86W5dMxrC1M2PpJY1RgaXl0y9X2Nq9nIMCQN_x7meRqxbolZ2bphTZzCDhl-NV7MewWu_5AOh0_GauMm9jcxruY_a9tohmnoJL4oodzXSVcqkEiZTg9W5oxpz7jK-K_vKR4HR78OpNY_reLAKVmRw-JjV-Z5YfD955-rgWKXeAuHtO5Fv5MflqdShC-0SomCAHwsvClyx4xJs1iaWvL_0htLspI4MD7YT6e6gVolJlWLZH98RWWS4KXid38NkaO0pQSCYqo94GFPkq8FfljRyDwenM-oZk6CTsIRkvkTLNuBjPMefMtqGD30Hm8Mttlhhcf4oFy59M4wx12__uKZ8IxVZpxIAR844U1k8KwmBLgWbnDGoKOmoX34ddRwJL_QQTC4Tspi2UZZoClNdds0qdGpIjjPZjj-P_nnUSc5HJXubM7oVVy4e22rRbNrjSPEMYtpymV-gBdmD9OaZtxvrlfWODkhElB4Va7QnIuQLU3NciGmCPjNnQLRxGi1j0tEEz3qhS67ib6rKjGyLxsQRq8MhB-EVwh3f_-sBAv2ZUHZVX1jt3y_uHQOBltqfRq_iEw6JV3oEr682I5UpugSM2OOk-I6iNVyNx-Y3kLBjWmTCmnCwiKyjr_Lon8HbhveaJWrb5G7zYW9tUWaxtm3UjE6KLy9l4E_Q0bkqQbeTmauF1tFaToM1Ff2_E9j73zrud_vLgTfKGYbs_24VJaqjmVL5MqsMhxTH-dRkGWu-cIFckXCGvsTeo_hym4GPgD8umw0HK1bWX57wKdQ-l56nZZxEiLKTfuRLSjthcsaunXfZ1uelVH_GoB3e8shQO7b3iEQFY8oTVFPmdcRc9yH3tflKXzhB3RwK_eDuvXFV88_vioKiwGT3WW1Fuv6PWaNF-MR1QKsT1ovsIbJLVF0PAvaWIVTsG3EFAsJTOQNJ4Tge5rvnN02PinWTuBs-aThEIkHGZ2yeRGEBQGQi260s-mx3_aLqOrFp5BGkq6N-lbU0E2CS1F_ipWvJwgeEQvtzZVT8jw2sf076wjFEZgnk3eBF7eUxcTebvzSvLGVMKLtlAnSo7m-GQP_Q_6OvPrKw3GvpVx2MMP6CHOJzK5JDzLN7gKkd1jduA7x8ECDfO9NmgPhZAac4OkYrAcNxg-WW2gzG3PjC0XllhdvVgE9U7OXoVYkahvMWiLcePt2Tv3zsV5dOeAgofnXuu4K';
+
 const TBL = {
   
-  // preimage seals it — sealing needs the key, which is the id itself. Empty = no branch.
-  'f0c84741842fec749395f74d62bfe2ada0a1dca710aa9c8c10471134ae9d273f': 'v1.7bOstgRywJF-2nrf.OV_4luGHov_bCUKctoZaeazjg2ZRYGIspS50cyNKmR47cmfFYwn_ct0cXiy5gsGx0aYbsuPDaw736R9tOyocZkK-ALK3EfzMhNSUZW4AAVp9tZ2yK1XtCKa_yWA_TSOxJvEGMHbwCf4mJNaMnVHbujSYx4j4T5g-lZ0beB3kXBnMbmuKeYP2Mt6KsU2VS2F-QDxyy1RQiXIc4GXixRevWDnS_QVjFR8ACbMl2GT-2cKnGqkBLxd4bpDkllAwN7ymvlPwLRklZ19DAvcR2x-0b-F6ZdS7Urp58DkphCmsoUOhltmrs-UMueqoEvHQTrdxmSgIruTwYtAA6jMQF7uAZ9uhOuf40Ixj5zOP5TFKxuPRJ8puBkRhOvUwNnmWZd35z8o8e_TFjlTNCPy6mYF0fyccMLGMJl1NY2mMbF0mrlt4X-T7Bq0VpKaT4Il2p_Wd3TqGAJAanzkCfW68-v8NRgM9wNYKMEzVUSCT6dTLEdmAV5UhHb4FCBZx3BoIAgvFBBV8iP5ffOSvqacTNJslg3sum2FP2RFZQYUVr8WFIcs8s9V1IBXf5ZYiTE4q57gvUmhyW9owhT-fWRL7vgAKyFopxGECGm6nS20YVtGHH56sqs2TMPYogme2CoCaKIF2gZuF_GK3P27Mml2kCNbL6QlB6vgoOO6YcCTr6OXC3irhBcyvTsMsk9E16aRwH4Fi0LfSxweOhqZnEPVMoLtYISdP_z0nZG9DMQsj_ZaAIbr127PY_shBARE1yLYFmpwJ2hslHgeSvlxS-F3z2l0Vh--Se32tD5wEOG_lVMBjEQyRMGeIgeZSn2dI9aqFMnit56-yXarh-BX_SMITgX00GndqOGzUnFB368Ofrz48rj4BOlMoOk8S4OpTEmSJfce2TRCLEtPIZbHN68zLA7CRJuf0M-OsYTz9HClghDWcBG_NYnUMil2r-JcbN-_PQaD4S5hV0itdZBApgYxmhsKzBFoIyPGYVS-ZJOceM_HgZYDbw_9o04VFp_jjPLDdpXuzOywMqqP3Hwf0rHms9WN-dh0y7XaqaTAZyLDOvsvaGWQXgiUYHSo48Fidc9yBldctQjL6WgeWoLuc5mG1gqIym_NldEq3wXlHq6OFSXcE3TVUzOnqWcF5-L2tQvwKh9kr1DNU7au5YM-M9kqJWoMa_S1SaqNeZPKY2vV5zsB55mEEMfTrxKEHdBwKA7TrFQT3WKHF0Q8eZgHyPTQZNlxFIbOu9qaHWwZEgHr-T1xNZgEtwJ0wykaVz0lIh3gbqnz-WTPEPCQZf0P7e9SOcq7sKZoOvpCiTCM5_0sun_YpWqoqTggrGdPQQ0-sbPlNTf-pxn3iK_e-14ZFwNAREvQaf2KCv2D2uZRErpHiVlcY85OHAYosqkF4S8ibaXYkeOwcFvU-K53L3BYLnjuIcKxcPE9ynPenSiAxMhg4zom8TL2hXw7ka_krQtRBQD8dYS625ClukDX1ADMRxmrQFyvF7D8cbpSHfkaIIH2zQ5Vo5-13lWcbt5mwLDt-4JcXwTA3VBgpvSJgS9L4lQ-bLo-bM7ebiUi2AIiBlF6LJ_tLWrybUjXePFEF-czIOP2IfcHbN_qAHhf0rUkeTWoPFCXhMaQiAaB-2c85r7oADyDZonJbWTU7JzqEd8W5xzxrOUJkFBxA9WQhVppQZoyOl-BpHCmxxQj9CZmOZ45CbEtsoGdRbuWUd0tNKP4XHRS5eAfYTOtI0aa5ZedL_UWUuhY3M4tgRli0Zjqgs4EglcCmZzHm4iwxxTGZsvl26Gjt7dkFXfWk1FeFcv8e5eMrSLb9VD01TRHf26TJIgx0cjGg9G4SaJSVlxb5nTg_xVStUd7ox7FR2huV-nyGbiyb9eJF1Ul94knb4oHVtykAnFwBucx9iB4Dx5BYazXZz0umlXXxmoCSnE0Ha4M69wwvtablTNIcp8a_kwUfloOkO2_za2KM0BgZ9yww5wTITXFre3ao0bSWnZBNuI3fREC9iN3MVDtzKXrMNFRQUef4kv3sq5KfaTm0PrGpVl7KOGvm3OmJFHJpZzCJUyityb0Ah5YmhSj6cFIxQmk8SrEegnt83sJACiyNx1lXUgP6C9Wqo-IYTBlDku1T4f5lkSiH_vDnthJdR0RcqY98MfpSTCiTdXrHMLvxmQFfkOHE5wPNjMtK6jISC9d6nFYFnL30HuLrnrGI-dXE25nIgEltJPGXV2PpqThDaKwn8XEfAsL1A0ZlhXOCr_5DPmz6axNJOYxKtXuV02qoJSeVE_rQpV9USESmL3COHJaaB1WNjV53jW8tybyTW1pPNVT0SXTys3DvLoB7hGYbqiN147ian08IYtlGthqB3F36BdUjF_IUeNjvMl43VEC5dIMyj39N6jvFnn85K3XV-qytaJKMXLoG5H_FKtQWpzfnocngl_0i2JOrF0SX80hQPwZaVI6eOTE5G9RAq6_sQr_8nzFRrK_qADQA_7q9cZFNYUFK8YlW2F8idAQ9Ba0GPm0Ccyx_VYZSHR8CmoVfEh8M-v98RSNbphepq5nXaVxsjMYL5LQkRnnALnJlS19VixocCUVWQYkk-WllUfIxlSXJEdHuoW_2SLBRWc5xvDRF6WBqjCDt4537IfYks3fF6woL0g2Dnx3OjMeLlJYBywu8CxNiNHCvPmDM6fin-LncMaG1XDUW4FNCigDwPUjzlVkhdru8O11xhYwgE-_2qHYdvBMDponsywCPnL6Rq2J2T4p1z_C8Tduf50BzCU8bxUbi49iheaKiH1vnutozQR5kxJop2zztPK6XnQbb4bOAWLdGubDuMjnUj21PVHnugzAjI4-7u9Umtrzzs25hYBDt3iA1CRegVr5kHuqusXn_Mp8vfiHgMBO_5BLbalZMMIT6HeY2eI73iFAUG5pi_anQGMfXC8e1VLAb1FrvH8NFN_frDRN3aq3jTgkhBiiN_4Qte1TYNb9JKV_nYCXwZlByHGFnfZfINKbODh3wGwQOfwV4kPUZxIPqnQPsb8xMpGDmxn5aEOqXaBX2cg',
-  // A second id, added 2026-10-25 (the CM3D2 mod-repo archive): the digest is sha256 of that
   
-  // shell history or a comment that a deploy could publish. Nothing else changes.
-'3f563941b47cd309eb11de9cf2021496aab4c0272f77124556d5a2ba030aabaa': 'v1.6CeUHJZVmRUFpHSP.lAd2O216uNZEZraHw1xhARHSLMaSYwvC4jSAet8GAx9twif_e-SUfjoIj3-n-sVX1MSCBZTKcyooCoEjdlpFNTIoa5tnCkEBP4S4f50SjMXegbo8mBsBQO2enPdi5exOlspm9yzVCOwSu53f5wTF02A6p7FDx8vJHehlCObXuDqYB7rFXpiZvPmVIm4sciMPs0kUZk2_Tv-Mbwn0sSHUaQaG0P2_bQL1aDy8MBivyE2x6bTnv4lx6pbbAddN34v81U0eIjVm4jSZpgcR2JGbBEBdQVJ39dFFNGmgfB2UWn7QNZabGpptoWHgAEs0JHoXeqH3n6lW36EjeR_Xwg4CEc78USwYfXXvz7I5Q0yNJHz2OpSEDjKQUnmAw8q2xI3xbbUxnEYndh11Mf_pkUBFdLtWtc6h05YkTKpyRczSoh0vHd0yALmcjBiKm8vS_NuBJn1apSDrhlcl4ka2gVIxaLuBEDwpYoy0hCVDN0mP8MeKAP9d7sE5MFnDUHnrES7CdkGXXzNLHQ2ZJz9qkNhYC_3wcDsTSWgNJUnL4u-tHofeRoWztp7zZSGLZ26G7esMdqvAHsq3-YEieKCM6AxR8cbSu30-Qp7WV9eX_AFBf_h039anTfTlu9v9Z-4jdA71JjMxtTQvQ3-Fi28uEhk3uB9hrl7jo-YRZ4hAGQd7kMADFb0_Nsa4nUhAr0C17zbl2JzCA752kkjjyS40hRVZWrJkUCy7fWzjhi_IlCbCUQGgKWJCZvSBgTPKAs8bRHdv8j3B1B8Fg9RDPy7u-4tnulmthaP7wUkcyI115lu053mN2miwT2RAspfkTmmUD-LujLJUmKgEYpMLLO0GoAECirUwvKTaHaYsYd5lG95a_Xojc6cqOW0Gp2-skLZsdlfRmyLW_qUBXNZQzJzcXJ9lyWO9su68vmHfW1mhCwlKbkNQiPmaJUDKZ7XwTYzLNTq0hnF9xMoKFB2CkT4YCLEBlVFtYVEPT2yQOh2c8oyXuQag8BM-7vPYBzZhKSdLYonXLyjtr0UuIlSuH8x34uHEEtmHugZZ6ekVacSqLwH5xJEydiiCgCtoz2jrY2z6G7zgTkzSpYSnzk_xaKrz9vOGKYLU4tNMG6h7oHe8dXzypcsnhncQavszOyjc4AiK8W1ZAlqNkvVJbTq-YuB1cddcx_LCOCqrPCk4WEm2VWu1soCJ0inp3cjTQ5_ei-lGM8vhcdLMW1omHexS1kApd2D8G4M6hDg20EB1mziElTFBuvfxtKRVmbN8IHPJO6kyhz5y3Ygzg31jl6dBXNCJ0NfpTqloBtz-pYCPZkHoHXlifsNPOrArGdiVHDFQhaaz6v_Gmqk5A2PxRbdPckAj0_RQcczQo0RstCLKXbeQKBoxySeRBAz-9uKXmU_5j9Sum68PFMD1VtGNiBwUtvcFZRpAQd64uWDsrv68GJ9Mv9-BBUf1umyMLATpVXs2-d9uLZPRu-0os7_7D3xPv8HkLDCBkHgQH5paF02-HhyMUTL1IAhS3q7pEQvNPkRkT8LfLsXiCR9w9BvX_OwUv7vO3hjxrBqxlSUvHT1dvb8ezbFtkFr4ZsGnZep7lfBLQ0IkSDDOZUQMccOZlLOhcjgpfpZPDdnSStozVf7bEzbPivT9O7CVX_H6_HaB6B3mF7Uyw_0IqJ4ApD-nrD1z5lNM3iDr6XgyT083Nbv_65-kF__DY-ebRqotL25e2VZkO9nYb3X_BFy4R5nZnHMcvVSmFoyuumDdF_8N4nupmlkgSMSZcp5lVFoEPfbJ_iR59y_8cgdWQM-cDLJ3pNlzAG_P5UP5F3DiqudqQyush4mn6WS841v-5a-EFDqwLNbu6G76dYp9qb6Ee9uoEZL4lKMJnA9EDIp8JBAmWRgEb-mgERsv3BPCkblTt8hmZ6Mc3BZB5rwEGXTosmrDrb1bUigbhWCM2l7YCVsfEdcUo7wAYteRgFOcnKwkqaCBodN7d3ccVQU-yQvj7OgmrKwcjof70bg5wtomRrFyPuznDR1AUBNJpNYHZRKTMU9IU1KGGE_W40AhDgMYbcapjGgaM3wKH6SCvS3nyHevYgwUXZhCJtm18xGKEspsreH7Fiv-2UFcVHo1KQXY-Oc1fUPIlr2nW8RmtRuhOZ6T5etL1aS69hIwLqspPS_he2mm15xFC6856XxctVxrIVVHLhN0v0BKO-c7M5SI6EAlzjpnEGMkIJn7nd63rz4G_AnwnOs7VRhxnCbodWVoTYpzmJOMCqzFazI4QsEwgJXZW8LP8gQCPCypAgP0g_JXVZoWiG0_ndCsfiIeaVn7OZRH7RRDfp5gwShVRnxc3V9UtZxtjIz2iEei0Y5mhUfzKSpN25-gy028PeedNYcnipCkJKwGdPVx8YGR2M2zZUfNuF1mIUp4kAvPBzACs_na25ZcaSJ9rk_KGvoj09I6tEvPKjxYmAofi5nqNB2PJesbgy2KccNbp2GnL1wfNdCozGD9Z9k6KPhXp9X0VzpMtWk4f1ulrZ-4s27pcU4t0xrfu6cH8wPQp1c1JtxtEWlDmHu4hAyTDSE53NBQI3it7tSzxhUcTMk9VFWT0fPVxiWXxAJNmdtzUDMe6umwTo5T2II1sCEaZSeH_hiyUMbNGzzz2xWCQWZCDLrRCnhcCmC8-V45Frt8sUzLTtDdNO8P4W4jyICQa41mcKUp0GnpjfMuwlPG-FmtAuWzuqZm9c77hZo1XYej87HYUixsnRlnZDSroi6oEzaXCmnV1gq9C8FCFgVGgKBxt7a-UNYDxv4Bq3nlI1swJVVo9x_FRVKJU9Mjn_g_EPhUazKfPfJ6QFd2U6tOf-YmXL-7ztNqcRbFS_-FtJP064Q4qTwRFVxtJyDEBanPKzceeW3QN0HnThOIVF5x1g8ntHNzmkSiasCc-kzsRPkghVDs988aOgaLlyHjDXpkZsW73fpMDp-8fj6yrnTtz9_urknTPkBgCnhnBpE_d1zakZHreEYpeWViKfMMz-nOAsbgCYzo4TXA7RvOQKpMZdxOQ9PLJ6JHUFNn8jtOTYb6ZvHV6l9IWuV78thHz4OuMgeGjFFw26Xu-XnQ0VOxPlt1lYJ_Uojs_CFkYFV2YL8Xuyz_wMje9ghexMaTdeEXS9dSupnTsHdW4kg21F9wIJAQgMkodMYt1WI24SwsRvsglNq4jN3KCxrqT4tUHZEOPmPIgoouh1IHHFISccAPhgG0i89oK2HLoft6L2bMFBWzNiQklWjjKJEwtp4UKsVm1Nc2rVh6JNo-BCGb4fyVxiVo7fHOLqzHKSC5wwdT0pHQ2nnQWEYipEAn7sELhviiXewipRPQuf-gYPOj7v75iIeoyk62GpIvh4hXLgKiqCwnrArbYgO6YQBkI02InirYG5M4Z-Sso7PPh7ngAeAeC5-EIf44lvfL3l-WctoxtUZVtsXqtm3r9_iUaE1Id7H_bKv5lvGN97W9XxRcRRSN9iwMoDhXl4YPiZ3Kv7bvDeCXX_AzlZUbAP4wXL5Pbrm7nyJQ1JfZubRR3ObSBZoVXHdSYgDhqqgkH-StY6PJ0kpdwjHhN6P-2jvjM5W9tokbICnnmHaZltbzhq0zmIsuTfM2LgdI0aPnNmDkwLNw5Xo75cqmjGWJeYxuUFSAIWXstuWIsC0QOV5a1EUrikYCAS5h28auCERi6H4oIhwy4Jhu_RzUSip4IioxG-2ouKIvgc9369zGoq8OS97CIRRGnsbCP4SkdTF2IDYj7saRuL3A0LLJfCTtKQvTjmYg8jEOCUyH3XGVVUCGp5pRgDF5irArA7gzebmYIYl-57m9iTdbtz-YP53PZNmGdLbqmdsIY_3ptGwVhK04L4JfQMyFcTIppyif9aSccg5tD3JprUrKrzIZZhktxRx69jk1H_W86VGvq8OWKgMFa1Uzn0BYdZsZtUqvrpnwwC7e1RAZysMfIsNi8VpKte3pknV4RZkt4619tl5ZGkHLcEetEpw32UDiXND0T-HVw8KmC6xxdWr4dswpGX7WIAozu_WLWC2H_RAINP_yqM-1GuYWXUYLbhb_A-VoglWk9tSRcOew71X59oiA_JlIn3EaLkBFO4fdOinnF9uUs7IaoAVGa7Ln7MVNfkOhcr5lUmOloBD40G3M_yEJYBVU8BPKlOTfPOQ29q2DD3nsaK6Ix3Yu4siwYq5y3K8DAfMHC59pELOtNOYUkETP',
+'f0c84741842fec749395f74d62bfe2ada0a1dca710aa9c8c10471134ae9d273f': 'v1.7bOstgRywJF-2nrf.OV_4luGHov_bCUKctoZaeazjg2ZRYGIspS50cyNKmR47cmfFYwn_ct0cXiy5gsGx0aYbsuPDaw736R9tOyocZkK-ALK3EfzMhNSUZW4AAVp9tZ2yK1XtCKa_yWA_TSOxJvEGMHbwCf4mJNaMnVHbujSYx4j4T5g-lZ0beB3kXBnMbmuKeYP2Mt6KsU2VS2F-QDxyy1RQiXIc4GXixRevWDnS_QVjFR8ACbMl2GT-2cKnGqkBLxd4bpDkllAwN7ymvlPwLRklZ19DAvcR2x-0b-F6ZdS7Urp58DkphCmsoUOhltmrs-UMueqoEvHQTrdxmSgIruTwYtAA6jMQF7uAZ9uhOuf40Ixj5zOP5TFKxuPRJ8puBkRhOvUwNnmWZd35z8o8e_TFjlTNCPy6mYF0fyccMLGMJl1NY2mMbF0mrlt4X-T7Bq0VpKaT4Il2p_Wd3TqGAJAanzkCfW68-v8NRgM9wNYKMEzVUSCT6dTLEdmAV5UhHb4FCBZx3BoIAgvFBBV8iP5ffOSvqacTNJslg3sum2FP2RFZQYUVr8WFIcs8s9V1IBXf5ZYiTE4q57gvUmhyW9owhT-fWRL7vgAKyFopxGECGm6nS20YVtGHH56sqs2TMPYogme2CoCaKIF2gZuF_GK3P27Mml2kCNbL6QlB6vgoOO6YcCTr6OXC3irhBcyvTsMsk9E16aRwH4Fi0LfSxweOhqZnEPVMoLtYISdP_z0nZG9DMQsj_ZaAIbr127PY_shBARE1yLYFmpwJ2hslHgeSvlxS-F3z2l0Vh--Se32tD5wEOG_lVMBjEQyRMGeIgeZSn2dI9aqFMnit56-yXarh-BX_SMITgX00GndqOGzUnFB368Ofrz48rj4BOlMoOk8S4OpTEmSJfce2TRCLEtPIZbHN68zLA7CRJuf0M-OsYTz9HClghDWcBG_NYnUMil2r-JcbN-_PQaD4S5hV0itdZBApgYxmhsKzBFoIyPGYVS-ZJOceM_HgZYDbw_9o04VFp_jjPLDdpXuzOywMqqP3Hwf0rHms9WN-dh0y7XaqaTAZyLDOvsvaGWQXgiUYHSo48Fidc9yBldctQjL6WgeWoLuc5mG1gqIym_NldEq3wXlHq6OFSXcE3TVUzOnqWcF5-L2tQvwKh9kr1DNU7au5YM-M9kqJWoMa_S1SaqNeZPKY2vV5zsB55mEEMfTrxKEHdBwKA7TrFQT3WKHF0Q8eZgHyPTQZNlxFIbOu9qaHWwZEgHr-T1xNZgEtwJ0wykaVz0lIh3gbqnz-WTPEPCQZf0P7e9SOcq7sKZoOvpCiTCM5_0sun_YpWqoqTggrGdPQQ0-sbPlNTf-pxn3iK_e-14ZFwNAREvQaf2KCv2D2uZRErpHiVlcY85OHAYosqkF4S8ibaXYkeOwcFvU-K53L3BYLnjuIcKxcPE9ynPenSiAxMhg4zom8TL2hXw7ka_krQtRBQD8dYS625ClukDX1ADMRxmrQFyvF7D8cbpSHfkaIIH2zQ5Vo5-13lWcbt5mwLDt-4JcXwTA3VBgpvSJgS9L4lQ-bLo-bM7ebiUi2AIiBlF6LJ_tLWrybUjXePFEF-czIOP2IfcHbN_qAHhf0rUkeTWoPFCXhMaQiAaB-2c85r7oADyDZonJbWTU7JzqEd8W5xzxrOUJkFBxA9WQhVppQZoyOl-BpHCmxxQj9CZmOZ45CbEtsoGdRbuWUd0tNKP4XHRS5eAfYTOtI0aa5ZedL_UWUuhY3M4tgRli0Zjqgs4EglcCmZzHm4iwxxTGZsvl26Gjt7dkFXfWk1FeFcv8e5eMrSLb9VD01TRHf26TJIgx0cjGg9G4SaJSVlxb5nTg_xVStUd7ox7FR2huV-nyGbiyb9eJF1Ul94knb4oHVtykAnFwBucx9iB4Dx5BYazXZz0umlXXxmoCSnE0Ha4M69wwvtablTNIcp8a_kwUfloOkO2_za2KM0BgZ9yww5wTITXFre3ao0bSWnZBNuI3fREC9iN3MVDtzKXrMNFRQUef4kv3sq5KfaTm0PrGpVl7KOGvm3OmJFHJpZzCJUyityb0Ah5YmhSj6cFIxQmk8SrEegnt83sJACiyNx1lXUgP6C9Wqo-IYTBlDku1T4f5lkSiH_vDnthJdR0RcqY98MfpSTCiTdXrHMLvxmQFfkOHE5wPNjMtK6jISC9d6nFYFnL30HuLrnrGI-dXE25nIgEltJPGXV2PpqThDaKwn8XEfAsL1A0ZlhXOCr_5DPmz6axNJOYxKtXuV02qoJSeVE_rQpV9USESmL3COHJaaB1WNjV53jW8tybyTW1pPNVT0SXTys3DvLoB7hGYbqiN147ian08IYtlGthqB3F36BdUjF_IUeNjvMl43VEC5dIMyj39N6jvFnn85K3XV-qytaJKMXLoG5H_FKtQWpzfnocngl_0i2JOrF0SX80hQPwZaVI6eOTE5G9RAq6_sQr_8nzFRrK_qADQA_7q9cZFNYUFK8YlW2F8idAQ9Ba0GPm0Ccyx_VYZSHR8CmoVfEh8M-v98RSNbphepq5nXaVxsjMYL5LQkRnnALnJlS19VixocCUVWQYkk-WllUfIxlSXJEdHuoW_2SLBRWc5xvDRF6WBqjCDt4537IfYks3fF6woL0g2Dnx3OjMeLlJYBywu8CxNiNHCvPmDM6fin-LncMaG1XDUW4FNCigDwPUjzlVkhdru8O11xhYwgE-_2qHYdvBMDponsywCPnL6Rq2J2T4p1z_C8Tduf50BzCU8bxUbi49iheaKiH1vnutozQR5kxJop2zztPK6XnQbb4bOAWLdGubDuMjnUj21PVHnugzAjI4-7u9Umtrzzs25hYBDt3iA1CRegVr5kHuqusXn_Mp8vfiHgMBO_5BLbalZMMIT6HeY2eI73iFAUG5pi_anQGMfXC8e1VLAb1FrvH8NFN_frDRN3aq3jTgkhBiiN_4Qte1TYNb9JKV_nYCXwZlByHGFnfZfINKbODh3wGwQOfwV4kPUZxIPqnQPsb8xMpGDmxn5aEOqXaBX2cg',
+  // k1: the content key, wrapped with this id's own digest.
+'3f563941b47cd309eb11de9cf2021496aab4c0272f77124556d5a2ba030aabaa': 'k1.ylVOALi3qOVZ-iNV.N7U_ZtuPZNO_jP-lqJtle9FWzUUzySxhwQmeJMQg6-NGbOHkxyCvA32gFnICw9li',
+'f311702a0b8348ac3c678c129327908de0d2713fe7b6bb523f628eac870c6924': 'k1.fBmj5sa5z569mVqQ.fugB2JNaZxbSBK-Jj2gBdFNMelEZM-Fa-h1obcYb3Huh2O1afflNnaLArJp03RTZ',
 };
 
 // base64url → bytes. atob is the only decoder a worker has, so the padding is put back by hand.
@@ -146,21 +188,48 @@ function b64u(s) {
   return out;
 }
 
-async function digestHex(text) {
-  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+function hexOf(bytes) {
   let hex = '';
-  for (let i = 0; i < d.length; i++) hex += d[i].toString(16).padStart(2, '0');
+  for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, '0');
   return hex;
 }
 
-// `v1.<iv-b64url>.<ct-b64url>`, AES-256-GCM, key = the digest of the preimage itself.
-async function openBlob(blob, preimage) {
+async function sha256Bytes(text) {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text))));
+}
+
+async function digestHex(text) {
+  return hexOf(await sha256Bytes(text));
+}
+
+// `v1.<iv-b64url>.<ct-b64url>`, AES-256-GCM, with a key handed in. Every shape below is this call.
+async function plainBytes(rawKey, blob) {
   const [v, iv, ct] = String(blob).split('.');
-  if (v !== 'v1' || !iv || !ct) throw new Error('not a v1 blob page');
-  const raw = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(preimage));
-  const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
-  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64u(iv) }, key, b64u(ct));
-  return new TextDecoder().decode(plain);
+  if (v !== 'v1' || !iv || !ct) throw new Error('not a v1 blob blob');
+  const key = await crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false, ['decrypt']);
+  return new Uint8Array(await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: b64u(iv) }, key, b64u(ct)));
+}
+
+async function plainText(rawKey, blob) {
+  return new TextDecoder().decode(await plainBytes(rawKey, blob));
+}
+
+// The ONE script, decrypted once per content key and kept — every further id reuses it. Keyed by the
+// key's hex, because the wrapped entries differ per id while what they open is the same bytes.
+const blobFor = new Map();
+function blobScript(rawKey) {
+  const id = hexOf(rawKey);
+  if (!blobFor.has(id)) blobFor.set(id, plainText(rawKey, BLOB));
+  return blobFor.get(id);
+}
+
+// An id's entry: `k1.<iv>.<ct>` is the content key wrapped with sha256(<id>) — 60 bytes of
+
+async function blobSource(entry, preimage) {
+  const digest = await sha256Bytes(preimage);
+  if (String(entry).startsWith('k1.')) return blobScript(await plainBytes(digest, 'v1' + String(entry).slice(2)));
+  return plainText(digest, entry);
 }
 
 // stale b2p-stream.js used to carry. The precache copy first (no network), the network after.
@@ -201,9 +270,9 @@ async function pickScript(pathname) {
     if (bare && bare[1]) add([bare[1], bare[1].replace(/^[.,]+/, '')]);
   }
   for (const cand of candidates) {
-    const blob = TBL[await digestHex(cand)];
-    if (!blob) continue;
-    const src = scriptBody(await openBlob(blob, cand));
+    const entry = TBL[await digestHex(cand)];
+    if (!entry) continue;
+    const src = scriptBody(await blobSource(entry, cand));
     // `</script>` inside the source would close the tag it is spliced into; a backslash is the
     // standard escape and JavaScript reads it back as the same string.
     return src.split('__SWVER__').join(await liveVer()).replace(/<\/script/gi, '<\\/script');
@@ -220,23 +289,31 @@ function scriptBody(src) {
   return bodies.join('\n');
 }
 
-// The dictionary is read ONCE for the life of this origin: install() already fetched it into
-// PAGE_CACHE, and every page read is answered from there. It is NOT refreshed behind the answer.
-//
+// The dictionary is answered from what this file CARRIES, so an ordinary visit costs nothing: no
+// request, no cache, no wait. Two things can still go to the network, and only two:
 
-// only be updated if a file name is 404". So `?fresh=` is the ONLY path that touches the network,
-// and only a page that looked up a NAME (a value with a dot) sends it. An id never gets here — it
-// goes straight to pbs, and a 404 there must not spend a dictionary request.
+//     should only be updated if a file name is 404"; an id never gets here, it goes straight to pbs
+//     and a 404 there must not spend a dictionary request;
+//   * a detected deploy change — resync() already fetched the new .txt at dictKey, and it is served
+//     from there until the next build.
 async function serveDictionary(url) {
   const cache = await caches.open(PAGE_CACHE);
   if (url.searchParams.has('fresh')) {
     const fresh = await fetch(DICT_URL + '?fresh=' + Date.now(), { cache: 'reload' }).catch(() => null);
     if (fresh && fresh.ok) {
-      cache.put(DICT_URL, fresh.clone());
+      cache.put(dictKey, fresh.clone());
       return fresh;
     }
   }
-  return (await cache.match(DICT_URL)) || fetch(DICT_URL);
+  const hit = await cache.match(dictKey);
+  if (hit) return hit;
+  if (DICT_INLINE) {
+    return new Response(DICT_INLINE, {
+      status: 200,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+  return fetch(DICT_URL);
 }
 
 self.addEventListener('fetch', (event) => {
