@@ -462,13 +462,17 @@ function streamRange(plan, start, end, total) {
         // range" and the prefetch then fetched one part past its end — measured 2026-10-25 on his
         // 32 MB member read: chunk 7 for a range that ended in chunk 6, a whole 5 MB nobody asked for.
         const reachesNext = at + want - 1 < end;
-        if (wide && reachesNext && i + 1 < plan.parts.length) {
-          // A tt2png chunk is addressed by exact bytes, so the prefetch must ask for the WINDOW the
-          // loop will ask for next — not the whole chunk. `ttPartPayload(…, Infinity)` pulled the
-          // chunk's entire PNG and the sequential read then fetched its slice AGAIN: measured on
-          // his 267 MB index, 2026-10-25, three chunks of 5,000,291 B each were fetched twice —
-          // 15 MB of the 52.5 MB. The window is cached, so the read that follows costs no request.
-          if (plan.tt) ttWindow(plan, i + 1, 0, plan.cap).catch(() => {});
+        // HOW MUCH of the next chunk the range will actually need — `plan.cap` was wrong for the last
+        // one: his 32 MB member read ended 1,792,355 B into chunk 6 and the prefetch pulled all
+        // 5,000,000 (measured 2026-10-25: 33.4 MiB of wire for 30.3 MiB of bytes).
+        const nextWant = Math.min(end - (at + want) + 1, plan.cap);
+        if (wide && reachesNext && nextWant > 0 && i + 1 < plan.parts.length) {
+          // A tt2png chunk is addressed by exact bytes, so the prefetch asks for the WINDOW the loop
+          // will ask for next — not the whole chunk. `ttPartPayload(…, Infinity)` pulled the chunk's
+          // entire PNG and the sequential read then fetched its slice AGAIN: three chunks fetched
+          // twice, 15 MB of the 52.5 MB (measured 2026-10-25). The window is cached (and an in-flight
+          // one is shared by `ttWindow`), so the read that follows costs no request.
+          if (plan.tt) ttWindow(plan, i + 1, 0, nextWant).catch(() => {});
           // A bin2png part carries its bytes in pixels and cannot be read from the middle, so here
           // the whole part IS the useful prefetch; the part cache dedupes it against the read next.
           else if (!payloadOf.has(plan.parts[i + 1])) partPayload(plan, i + 1).catch(() => {});
