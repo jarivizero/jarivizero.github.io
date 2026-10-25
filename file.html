@@ -1517,7 +1517,19 @@ function centralListing() {
     } catch (e) {
       console.warn('the archive directory is not readable by range:', e.message);
       const bytes = await wholeFile();
-      const listing = await zipFromMemory(bytes);
+      let listing = null;
+      try {
+        listing = await zipFromMemory(bytes);
+      } catch (notZip) {
+        // Not a zip at all: a `.7z` uploaded on its own, which the uploader now lists in the index
+        
+        // parser — and the listing comes from the index when there is one, so 7-Zip only runs when
+        // a member is actually opened.
+        if (!isSevenBytes(bytes) && !/\.7z$/i.test(src.name || '')) throw notZip;
+        const seven = await openSevenZip(async () => bytes, src.name || 'archive.7z', 'root',
+                                         src.tt && !src.tt.inner ? src.tt : null);
+        return { files: seven.files, read: (f) => seven.read(f.path) };
+      }
       return { files: listing.files, read: (f) => extractFrom(bytes, f) };
     }
   })();
@@ -1531,6 +1543,12 @@ async function rootRead(path) {
 }
 
 // A member as the INDEX recorded it (`tiktokupload.py`'s listing, which travels in the index).
+// The 7z signature (`37 7A BC AF 27 1C`): a payload can be a `.7z` whatever its name says.
+function isSevenBytes(bytes) {
+  return !!bytes && bytes.length > 6 && bytes[0] === 0x37 && bytes[1] === 0x7a && bytes[2] === 0xbc
+    && bytes[3] === 0xaf && bytes[4] === 0x27 && bytes[5] === 0x1c;
+}
+
 function listedMember(f) {
   const path = String(f.path || '');
   const when = f.modified ? new Date(f.modified) : null;
@@ -1835,12 +1853,20 @@ function parse7zList(text, archiveIn) {
 // `getBytes` is a GETTER, `stamp` is the archive's path from the ROOT archive: the listing and every
 // extracted file are remembered under that stamp, so a remembered listing is drawn without touching
 // the archive at all, and a file read once is never unpacked again.
-async function openSevenZip(getBytes, entryPath, stamp) {
+async function openSevenZip(getBytes, entryPath, stamp, indexed) {
   const name = entryPath.replace(/^.*\//, '').replace(/[^\w.\- ]/g, '_') || 'archive.7z';
   const tag = `7z|${stamp || entryPath}`;
   let files = null;
   const listed = await memoGet(tag + '|list');
   if (Array.isArray(listed && listed.json)) files = listed.json.map(listedMember);
+  // The INDEX already knows this `.7z`'s directory — the uploader lists every archive inside the
+  // one it uploads, `.7z` included — so the rows are drawn without loading JS7z and without
+  // fetching one byte of the member.
+  if (!files && indexed && Array.isArray(indexed.files) && indexed.files.length) {
+    files = indexed.files.map(listedMember);
+    await memoPut(tag + '|list', files.map((f) => ({ path: f.path, size: f.size, dir: f.dir,
+      modified: f.modified ? f.modified.toISOString() : null })));
+  }
   if (!files) {
     const list = await run7z(await getBytes(), name, ['l', '-slt', '{in}']);
     if (list.code !== 0) throw new Error(`7-Zip could not list ${name} (exit ${list.code})`);
@@ -1954,7 +1980,9 @@ function reviveEntry(o) {
 // JS7z. Same getter-and-stamp contract as `openSevenZip` — a zip's listing is its own central
 // directory, so it is remembered the same way and its members are extracted once.
 async function openInnerArchive(getBytes, path, stamp, stored, indexed) {
-  if (/\.7z$/i.test(path)) return openSevenZip(getBytes, path, stamp);
+  // A `.7z` takes the index's listing too (`indexed`): its rows cost nothing, only a member read
+  // needs the bytes and a run of JS7z — there is no 7z reader here that works on a range.
+  if (/\.7z$/i.test(path)) return openSevenZip(getBytes, path, stamp, indexed);
   const tag = `zip|${stamp || path}`;
   let files = null;
   const listed = await memoGet(tag + '|list');
@@ -2716,8 +2744,11 @@ async function run() {
   // "let the two ends decide" for a FILE whose name may lie — but here the resolved name already says
   // `.zip`, and probing it as an image decoded part 1 to 0 B (it is not an image at all), which threw
   // and replaced the `Index of /` shell with a bare download page.
+  // A `.7z` is an archive too, and its name is enough to say so: the uploader lists it in the index
+  
   const namedArchive = /\.(zip|apk|jar)$/i.test(src.name);
-  let mime = src.ranged && !namedArchive ? '' : mimeFromName(src.name);
+  const namedSeven = /\.7z$/i.test(src.name);
+  let mime = src.ranged && !namedArchive && !namedSeven ? '' : mimeFromName(src.name);
   let zipByName = namedArchive;
   // A media or index view owns its own title (none for media, "Index of …" for an archive).
   // Assigning one here would insert a <title> INTO the bare head — measured: `META:viewport,TITLE:`.
@@ -2740,7 +2771,8 @@ async function run() {
           // dot address or not — the same rule as `namedArchive` above, and the second half of the
           // 2026-10-25 live bug: following the index and then still refusing to list it.
           const nowArchive = /\.(zip|apk|jar)$/i.test(src.name);
-          mime = src.ranged && !nowArchive ? '' : mimeFromName(src.name);
+          const nowSeven = /\.7z$/i.test(src.name);
+          mime = src.ranged && !nowArchive && !nowSeven ? '' : mimeFromName(src.name);
           zipByName = nowArchive;
           if (!player && !index) document.title = src.name;
           continue;
@@ -2780,7 +2812,11 @@ async function run() {
       await renderMedia(mime);
       return;
     }
-    if (mime === 'application/zip' || zipByName) {
+    // A `.7z` root gets the same `Index of` page as a zip: the rows come from the index or from
+    // JS7z, never from a zip directory (there is none).
+    const sevenRoot = !zipByName && (mime === 'application/x-7z-compressed' || namedSeven
+                                     || /\.7z$/i.test(src.name));
+    if (mime === 'application/zip' || zipByName || sevenRoot) {
       if (player) player.remove();
       // A name that says `.zip` can still be an INDEX that names the archive — a tt2png index
       // carries the archive's own name (`Pictures.zip`). ONE part tells, and it is the part the
@@ -2789,7 +2825,8 @@ async function run() {
         await followIndex(await partPayload(0).catch(() => null));
       }
       // An id (or a `.bin`) has no archive suffix; the archive still saves as one.
-      const label = /\.(zip|apk|jar)$/i.test(src.name) ? src.name : `${src.name}.zip`;
+      const label = sevenRoot ? src.name
+        : (/[.](zip|apk|jar)$/i.test(src.name) ? src.name : `${src.name}.zip`);
       // A path INSIDE the archive: `/file/<archive>/docs/readme.txt` or `/file/<archive>/docs/`.
       if (member) {
         // No resetPage() here: the folder page replaces the shell by building its own, and clearing
@@ -2805,8 +2842,9 @@ async function run() {
       // Hand the worker this archive's plan: from here on `/file/<archive>/<member>` is answered
       // with the member AS a file (its own type, `Content-Disposition: inline`, ranges).
       // Shared under the ADDRESS the rows link to, so the worker answers `/file/<id>/<member>`
-      // without re-reading the archive's own directory first.
-      shareArchivePlan(typedToken || label);
+      // without re-reading the archive's own directory first. NOT for a 7z: the worker has no 7z
+      // decoder, so a shared plan would promise members it cannot unpack.
+      if (!sevenRoot) shareArchivePlan(typedToken || label);
       // The rows: a tt2png index carries the archive's listing, so that copy costs no archive byte
       // at all; anything else reads the central directory (one tail range).
       fillFolder(index, '', await rootRows());
