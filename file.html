@@ -611,7 +611,10 @@ async function wholeFile() {
 // ─── mime, by name first ─────────────────────────────────────────────────────────────────────
 const MIME_BY_EXT = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
-  bmp: 'image/bmp', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
+  // `.ico` was in the ICON lists but not here, so `mimeFromName('favicon.ico')` was empty, the sniff
+  // did not know the signature either, and a favicon ended on the "cannot render it" screen (his
+  // report 2026-10-25). Chromium draws a blob labelled `image/x-icon`, so one line is the whole fix.
+  bmp: 'image/bmp', ico: 'image/x-icon', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
   mp3: 'audio/mpeg', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac',
   wav: 'audio/wav', m4a: 'audio/mp4',
   txt: 'text/plain', json: 'application/json', html: 'text/html', css: 'text/css',
@@ -956,6 +959,9 @@ function sniffMime(head) {
   if (at(0, 0xff, 0xd8, 0xff)) return 'image/jpeg';
   if (at(0, 0x47, 0x49, 0x46, 0x38)) return 'image/gif';
   if (at(0, 0x52, 0x49, 0x46, 0x46) && b.length > 11) return 'image/webp';
+  // A Windows icon: 00 00 01 00, then the image count. An address with no name (an id) has only
+  // these bytes to go on, and without them an .ico is "unknown binary".
+  if (b.length > 5 && at(0, 0x00, 0x00, 0x01, 0x00)) return 'image/x-icon';
   if (at(0, 0x25, 0x50, 0x44, 0x46)) return 'application/pdf';
   if (at(0, 0x49, 0x44, 0x33)) return 'audio/mpeg';
   if (at(0, 0x4f, 0x67, 0x67, 0x53)) return 'audio/ogg';
@@ -1453,7 +1459,7 @@ function indexView(label, total, opts) {
       // An archive row is a LISTING too: `.zip`/`.apk`/`.jar`/`.7z` inside an archive opens its own
       
       // opening a new tab even though nothing about it is a file you view).
-      const listsHere = f.dir || /\.(zip|apk|jar|7z)$/i.test(f.path);
+      const listsHere = f.dir || /\.(zip|apk|jar|7z|tar)$/i.test(f.path);
       const a = addRow(listsHere ? 'dir' : 'file', text, f.dir || href ? null : async (el) => {
         el.textContent = text + ' …';
         try {
@@ -1536,6 +1542,13 @@ function centralListing() {
     } catch (e) {
       console.warn('the archive directory is not readable by range:', e.message);
       const bytes = await wholeFile();
+      // A `.tar` is not a zip at all, so the zip parser above already failed — and its own walk is
+      // the cheapest read in this file (headers only when the payload is a range source).
+      if (/\.tar$/i.test(src.name || '')) {
+        const tar = await openTar(async () => bytes, src.name || 'archive.tar', 'root',
+                                  src.tt && !src.tt.inner ? src.tt : null, await wholeSpan());
+        if (tar.files.length) return { files: tar.files, read: (f) => tar.read(f.path) };
+      }
       let listing = null;
       try {
         listing = await zipFromMemory(bytes);
@@ -1666,7 +1679,7 @@ async function resolveArchivePath(rawPath) {
   while (parts.length) {
     const name = parts[0];
     const entry = findEntry(files, name);
-    const archive = entry && !entry.dir && /\.(zip|apk|jar|7z)$/i.test(name);
+    const archive = entry && !entry.dir && /\.(zip|apk|jar|7z|tar)$/i.test(name);
     if (archive) {
       parts.shift();
       // Where this archive sits from the ROOT (`CM3D2 mod repo/Cat suit.7z`) — the name everything
@@ -1762,7 +1775,7 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
     return;
   }
   if (entry.dir) return renderZipFolder(label, entry.path, files, read, deepest, addrArch);
-  if (/\.(zip|apk|jar|7z)$/i.test(entry.path)) {
+  if (/\.(zip|apk|jar|7z|tar)$/i.test(entry.path)) {
     // The archive's path from the ROOT, for what gets remembered about it: `entry.path` is relative
     // to the listing we are on, `base` is that listing's own path.
     const at = (base ? base + '/' : '') + entry.path;
@@ -1913,6 +1926,117 @@ async function openSevenZip(getBytes, entryPath, stamp, indexed) {
     },
   };
 }
+// ─── a .tar is browsable too, and for free ────────────────────────────────────────────────────
+
+// and a Download button. That was not stale code — `.tar` was simply never in the page's archive
+// list, so a format whose header block is 512 plain bytes was treated as an opaque blob. It is the
+// EASIEST archive there is: every member is STORED, so a member is a byte range like a stored zip
+// member, and the whole directory is a walk of 512-byte blocks — no library, no JS7z, no inflate.
+function tarText(b, at, len) {
+  let s = '';
+  const end = Math.min(at + len, b.length);
+  for (let i = at; i < end && b[i]; i++) s += String.fromCharCode(b[i]);
+  return s;
+}
+// Ages and sizes are octal ASCII, except when they are not: GNU writes a size that does not fit 12
+// octal digits as base-256 with the top bit of the first byte set. One branch, so a 4 GB tar lists.
+function tarNum(b, at, len) {
+  if (b[at] & 0x80) { let n = 0; for (let i = at + 1; i < at + len; i++) n = n * 256 + b[i]; return n; }
+  const s = tarText(b, at, len).replace(/[^0-7]/g, '');
+  return s ? parseInt(s, 8) : 0;
+}
+// Every entry, by walking the header blocks. `range(a, b)` is INCLUSIVE, like `sourceRange`, so the
+// same walk runs over a byte-range source (a 177 MB tar costs 512 B per member) and over bytes
+// already in memory.
+async function tarWalk(range, size) {
+  const files = [];
+  let at = 0, longName = '', guard = 0;
+  while (at + 512 <= size && guard++ < 400000) {
+    const h = await range(at, Math.min(size - 1, at + 511));
+    if (h.length < 512) break;
+    let blank = true;
+    for (let i = 0; i < 512; i++) if (h[i]) { blank = false; break; }
+    if (blank) break;                                   // the end-of-archive block
+    const size0 = tarNum(h, 124, 12);
+    const type = String.fromCharCode(h[156] || 48);
+    const magic = tarText(h, 257, 6);
+    const prefix = magic === 'ustar' ? tarText(h, 345, 155) : '';
+    const data = at + 512;
+    const blocks = Math.ceil(size0 / 512) * 512;
+    if (type === 'L') {                                 // GNU long name: the name IS the data
+      longName = new TextDecoder().decode(await range(data, data + Math.max(0, size0 - 1)))
+        .replace(/\0+$/, '');
+      at = data + blocks; continue;
+    }
+    if (type === 'x' || type === 'g' || type === 'K') { at = data + blocks; continue; }
+    const name = longName || (prefix ? `${prefix}/${tarText(h, 0, 100)}` : tarText(h, 0, 100));
+    longName = '';
+    if (!name) { at = data + blocks; continue; }
+    const dir = type === '5' || /\/$/.test(name);
+    const linked = type === '1' || type === '2';        // a link has no bytes of its own
+    const when = tarNum(h, 136, 12);
+    files.push({ path: dir ? name.replace(/\/+$/, '') + '/' : name, size: linked ? 0 : size0, dir,
+                 modified: when ? new Date(when * 1000) : null,
+                 localOff: data, csize: linked ? 0 : size0, method: 0 });
+    at = data + blocks;
+  }
+  return files;
+}
+// `{ files, read(path) }` for a `.tar`, the same shape a zip hands out. The index lists a tar too
+// (`_list_tar` in `tiktokupload.py`), so the rows usually cost nothing; the walk is for an upload
+// whose index predates the `off`/`csize` it now writes.
+async function openTar(getBytes, path, stamp, indexed, span) {
+  const tag = `tar|${stamp || path}`;
+  let files = null;
+  const listed = await memoGet(tag + '|list');
+  if (Array.isArray(listed && listed.json)) files = listed.json.map(reviveEntry);
+  if (!files && indexed && Array.isArray(indexed.files) && indexed.files.length) {
+    files = indexed.files.map(indexedEntry);
+  }
+  let bytes = null;
+  const load = async () => (bytes || (bytes = await getBytes()));
+  const walkBytes = async (b) => tarWalk(async (a, z) => b.subarray(a, z + 1), b.length);
+  if (!files) {
+    files = span ? await tarWalk(span.range, span.size) : await walkBytes(await load());
+    await memoPut(tag + '|list', files.map(keepEntry));
+  }
+  return {
+    files,
+    read: async (p) => {
+      const want = String(p).replace(/^\/+/, '');
+      const what = tag + '|file|' + want;
+      const memo = await memoGet(what);
+      if (memo && memo.bytes) return memo.bytes;
+      let e = findEntry(files, want);
+      if (!e) throw new Error(`"${want}" is not in ${path}`);
+      let out = null;
+      if (Number.isFinite(e.localOff) && e.csize !== undefined) {
+        const end = e.localOff + Number(e.csize) - 1;
+        if (span) out = end >= e.localOff ? await span.range(e.localOff, end) : new Uint8Array(0);
+        else { const b = await load(); out = b.subarray(e.localOff, end + 1); }
+      }
+      if (!out) {                         // an index with no offsets: find it in the headers
+        const b = await load();
+        e = findEntry(await walkBytes(b), want);
+        if (!e) throw new Error(`"${want}" is not in ${path}`);
+        out = b.subarray(e.localOff, e.localOff + Number(e.csize));
+      }
+      const copy = out.slice();
+      await memoPut(what, copy);
+      return copy;
+    },
+  };
+}
+// The address's own file as a range source, when its bytes ARE byte offsets (not a packed payload).
+async function wholeSpan() {
+  if (src.packed) return null;
+  try {
+    const size = await sourceSize();
+    if (!size) return null;
+    return { size, range: (a, b) => sourceRange(a, b) };
+  } catch (e) { return null; }
+}
+
 // ─── a STORED member is a byte range, so its own directory is too ────────────────────────────
 // `…/CM3D2 mod repo/Robomaid.zip/README.txt` moved 7,273 KB for a 45 KB answer (his measurement
 // 2026-10-25). The entry in the outer archive is method 0 — stored, size == csize == 7,386,123 B —
@@ -2005,6 +2129,10 @@ async function openInnerArchive(getBytes, path, stamp, stored, indexed) {
   // A `.7z` takes the index's listing too (`indexed`): its rows cost nothing, only a member read
   // needs the bytes and a run of JS7z — there is no 7z reader here that works on a range.
   if (/\.7z$/i.test(path)) return openSevenZip(getBytes, path, stamp, indexed);
+  // A `.tar` needs no reader at all: stored members, 512-byte headers. `stored` (the member's own
+  // byte range in the outer archive) becomes its range source, so a tar inside a zip is walked over
+  // ranges too instead of being pulled whole.
+  if (/\.tar$/i.test(path)) return openTar(getBytes, path, stamp, indexed, stored || null);
   const tag = `zip|${stamp || path}`;
   let files = null;
   const listed = await memoGet(tag + '|list');
@@ -2513,7 +2641,9 @@ async function followIndex(head) {
   const text = new TextDecoder('utf-8', { fatal: false }).decode(plain.subarray(0, 64)).trimStart();
   if (text.charAt(0) !== '{') return false;
   const index = parseTt2png(await wholeFile());
-  if (!index || !/\.(zip|apk|jar)$/i.test(String(index.name || ''))) return false;
+  // `.tar` too: the uploader lists a tar's members in the index (`_list_tar`), so an uploaded tar
+  // can be listed from the index with no chunk read at all — the same deal a zip gets.
+  if (!index || !/\.(zip|apk|jar|tar)$/i.test(String(index.name || ''))) return false;
   indexHops++;
   src = { ...src, name: mimeFromName(src.name) ? src.name : (index.name || src.name),
           urls: index.chunks.map((c) => c.url), direct: false, guess: false, tt: index };
@@ -2768,7 +2898,7 @@ async function run() {
   // and replaced the `Index of /` shell with a bare download page.
   // A `.7z` is an archive too, and its name is enough to say so: the uploader lists it in the index
   
-  const namedArchive = /\.(zip|apk|jar)$/i.test(src.name);
+  const namedArchive = /\.(zip|apk|jar|tar)$/i.test(src.name);
   const namedSeven = /\.7z$/i.test(src.name);
   let mime = src.ranged && !namedArchive && !namedSeven ? '' : mimeFromName(src.name);
   let zipByName = namedArchive;
@@ -2792,7 +2922,7 @@ async function run() {
           // The index just named the file. If that name says `.zip`/`.apk`/`.jar` it IS an archive,
           // dot address or not — the same rule as `namedArchive` above, and the second half of the
           // 2026-10-25 live bug: following the index and then still refusing to list it.
-          const nowArchive = /\.(zip|apk|jar)$/i.test(src.name);
+          const nowArchive = /\.(zip|apk|jar|tar)$/i.test(src.name);
           const nowSeven = /\.7z$/i.test(src.name);
           mime = src.ranged && !nowArchive && !nowSeven ? '' : mimeFromName(src.name);
           zipByName = nowArchive;
@@ -2838,7 +2968,12 @@ async function run() {
     // JS7z, never from a zip directory (there is none).
     const sevenRoot = !zipByName && (mime === 'application/x-7z-compressed' || namedSeven
                                      || /\.7z$/i.test(src.name));
-    if (mime === 'application/zip' || zipByName || sevenRoot) {
+    // A `.tar` root gets the same `Index of` page, and unlike a 7z it costs nothing extra: the
+    // index lists it and a member is a byte range. It used to fall through to the download screen
+    
+    const tarRoot = !zipByName && !sevenRoot && (mime === 'application/x-tar'
+                                                 || /\.tar$/i.test(src.name));
+    if (mime === 'application/zip' || zipByName || sevenRoot || tarRoot) {
       if (player) player.remove();
       // A name that says `.zip` can still be an INDEX that names the archive — a tt2png index
       // carries the archive's own name (`Pictures.zip`). ONE part tells, and it is the part the
@@ -2847,8 +2982,8 @@ async function run() {
         await followIndex(await partPayload(0).catch(() => null));
       }
       // An id (or a `.bin`) has no archive suffix; the archive still saves as one.
-      const label = sevenRoot ? src.name
-        : (/[.](zip|apk|jar)$/i.test(src.name) ? src.name : `${src.name}.zip`);
+      const label = sevenRoot || tarRoot ? src.name
+        : (/[.](zip|apk|jar|tar)$/i.test(src.name) ? src.name : `${src.name}.zip`);
       // A path INSIDE the archive: `/file/<archive>/docs/readme.txt` or `/file/<archive>/docs/`.
       if (member) {
         // No resetPage() here: the folder page replaces the shell by building its own, and clearing
@@ -2865,8 +3000,9 @@ async function run() {
       // with the member AS a file (its own type, `Content-Disposition: inline`, ranges).
       // Shared under the ADDRESS the rows link to, so the worker answers `/file/<id>/<member>`
       // without re-reading the archive's own directory first. NOT for a 7z: the worker has no 7z
-      // decoder, so a shared plan would promise members it cannot unpack.
-      if (!sevenRoot) shareArchivePlan(typedToken || label);
+      // decoder, so a shared plan would promise members it cannot unpack. Not for a `.tar` either:
+      // the worker parses a ZIP directory, so its shared-plan member route cannot answer one.
+      if (!sevenRoot && !tarRoot) shareArchivePlan(typedToken || label);
       // The rows: a tt2png index carries the archive's listing, so that copy costs no archive byte
       // at all; anything else reads the central directory (one tail range).
       fillFolder(index, '', await rootRows());
