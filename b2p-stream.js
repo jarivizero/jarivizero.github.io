@@ -248,6 +248,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
+  // `/file/<archive>/<path>`: a FILE is answered with the file itself (its own type,
+  // `Content-Disposition: inline`, ranges); a folder — or anything this worker cannot read — falls
+  // through to the renderer, which shows the `Index of` page or renders the member by itself.
+  if (event.request.mode === 'navigate' && url.origin === self.location.origin) {
+    const inside = archiveAddress(url.pathname);
+    if (inside) {
+      event.respondWith(serveMember(inside, event.request).then((res) => res || serveFilePage(null)));
+      return;
+    }
+  }
   if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
       (FILE_PAGE.test(url.pathname) ||
        (ROOT_ADDRESS.test(url.pathname) && !isRealPath(url.pathname)))) {
@@ -461,6 +471,205 @@ async function totalBytes(plan) {
     }));
   }
   return plan.total;
+}
+
+// ─── `/file/<archive>/<member>`: the member AS a response, not as a page ───────────────────────
+
+// path has, and the RESPONSE should be the file — `Content-Type` from its name,
+// `Content-Disposition: inline; filename="…"`, `Accept-Ranges`, real byte ranges — so the tab is
+// the browser's own viewer and "Save as" knows the name. A page can imitate the pixels; it cannot
+// imitate the headers, because a document's headers are its own.
+//
+// A folder (`…/dir/`, or a directory entry) is a LISTING, so this answers null and the renderer
+// shows its `Index of` table at the same address.
+const sitePath = new URL('./', self.location.href).pathname;      // '/' or '/<repo>/'
+
+function archiveAddress(pathname) {
+  if (!pathname.startsWith(sitePath + 'file/')) return null;
+  const rest = pathname.slice((sitePath + 'file/').length);
+  const cut = rest.indexOf('/');
+  if (cut <= 0) return null;                                       // /file/<archive>: the listing
+  const member = rest.slice(cut + 1);
+  if (!member || member.endsWith('/')) return null;                // a folder: the renderer
+  try {
+    return { archive: decodeURIComponent(rest.slice(0, cut)), member: decodeURIComponent(member) };
+  } catch (e) { return null; }
+}
+
+// Which bytes make up the archive. The renderer writes this when it lists an archive (`archive-`
+// plans), so a name — even a sealed one — is already resolved by the time a member is opened.
+// Without that plan a bare pbs id resolves on its own: its first part is read as a PREFIX, and what
+// that part holds (a master, a tt2png index, or the archive itself) is followed.
+async function archivePlan(address) {
+  const key = planKey('archive-' + await sha256Hex(address));
+  const hit = await (await caches.open(PLAN_CACHE)).match(key).catch(() => null);
+  if (hit) {
+    try { return await hit.json(); } catch (e) { /* resolve it below */ }
+  }
+  const id = String(address).replace(/\.[A-Za-z0-9]+$/, '');
+  if (!/^[A-Za-z0-9_-]{15}$/.test(id)) return null;                // a name needs the page's keyring
+  const plan = { id: null, name: address, mime: 'application/zip', cap: 2421906,
+                 parts: ['https://pbs.twimg.com/media/' + id + '?format=png'], total: 0 };
+  let got;
+  try { got = await firstPayload(plan); } catch (e) { return null; }
+  if (!got || !got.payload) return null;
+  const payload = got.payload;
+  const head = new TextDecoder('utf-8', { fatal: false }).decode(payload.subarray(0, 64)).trimStart();
+  if (head.startsWith('#bin2png-manifest')) {
+    const parts = [];
+    for (const line of new TextDecoder().decode(payload).split('\n')) {
+      const f = line.split('\t');
+      if (f[0] === 'part' && f[2]) parts.push(f[2]);
+    }
+    return parts.length ? { ...plan, parts } : null;
+  }
+  if (head.charAt(0) === '{') {
+    let index = null;
+    try { index = JSON.parse(new TextDecoder().decode(payload)); } catch (e) { return null; }
+    if (!index || index.tool !== 'tt2png' || !Array.isArray(index.chunks) || !index.chunks.length) return null;
+    return { id: null, name: index.name || address, mime: 'application/zip',
+             cap: Number(index.chunk_size) || 2421906,
+             parts: index.chunks.map((c) => c.url), total: Number(index.bytes) || 0, tt: true };
+  }
+  // A packed payload's byte N is not the file's byte N, so no offset can be trusted.
+  if (got.packed) return null;
+  return plan;                                                     // the parts ARE the archive
+}
+
+// The first payload's head, inflated when the encoder wrapped it (`B2PZ`). A PREFIX, never a part:
+// a 5.8 KB index costs ~70 KB of PNG this way instead of the whole 2.4 MB part.
+async function firstPayload(plan) {
+  let payload = await partPayload(plan, 0, 70000);
+  const packed = payload.length > 9 && payload[0] === 0x42 && payload[1] === 0x32 &&
+                 payload[2] === 0x50 && payload[3] === 0x5a && payload[4] === 1;
+  if (packed) payload = await inflateTolerant(payload.subarray(9));
+  return { payload, packed };
+}
+
+const U16 = (b, o) => b[o] | (b[o + 1] << 8);
+const U32 = (b, o) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
+
+// Bytes [start, end] of the FILE, through the same range machinery the player uses (part or chunk,
+// decoded only as far as this range needs).
+async function fileBytes(plan, start, end) {
+  if (end < start) return new Uint8Array(0);
+  const last = Math.min(end, plan.total - 1);
+  const body = new Response(streamRange(plan, start, last, plan.total));
+  return new Uint8Array(await body.arrayBuffer());
+}
+
+// The archive's directory, read ONCE per plan: every further member costs its own bytes, not the
+// listing again.
+const DIRS = new Map();
+async function zipDir(plan) {
+  const key = plan.parts.join('|') + '#' + plan.total;
+  if (DIRS.has(key)) return DIRS.get(key);
+  const total = plan.total;
+  const tailStart = Math.max(0, total - 65557);
+  const tail = await fileBytes(plan, tailStart, total - 1);
+  let eocd = -1;
+  for (let i = tail.length - 22; i >= 0; i--) if (U32(tail, i) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('no zip end-of-directory record in the last 64 KB');
+  const cdOff = U32(tail, eocd + 16);
+  const cdSize = U32(tail, eocd + 12);
+  if (cdOff === 0xffffffff || cdSize === 0xffffffff) throw new Error('ZIP64: the page reads these');
+  const from = Math.min(cdOff, tailStart);
+  const cd = await fileBytes(plan, from, Math.min(total - 1, cdOff + cdSize + 64));
+  const dir = new Map();
+  let k = cdOff - from;
+  const end = Math.min(k + cdSize, cd.length);
+  while (k + 46 <= end && U32(cd, k) === 0x02014b50) {
+    const method = U16(cd, k + 10), csize = U32(cd, k + 20);
+    const nlen = U16(cd, k + 28), elen = U16(cd, k + 30), clen = U16(cd, k + 32);
+    const localOff = U32(cd, k + 42);
+    const name = new TextDecoder().decode(cd.subarray(k + 46, k + 46 + nlen));
+    if (!dir.has(name)) dir.set(name, { name, method, csize, localOff, dir: /\/$/.test(name) });
+    k += 46 + nlen + elen + clen;
+  }
+  DIRS.set(key, dir);
+  return dir;
+}
+
+async function zipEntry(plan, want) {
+  const dir = await zipDir(plan);
+  const entry = dir.get(want) || dir.get(want + '/');
+  if (!entry || entry.dir) return null;
+  const head = await fileBytes(plan, entry.localOff, entry.localOff + 29);
+  if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) return null;
+  const nlen = U16(head, 26), elen = U16(head, 28);
+  return { ...entry, start: entry.localOff + 30 + nlen + elen };
+}
+
+// A member's own type. The media list above is what a PLAN needs; this is what a FILE needs: the
+// browser's viewer picks itself from these, exactly as it would for a `file:///` tab.
+const MEMBER_MIME = {
+  txt: 'text/plain; charset=utf-8', md: 'text/plain; charset=utf-8', log: 'text/plain; charset=utf-8',
+  csv: 'text/csv; charset=utf-8', json: 'application/json', xml: 'application/xml',
+  html: 'text/html; charset=utf-8', htm: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8',
+  js: 'text/javascript; charset=utf-8', py: 'text/x-python', sh: 'text/x-shellscript',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  bmp: 'image/bmp', svg: 'image/svg+xml', ico: 'image/x-icon', pdf: 'application/pdf',
+  zip: 'application/zip', gz: 'application/gzip', '7z': 'application/x-7z-compressed',
+  apk: 'application/vnd.android.package-archive', jar: 'application/java-archive',
+};
+function memberMime(name) {
+  const ext = (String(name || '').match(/\.([A-Za-z0-9]+)$/) || [])[1];
+  return (ext && (MEMBER_MIME[ext.toLowerCase()] || MIME_BY_EXT[ext.toLowerCase()])) ||
+    'application/octet-stream';
+}
+
+async function memberResponse(plan, entry, request) {
+  const name = entry.name.replace(/^.*\//, '');
+  const headers = {
+    'Content-Type': memberMime(name),
+    'Content-Disposition': filenameHeader(name),
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store',
+    'Access-Control-Allow-Origin': '*',
+  };
+  if (!entry.csize) {
+    return new Response(new Uint8Array(0), { status: 200, headers: { ...headers, 'Content-Length': '0' } });
+  }
+  // A STORED member is a byte range of the archive, so it answers ranges itself (a video in a tab
+  // then seeks like any other). A deflated one has to be inflated whole, and says so with a 200.
+  if (entry.method === 0) {
+    const r = parseRange(request.headers.get('Range'), entry.csize);
+    if (r && r.unsatisfiable) {
+      return new Response(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${entry.csize}` } });
+    }
+    if (r) {
+      const body = await fileBytes(plan, entry.start + r.start, entry.start + r.end);
+      return new Response(body, { status: 206, headers: {
+        ...headers, 'Content-Range': `bytes ${r.start}-${r.end}/${entry.csize}`,
+        'Content-Length': String(body.length),
+      } });
+    }
+  }
+  const comp = await fileBytes(plan, entry.start, entry.start + entry.csize - 1);
+  let bytes = comp;
+  if (entry.method === 8) {
+    bytes = new Uint8Array(await new Response(new Blob([comp]).stream()
+      .pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+  } else if (entry.method !== 0) {
+    return null;
+  }
+  return new Response(bytes, { status: 200, headers: { ...headers, 'Content-Length': String(bytes.length) } });
+}
+
+async function serveMember(address, request) {
+  try {
+    const plan = await archivePlan(address.archive);
+    if (!plan) return null;
+    if (!Number(plan.total)) plan.total = await totalBytes(plan);
+    const entry = await zipEntry(plan, address.member);
+    if (!entry) return null;
+
+    // 2026-10-25): the renderer opens it as its own `Index of` page.
+    if (/\.(zip|apk|jar|7z)$/i.test(entry.name)) return null;
+    return await memberResponse(plan, entry, request);
+  } catch (e) {
+    return null;                       // the renderer, which renders a member by itself
+  }
 }
 
 // ─── a part, without downloading it whole ──────────────────────────────────────────────────────
