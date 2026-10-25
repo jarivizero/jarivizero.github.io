@@ -86,7 +86,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-25T09:31';
+const BUILD = '2026-10-25T09:35';
 // ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
 // `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
@@ -1613,7 +1613,14 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   // what makes the url resolve. A folder page hands its rows the archive's address instead, because
   // those rows spell their own prefixes.
   if (rest === '' || /\/$/.test(rest)) {
-    return renderZipFolder(label, rest, files, read, deepest, lastWasArchive ? addrWalk : addrArch);
+    // An ARCHIVE opened from inside another gets the address of the listing it came from, or its page
+
+    // folder of a zip). A folder's own parent is computed from its prefix, as before.
+    const up = lastWasArchive && walked.length ? walked.slice(0, -1).join('/') : '';
+    const containing = up ? `${addrBase}/${up}` : addrBase;
+    return renderZipFolder(label, rest, files, read, deepest,
+                           lastWasArchive ? addrWalk : addrArch,
+                           lastWasArchive ? containing : null);
   }
   const entry = findEntry(files, rest);
   if (!entry) throw new Error(`"${rest}" is not in ${label}`);
