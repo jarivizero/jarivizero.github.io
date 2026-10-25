@@ -154,9 +154,9 @@ async function digestHex(text) {
 }
 
 // `v1.<iv-b64url>.<ct-b64url>`, AES-256-GCM, key = the digest of the preimage itself.
-async function openBlob(sealed, preimage) {
-  const [v, iv, ct] = String(sealed).split('.');
-  if (v !== 'v1' || !iv || !ct) throw new Error('not a v1 sealed page');
+async function openBlob(blob, preimage) {
+  const [v, iv, ct] = String(blob).split('.');
+  if (v !== 'v1' || !iv || !ct) throw new Error('not a v1 blob page');
   const raw = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(preimage));
   const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
   const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64u(iv) }, key, b64u(ct));
@@ -201,9 +201,9 @@ async function pickScript(pathname) {
     if (bare && bare[1]) add([bare[1], bare[1].replace(/^[.,]+/, '')]);
   }
   for (const cand of candidates) {
-    const sealed = TBL[await digestHex(cand)];
-    if (!sealed) continue;
-    const src = scriptBody(await openBlob(sealed, cand));
+    const blob = TBL[await digestHex(cand)];
+    if (!blob) continue;
+    const src = scriptBody(await openBlob(blob, cand));
     // `</script>` inside the source would close the tag it is spliced into; a backslash is the
     // standard escape and JavaScript reads it back as the same string.
     return src.split('__SWVER__').join(await liveVer()).replace(/<\/script/gi, '<\\/script');
@@ -438,6 +438,11 @@ async function serve(request, url) {
 // needs a byte from it. Nothing is buffered beyond the part in hand.
 function streamRange(plan, start, end, total) {
   let at = start;
+  // ONE PART AHEAD when the range is wider than a part — a whole-file download used to wait for
+  // part i before it even asked for part i+1, so a 3-part file cost 3 round trips end to end (his
+  // report 2026-10-25). Wide ranges now keep the next part in flight; a narrow one (playback) does
+  // not, because there the next part is bandwidth nobody asked for.
+  const wide = end - start >= plan.cap - 1;
   return new ReadableStream({
     async pull(ctrl) {
       if (at > end) { ctrl.close(); return; }
@@ -446,6 +451,10 @@ function streamRange(plan, start, end, total) {
         if (i >= plan.parts.length) { ctrl.close(); return; }
         const off = at - i * plan.cap;
         const want = Math.min(end - at + 1, plan.cap - off);
+        if (wide && i + 1 < plan.parts.length && !payloadOf.has(plan.parts[i + 1])) {
+          // fire and forget: the part cache dedupes this against the read that happens next.
+          (plan.tt ? ttPartPayload(plan, i + 1) : partPayload(plan, i + 1)).catch(() => {});
+        }
         // Only `want` payload bytes are needed from this part — so only that much of its PNG is
         // fetched. This is the whole point of the prefix fetcher below: playing the first second
         // of a 2.4 MB part costs a few hundred KB, not 2.4 MB.
