@@ -1496,6 +1496,25 @@ function findEntry(files, want) {
   return inside ? { path: w + '/', size: 0, dir: true, modified: null } : null;
 }
 
+// The INDEX's listing of an archive inside the uploaded file. `archives` is keyed by the member's
+// path from the archive ROOT (`Burrow/burrow-client-main.zip`), and an address may name that archive
+// by its last segment only (`…/burrow-client-main.zip/…`) — `findEntry` resolves that (it matches
+// `endsWith('/' + name)`), the key lookup did not, so the listing fell through to reading the whole
+
+// pulled 52.5 MB, with it 0.1 MB. Exact key first, then a suffix, then the bare name.
+function ttArchiveIndex(...keys) {
+  const map = (src.tt && src.tt.archives) || null;
+  if (!map) return null;
+  const want = keys.map((k) => String(k || '').replace(/^\/+/, '')).filter(Boolean);
+  for (const k of want) if (map[k]) return map[k];
+  for (const k of want) {
+    const hit = Object.keys(map).find((key) => key.endsWith('/' + k))
+      || (!k.includes('/') && Object.keys(map).find((key) => key.split('/').pop() === k));
+    if (hit) return map[hit];
+  }
+  return null;
+}
+
 // The rows of the address's own archive: a tt2png index carries the archive's listing already, so
 // that copy is free; otherwise it is the archive's central directory (one tail range).
 async function rootRows() {
@@ -1658,7 +1677,10 @@ async function resolveArchivePath(rawPath) {
       // Only the address's OWN archive has offsets `sourceRange` can use; deeper levels are already
       // in memory, so they keep the whole-bytes path.
       const stored = reader === rootRead ? await storedSpan(await withOffsets(entry)) : null;
-      const indexed = src.tt && src.tt.archives && src.tt.archives[at];
+      // `at` is the address's own path (`burrow-client-main.zip` when a folder was left out of it);
+      // `entry.path` is where the archive really sits (`Burrow/burrow-client-main.zip`), which is
+      // what the index calls it.
+      const indexed = ttArchiveIndex(at, entry.path);
       const inner = await openInnerArchive(getBytes, entry.path, at, stored, indexed);
       deepest = getBytes;
       lastWasArchive = true;
@@ -1746,7 +1768,7 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
     const at = (base ? base + '/' : '') + entry.path;
     const getBytes = once(() => read(entry.path));
     const stored = read === rootRead ? await storedSpan(await withOffsets(entry)) : null;
-    const indexed = src.tt && src.tt.archives && src.tt.archives[at];
+    const indexed = ttArchiveIndex(at, entry.path);
     const inner = await openInnerArchive(getBytes, entry.path, at, stored, indexed);
     // `entry.path` is relative to the listing we are on (`rest`, which already holds the folders
     // walked into), so only the part PAST them is appended to the address.
