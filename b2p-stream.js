@@ -451,9 +451,16 @@ function streamRange(plan, start, end, total) {
         if (i >= plan.parts.length) { ctrl.close(); return; }
         const off = at - i * plan.cap;
         const want = Math.min(end - at + 1, plan.cap - off);
-        if (wide && i + 1 < plan.parts.length && !payloadOf.has(plan.parts[i + 1])) {
-          // fire and forget: the part cache dedupes this against the read that happens next.
-          (plan.tt ? ttPartPayload(plan, i + 1) : partPayload(plan, i + 1)).catch(() => {});
+        if (wide && i + 1 < plan.parts.length) {
+          // A tt2png chunk is addressed by exact bytes, so the prefetch must ask for the WINDOW the
+          // loop will ask for next — not the whole chunk. `ttPartPayload(…, Infinity)` pulled the
+          // chunk's entire PNG and the sequential read then fetched its slice AGAIN: measured on
+          // his 267 MB index, 2026-10-25, three chunks of 5,000,291 B each were fetched twice —
+          // 15 MB of the 52.5 MB. The window is cached, so the read that follows costs no request.
+          if (plan.tt) ttWindow(plan, i + 1, 0, plan.cap).catch(() => {});
+          // A bin2png part carries its bytes in pixels and cannot be read from the middle, so here
+          // the whole part IS the useful prefetch; the part cache dedupes it against the read next.
+          else if (!payloadOf.has(plan.parts[i + 1])) partPayload(plan, i + 1).catch(() => {});
         }
         // Only `want` payload bytes are needed from this part — so only that much of its PNG is
         // fetched. This is the whole point of the prefix fetcher below: playing the first second
@@ -463,7 +470,9 @@ function streamRange(plan, start, end, total) {
           // payload is a window of the PNG. Ask for exactly those bytes: reading the tail of a 2.4 MB
           // chunk used to decode the WHOLE chunk (his 8 MB for a 28 kB png, 2026-10-25).
           const known = payloadOf.get(plan.parts[i]);
-          const part = known || await ttWindow(plan, i, off, want);
+          // A window the prefetch already pulled: answer from it instead of asking again.
+          const held = known ? null : ttWinGet(plan.parts[i], off, want);
+          const part = known || held || await ttWindow(plan, i, off, want);
           const n = Math.min(want, part.length - (known ? off : 0));
           if (n <= 0) throw new Error(`part ${i + 1} ends before byte ${at}`);
           ctrl.enqueue(known ? part.subarray(off, off + n) : part.subarray(0, n));
@@ -809,6 +818,20 @@ function pngTail(bytes) {
 // The payload starts right after IEND. Reading it once costs one 512-byte request; after that any
 // window of any chunk is a single ranged request of exactly the bytes asked for.
 const TTHDR = new Map();        // part url -> the payload's byte offset in the PNG
+// The last window fetched from each chunk, so a prefetch and the read that follows it are ONE
+// request. Kept small and newest-last: a long download slides through every chunk it touches.
+const TTWIN = new Map();        // part url -> { off, bytes }
+const TTWIN_MAX = 8;
+function ttWinGet(key, off, want) {
+  const w = TTWIN.get(key);
+  if (!w || off < w.off || off + want > w.off + w.bytes.length) return null;
+  return w.bytes.subarray(off - w.off, off - w.off + want);
+}
+function ttWinPut(key, off, bytes) {
+  if (!bytes.length) return;
+  TTWIN.set(key, { off, bytes });
+  while (TTWIN.size > TTWIN_MAX) TTWIN.delete(TTWIN.keys().next().value);
+}
 async function ttWindow(plan, i, off, want) {
   const key = plan.parts[i];
   let hdr = TTHDR.get(key);
@@ -828,6 +851,7 @@ async function ttWindow(plan, i, off, want) {
   if (!res.ok && res.status !== 416) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
   const body = new Uint8Array(await res.arrayBuffer());
   netBytes.set(key, (netBytes.get(key) || 0) + body.length);
+  ttWinPut(key, off, body);
   return body;
 }
 
