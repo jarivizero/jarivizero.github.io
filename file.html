@@ -79,8 +79,13 @@ try {
 // under `/file/`, where IDSDICTIONARY.txt and b2p-stream.js do not exist. Everything internal is
 // built from the directory that HOLDS `/file`.
 const SITE_BASE = (() => {
-  const at = location.pathname.lastIndexOf('/file');
-  const dir = at >= 0 ? location.pathname.slice(0, at + 1) : new URL('.', location.href).pathname;
+  // The `/file` SEGMENT, not `lastIndexOf('/file')`. That one also matches the first two letters of
+  // any later segment, so `/file/<id>/x/files/` put the base one folder too deep: file.html was then
+  // fetched from `…/x/file.html` (a 404, so the page stayed blank) and every href doubled — his
+  // report 2026-10-25, `…/game/files/` whose parent link pointed at `…/game/file/<id>/…/game/`.
+  const at = location.pathname.match(/\/file(\/|$)/);
+  const dir = at ? location.pathname.slice(0, at.index + 1)
+                 : new URL('.', location.href).pathname;
   return location.origin + dir;
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
@@ -1431,7 +1436,10 @@ function indexView(label, total, opts) {
     const sizeTd = document.createElement('td');
     sizeTd.className = 'detailsColumn';
     sizeTd.dataset.value = String(Number.isFinite(size) ? size : 0);
-    sizeTd.textContent = fmtSize(size);
+    // A folder has no byte count of its own, and an archive records none — a blank cell reads as a
+    
+    // folders don't have ids or size, it's just weird").
+    sizeTd.textContent = cls === 'dir' ? '-' : fmtSize(size);
     const dateTd = document.createElement('td');
     dateTd.className = 'detailsColumn';
     dateTd.dataset.value = String(date && !isNaN(date) ? Math.floor(date.getTime() / 1000) : 0);
