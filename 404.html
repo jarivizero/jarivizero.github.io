@@ -143,7 +143,11 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     }
     // Then the renderer takes THIS document over — same url, same document, no iframe to paint first.
     // It reads the name from the path, and its own pre-paint script keeps the window black.
-    const root = location.pathname.slice(0, location.pathname.lastIndexOf('/file') + 1);
+    // The `/file` SEGMENT, not `lastIndexOf('/file')` — that also matches the start of a later
+    // segment, so `/file/<id>/x/files/` asked for `…/x/file.html` (404) and the page stayed blank
+    // (measured live 2026-10-25).
+    const atFile = location.pathname.match(/\/file(\/|$)/);
+    const root = atFile ? location.pathname.slice(0, atFile.index + 1) : '/';
     try {
       const res = await fetch(root + 'file.html', { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
