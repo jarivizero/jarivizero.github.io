@@ -86,7 +86,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-25T09:26';
+const BUILD = '2026-10-25T09:31';
 // ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
 // `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
@@ -1388,7 +1388,11 @@ function indexView(label, total, opts) {
       // listing has — so a click is a new tab at that path, never a save. Only a direct `https://`
       // archive has no path to spell, and there the row stays a download.
       const href = src.direct ? null : memberHref(baseLabel, f.path);
-      const a = addRow(f.dir ? 'dir' : 'file', text, f.dir || href ? null : async (el) => {
+      // An archive row is a LISTING too: `.zip`/`.apk`/`.jar`/`.7z` inside an archive opens its own
+
+      // opening a new tab even though nothing about it is a file you view).
+      const listsHere = f.dir || /\.(zip|apk|jar|7z)$/i.test(f.path);
+      const a = addRow(listsHere ? 'dir' : 'file', text, f.dir || href ? null : async (el) => {
         el.textContent = text + ' …';
         try {
           const bytes = await memberBytes(f);
@@ -1398,6 +1402,7 @@ function indexView(label, total, opts) {
         el.textContent = text;
       }, f.modified, f.dir ? 0 : f.size, href);
       a.className += f.dir ? ' folder' : ' member';
+      if (listsHere && !f.dir) a.classList.add('archive-row');
       if (!f.dir) a.title = `${f.path} (${fmt(f.size)}) — opened by its own byte range`;
       else a.title = `${f.path} — a folder in this archive`;
     },
@@ -1512,7 +1517,7 @@ function fillFolder(view, prefix, files) {
 // A FOLDER inside an archive: its own `Index of` page, `[parent directory]`, and its own zip.
 // `zipBytes` is set when the archive being listed is one INSIDE another: its Download Zip is those
 
-async function renderZipFolder(label, prefix, files, read, zipBytes, addr) {
+async function renderZipFolder(label, prefix, files, read, zipBytes, addr, parentHref) {
   prefix = String(prefix || '').replace(/^\/+/, '');
   if (prefix && !/\/$/.test(prefix)) prefix += '/';
   addr = String(addr || label);
@@ -1520,7 +1525,10 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr) {
   const innerName = label.replace(/^.*\//, '') || 'archive.zip';
   const view = indexView(shown, 0, {
     base: addr,
-    parentHref: prefix ? folderHref(addr, prefix) : null,
+    // A folder's parent is the folder above it. An ARCHIVE opened from inside another has no prefix of
+    // its own, so it is handed the address of the listing it came from — otherwise its page had no
+
+    parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
     downloadZip: zipBytes && !prefix ? () => {
       saveBytes(zipBytes, innerName, mimeFromName(innerName) || 'application/octet-stream');
       return { name: innerName, size: zipBytes.length };
@@ -1616,8 +1624,11 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
     // `entry.path` is relative to the listing we are on (`rest`, which already holds the folders
     // walked into), so only the part PAST them is appended to the address.
     const tail = within && entry.path.startsWith(within) ? entry.path.slice(within.length) : entry.path;
+    // The page it came FROM is the walk without its last segment (`walked` ends with this archive).
+    const up = walked.slice(0, -1).join('/');
+    const containing = up ? `${addrBase}/${up}` : addrBase;
     return renderZipFolder(`${label}/${entry.path}`, '', inner.files, (p) => inner.read(p), bytes,
-                           `${addrWalk}/${tail}`);
+                           `${addrWalk}/${tail}`, containing);
   }
   await renderBytes(await read(entry.path), entry.path.replace(/^.*\//, ''), label);
 }
