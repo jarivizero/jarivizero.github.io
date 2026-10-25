@@ -59,8 +59,8 @@ try {
   /* What this page BUILDS is all it styles: Apache's index table, a status line under it, the 404
      art, a PDF's embed. A text, image or media view removes this stylesheet entirely (`bareHead`),
      so what is left is exactly what a `file:///` tab has — nothing but the payload element. */
-  table { border-collapse: collapse; }
-  th, td { padding: 1px 6px 1px 0; vertical-align: top; text-align: left; }
+  /* The LISTING's own stylesheet (INDEX_CSS, injected with the view) owns table/th/td, because it is
+     Chrome's `file:///` page copied node for node — nothing here may add padding or alignment to it. */
   .status { margin: 6px 0 0; font-size: 12px; }
   .status.error { color: #b42318; }
   img { max-width: 100%; }
@@ -86,7 +86,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-19T06:41';
+const BUILD = '2026-10-25T08:25';
 // ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
 // `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
@@ -509,6 +509,11 @@ async function sourceSize() {
     }
     return Number(res.headers.get('Content-Length')) || 0;
   }
+  // A chunk list knows its own size: the index says it, so no part has to be read to find the end.
+  if (src.tt) {
+    return Number(src.tt.bytes) ||
+      src.tt.chunks.reduce((n, c) => n + (Number(c.size) || 0), 0);
+  }
   const last = await partPayload(src.urls.length - 1);
   return (src.urls.length - 1) * CAPACITY + last.length;
 }
@@ -529,6 +534,28 @@ async function sourceRange(start, end) {
       return all.subarray(start, end + 1);
     }
     return new Uint8Array(await res.arrayBuffer());
+  }
+  // A chunk list: byte N → chunk i (the index's `size` is the payload size), and the worker answers
+  // the range from that chunk's PNG prefix. Without a worker the chunk is fetched once and sliced.
+  if (src.tt) {
+    const plan = await ttPlanUrl();
+    if (plan) {
+      const bytes = await streamRange(plan, start, end);
+      if (bytes) return bytes;
+    }
+    const pieces = [];
+    let base = 0;
+    for (let i = 0; i < src.tt.chunks.length && base <= end; i++) {
+      const size = Number(src.tt.chunks[i].size) || 0;
+      if (base + size > start) {
+        const payload = await ttChunk(i);
+        const a = Math.max(start, base) - base;
+        const b = Math.min(end, base + size - 1) - base;
+        if (b >= a) pieces.push(payload.subarray(a, b + 1));
+      }
+      base += size;
+    }
+    return concat(pieces);
   }
   const first = Math.floor(start / CAPACITY), last = Math.floor(end / CAPACITY);
   const pieces = [];
@@ -553,6 +580,20 @@ async function wholeFile() {
     }
     return unpackPayload(new Uint8Array(await res.arrayBuffer()));
   }
+  // Every chunk, in order. Only a download (Download Zip) or a packed archive gets here — the
+  // directory and a member are ranges.
+  if (src.tt) {
+    const pieces = [];
+    for (let i = 0; i < src.tt.chunks.length; i++) pieces.push(await ttChunk(i));
+    const bytes = concat(pieces);
+    if (Number(src.tt.bytes) && bytes.length !== Number(src.tt.bytes)) {
+      throw new Error(`the chunks hold ${bytes.length} B, the index says ${src.tt.bytes} B`);
+    }
+    if (src.tt.sha256 && (await sha256(bytes)) !== src.tt.sha256) {
+      throw new Error('the reassembled file does not hash to the index\u2019s sha256');
+    }
+    return bytes;
+  }
   const parts = await Promise.all(src.urls.map((_, i) => partPayload(i)));
   return unpackPayload(concat(parts));
 }
@@ -574,6 +615,55 @@ function mimeFromName(name) {
   const ext = (String(name || '').match(/\.([A-Za-z0-9]+)$/) || [])[1];
   return (ext && MIME_BY_EXT[ext.toLowerCase()]) || '';
 }
+// ─── a zip of the folder in front of you ──────────────────────────────────────────────────────
+
+// already being fetched, and a second deflate pass in the page would cost more time than it saves.
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = (c >>> 8) ^ CRC_TABLE[(c ^ bytes[i]) & 0xff];
+  return (c ^ 0xffffffff) >>> 0;
+}
+function zipOf(entries) {                 // [{ path, bytes }] → the archive, as a Uint8Array
+  const enc = new TextEncoder();
+  const locals = [], centrals = [];
+  let at = 0;
+  for (const e of entries) {
+    const name = enc.encode(e.path);
+    const crc = crc32(e.bytes);
+    const lh = new Uint8Array(30);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, e.bytes.length, true); lv.setUint32(22, e.bytes.length, true);
+    lv.setUint16(26, name.length, true);
+    locals.push(lh, name, e.bytes);
+    const ch = new Uint8Array(46);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, e.bytes.length, true); cv.setUint32(24, e.bytes.length, true);
+    cv.setUint16(28, name.length, true); cv.setUint32(42, at, true);
+    centrals.push(ch, name);
+    at += 30 + name.length + e.bytes.length;
+  }
+  const cd = concat(centrals);
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, entries.length, true); ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, cd.length, true); ev.setUint32(16, at, true);
+  return concat([...locals, cd, eocd]);
+}
+
 function saveBytes(bytes, name, mime) {
   const blob = new Blob([bytes], { type: 'application/octet-stream' });   // a save, never a player
   const a = document.createElement('a');
@@ -754,7 +844,9 @@ function findEocd(buf) {
 
 // Parse the central directory from `block`, whose byte 0 is absolute offset `at`.
 async function readZipCentral() {
-  if (src.direct) return readZipCentralDirect();
+  // A chunk list is read the same way an ordinary url is: by ranges, from a size the index already
+  // states. Only a bin2png part list needs the last-part walk below.
+  if (src.direct || src.tt) return readZipCentralDirect();
   const n = src.urls.length;
   let last = await partPayload(n - 1);
   // The EOCD is in the last 22 bytes plus a comment of at most 65535 — grow the tail backwards
@@ -767,7 +859,13 @@ async function readZipCentral() {
     at -= prev.length;
     eocd = findEocd(block);
   }
-  if (eocd < 0) throw new Error('no zip end-of-directory record in the last part');
+  if (eocd < 0) {
+    // Not a zip at these offsets. The address may still point at an INDEX that NAMES one — a tt2png
+    // index carries the archive's own name (`Pictures.zip`), and a bin2png master is a list of
+    // parts. Follow it once and read the real archive, instead of fetching the whole thing.
+    if (await followIndex(await sourceRange(0, 4095).catch(() => null))) return readZipCentral();
+    throw new Error('no zip end-of-directory record in the last part');
+  }
   const total = at + block.length;
   let entries = u16(block, eocd + 10);
   let cdSize = u32(block, eocd + 12);
@@ -797,7 +895,8 @@ async function readZipCentral() {
   return parseCentral(block, at, entries, cdSize, cdOff, total);
 }
 
-// A zip behind one ordinary url: ask the server for the tail, then for the directory, with ranges.
+// A zip behind a byte-range source (one ordinary url, or a tt2png chunk list): ask for the tail,
+// then for the directory, with ranges.
 const ZIP_TAIL = 65557;
 async function readZipCentralDirect() {
   const total = await sourceSize();
@@ -904,6 +1003,8 @@ async function rangedEnds() {
   return { head, tail, total };
 }
 
+// `head` rides along on every non-zip answer: the caller uses it to notice that the payload is a
+// LIST of other payloads (a master, a tt2png index) without reading anything a second time.
 async function sniffSource() {
   if (src.direct) {
     const total = await sourceSize();
@@ -914,7 +1015,7 @@ async function sniffSource() {
     // A packed payload (the encoder's DEFLATE wrapper) hides its type; unpack when the head is
     // enough for it, which it always is for a text-sized file.
     const unpacked = isPacked(head) ? await unpackPayload(head) : null;
-    return { mime: sniffMime(unpacked || head) };
+    return { mime: sniffMime(unpacked || head), head };
   }
   if (src.ranged) {
     // A dot address: never fetch a part to find out what the payload is.
@@ -923,7 +1024,7 @@ async function sniffSource() {
       if (looksLikeZipTail(ends.tail)) return { zip: true };
       const packed = isPacked(ends.head);
       const plain = packed ? await unpackPrefix(ends.head) : null;
-      return { mime: sniffMime(plain || ends.head), packed };
+      return { mime: sniffMime(plain || ends.head), packed, head: ends.head };
     }
     // No worker (a `file://` page, or one refusing service workers): fall back to the parts.
   }
@@ -934,7 +1035,7 @@ async function sniffSource() {
   // prefix inflate, not unpackPayload — otherwise a 7.75 MB packed webm sniffed as "binary".
   const packed = isPacked(head);
   const unpacked = packed ? await unpackPrefix(head) : null;
-  return { mime: sniffMime(unpacked || head), packed };
+  return { mime: sniffMime(unpacked || head), packed, head };
 }
 
 function parseCentral(block, at, entries, cdSize, cdOff, total) {
@@ -1019,98 +1120,233 @@ function apacheDate(d) {
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
          `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
-// Apache 2.4's autoindex, copied: the same table, the same icon column, the same date and size
-// columns, and the `<address>` line at the bottom. The only change is the first data row: where
-// Apache puts "Parent Directory", this puts "Download Zip".
-//
+// ─── the listing: Chrome's `file:///` directory page, node for node ───────────────────────────
+// His saved tab (2026-10-25) IS the spec: `<h1>` with the bottom rule, `[parent directory]`, a
+// Name / Size / Date Modified table with Chrome's own icons, "135 kB" sizes, "10/18/26, 5:13:38 PM"
+// dates and sortable headers. The icons and the CSS below are that page's own. What this page adds
+// is CONTENT: a folder opens the same page one level down, a file is an address inside the archive,
+// and the download link sits under the parent link.
+const ICON_FILE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAABnRSTlMAAAAAAABupgeRAAABEElEQVR42nRRx3HDMBC846AHZ7sP54BmWAyrsP588qnwlhqw/k4v5ZwWxM1hzmGRgV1cYqrRarXoH2w2m6qqiqKIR6cPtzc3xMSML2Te7XZZlnW7Pe/91/dX47WRBHuA9oyGmRknzGDjab1ePzw8bLfb6WRalmW4ip9FDVpYSWZgOp12Oh3nXJ7nxoJSGEciteP9y+fH52q1euv38WosqA6T2gGOT44vry7BEQtJkMAMMpa6JagAMcUfWYa4hkkzAc7fFlSjwqCoOUYAF5RjHZPVCFBOtSBGfgUDji3c3jpibeEMQhIMh8NwshqyRsBJgvF4jMs/YlVR5KhgNpuBLzk0OcUiR3CMhcPaOzsZiAAA/AjmaB3WZIkAAAAASUVORK5CYII=';
+const ICON_DIR = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABt0lEQVR42oxStZoWQRCs2cXdHTLcHZ6EjAwnQWIkJyQlRt4Cd3d3d1n5d7q7ju1zv/q+mh6taQsk8fn29kPDRo87SDMQcNAUJgIQkBjdAoRKdXjm2mOH0AqS+PlkP8sfp0h93iu/PDji9s2FzSSJVg5ykZqWgfGRr9rAAAQiDFoB1OfyESZEB7iAI0lHwLREQBcQQKqo8p+gNUCguwCNAAUQAcFOb0NNGjT+BbUC2YsHZpWLhC6/m0chqIoM1LKbQIIBwlTQE1xAo9QDGDPYf6rkTpPc92gCUYVJAZjhyZltJ95f3zuvLYRGWWCUNkDL2333McBh4kaLlxg+aTmyL7c2xTjkN4Bt7oE3DBP/3SRz65R/bkmBRPGzcRNHYuzMjaj+fdnaFoJUEdTSXfaHbe7XNnMPyqryPcmfY+zURaAB7SHk9cXSH4fQ5rojgCAVIuqCNWgRhLYLhJB4k3iZfIPtnQiCpjAzeBIRXMA6emAqoEbQSoDdGxFUrxS1AYcpaNbBgyQBGJEOnYOeENKR/iAd1npusI4C75/c3539+nbUjOgZV5CkAU27df40lH+agUdIuA/EAgDmZnwZlhDc0wAAAABJRU5ErkJggg==';
+const ICON_UP = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAACM0lEQVR42myTA+w1RxRHz+zftmrbdlTbtq04qRGrCmvbDWp9tq3a7tPcub8mj9XZ3eHOGQdJAHw77/LbZuvnWy+c/CIAd+91CMf3bo+bgcBiBAGIZKXb19/zodsAkFT+3px+ssYfyHTQW5tr05dCOf3xN49KaVX9+2zy1dX4XMk+5JflN5MBPL30oVsvnvEyp+18Nt3ZAErQMSFOfelCFvw0HcUloDayljZkX+MmamTAMTe+d+ltZ+1wEaRAX/MAnkJdcujzZyErIiVSzCEvIiq4O83AG7LAkwsfIgAnbncag82jfPPdd9RQyhPkpNJvKJWQBKlYFmQA315n4YPNjwMAZYy0TgAweedLmLzTJSTLIxkWDaVCVfAbbiKjytgmm+EGpMBYW0WwwbZ7lL8anox/UxekaOW544HO0ANAshxuORT/RG5YSrjlwZ3lM955tlQqbtVMlWIhjwzkAVFB8Q9EAAA3AFJ+DR3DO/Pnd3NPi7H117rAzWjpEs8vfIqsGZpaweOfEAAFJKuM0v6kf2iC5pZ9+fmLSZfWBVaKfLLNOXj6lYY0V2lfyVCIsVzmcRV9Y0fx02eTaEwhl2PDrXcjFdYRAohQmS8QEFLCLKGYA0AeEakhCCFDXqxsE0AQACgAQp5w96o0lAXuNASeDKWIvADiHwigfBINpWKtAXJvCEKWgSJNbRvxf4SmrnKDpvZavePu1K/zu/due1X/6Nj90MBd/J2Cic7WjBp/jUdIuA8AUtd65M+PzXIAAAAASUVORK5CYII=';
+const INDEX_CSS = `
+  h1 { border-bottom: 1px solid #c0c0c0; margin-bottom: 10px; padding-bottom: 10px; white-space: nowrap; }
+  table { border-collapse: collapse; }
+  th { cursor: pointer; }
+  td.detailsColumn { padding-inline-start: 2em; text-align: end; white-space: nowrap; }
+  a.icon { padding-inline-start: 1.5em; text-decoration: none; user-select: auto; }
+  a.icon:hover { text-decoration: underline; }
+  a.file { background: url("${ICON_FILE}") left top no-repeat; }
+  a.dir { background: url("${ICON_DIR}") left top no-repeat; }
+  a.up { background: url("${ICON_UP}") left top no-repeat; }
+  html[dir=rtl] a { background-position-x: right; }
+  #parentDirLinkBox, #downloadBox { margin-bottom: 10px; padding-bottom: 10px; }
+`;
+
+// site already ships in `icons/` — a folder, an image, a video, a sound, an archive, text/code, and
+// the grey ones for everything else. The slot, the padding and the position stay Chrome's.
+const ICON_BY_KIND = {
+  image2: 'png jpg jpeg gif webp bmp ico svg avif tif tiff heic'.split(' '),
+  movie: 'mp4 m4v mov webm mkv avi wmv flv'.split(' '),
+  sound1: 'mp3 m4a aac ogg oga opus flac wav'.split(' '),
+  compressed: 'zip gz bz2 xz 7z rar tar tgz apk jar deb rpm'.split(' '),
+  text: 'txt md html htm json js css csv xml sh py diff ini yml yaml log c h jsx ts tsx'.split(' '),
+};
+const iconUrl = (name) => siteUrl('icons/' + name + '.gif');
+function iconForFile(path) {
+  const ext = ((String(path).match(/\.([A-Za-z0-9]+)$/) || [])[1] || '').toLowerCase();
+  for (const [icon, list] of Object.entries(ICON_BY_KIND)) if (list.includes(ext)) return icon;
+  if (ext === 'pdf') return 'binary';
+  return 'unknown';
+}
+// Chrome's size column, in binary units: 770 B, 6.0 kB, 135 kB, 2.6 MB (one decimal under 100).
+function fmtSize(n) {
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 1024) return `${n} B`;
+  const units = ['kB', 'MB', 'GB', 'TB'];
+  let v = n, i = -1;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+// Chrome's date column: 10/18/26, 5:13:38 PM (local, 2-digit year).
+function fmtDate(d) {
+  if (!d || isNaN(d)) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  const h = d.getHours();
+  return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}, ` +
+         `${(h % 12) || 12}:${p(d.getMinutes())}:${p(d.getSeconds())} ${h >= 12 ? 'PM' : 'AM'}`;
+}
 // The page is built BEFORE the directory is read, so a `.`-address shows "Index of …" at once and
 
-// offline and wait for the information to be decoded from server").
-function indexView(label, total) {
+//
+
+// (a row's address is `/file/<archive>/<path>`, never doubled), `parentHref` adds the
+// `[parent directory]` box, and `downloadDir` puts "Download current dir as zip" under it.
+function indexView(label, total, opts) {
+  opts = opts || {};
+  const baseLabel = opts.base || label;
   resetPage('');
   const state = { label, total: total || 0 };
   document.title = `Index of ${label}`;
 
+  // The head a `file:///` listing has: the color-scheme meta (white in light mode, dark in dark)
+  // and that page's own stylesheet.
+  if (!document.head.querySelector('meta[name="color-scheme"]')) {
+    const meta = document.createElement('meta');
+    meta.name = 'color-scheme';
+    meta.content = 'light dark';
+    document.head.appendChild(meta);
+  }
+  if (!document.getElementById('b2p-index-style')) {
+    const style = document.createElement('style');
+    style.id = 'b2p-index-style';
+    style.textContent = INDEX_CSS;
+    document.head.appendChild(style);
+  }
+
   const h1 = document.createElement('h1');
-  h1.id = 'where';
+  h1.id = 'header';
   h1.textContent = `Index of ${label}`;
   body.appendChild(h1);
 
-  const table = document.createElement('table');
-  const rule = () => {
-    const tr = document.createElement('tr');
-    const th = document.createElement('th');
-    th.colSpan = 5;
-    th.appendChild(document.createElement('hr'));
-    tr.appendChild(th);
-    table.appendChild(tr);
-  };
-  const head = document.createElement('tr');
-  const iconTh = document.createElement('th');
-  iconTh.setAttribute('valign', 'top');
-  const blank = document.createElement('img');
-  blank.src = '/icons/blank.gif';
-  blank.alt = '[ICO]';
-  iconTh.appendChild(blank);
-  head.appendChild(iconTh);
-  for (const text of ['Name', 'Last modified', 'Size', 'Description']) {
-    const th = document.createElement('th');
+  if (opts.parentHref) {
+    const box = document.createElement('div');
+    box.id = 'parentDirLinkBox';
     const a = document.createElement('a');
-    a.href = '#';
-    a.textContent = text;
-    th.appendChild(a);
-    head.appendChild(th);
+    a.id = 'parentDirLink';
+    a.className = 'icon up';
+    a.href = opts.parentHref;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    const span = document.createElement('span');
+    span.id = 'parentDirText';
+    span.textContent = '[parent directory]';
+    a.appendChild(span);
+    box.appendChild(a);
+    body.appendChild(box);
   }
-  table.appendChild(head);
-  rule();
 
-  const addRow = (icon, alt, text, onClick, date, size) => {
+  // The downloads sit where a `file:///` page has nothing: under the parent link (and in its place
+  // at the archive root, which has no parent).
+  let zipLink = null, dirLink = null;
+  if (!opts.parentHref || opts.downloadZip || opts.downloadDir) {
+    const box = document.createElement('div');
+    box.id = 'downloadBox';
+    if (!opts.parentHref || opts.downloadZip) {
+      zipLink = document.createElement('a');
+      zipLink.id = 'download-zip';
+      zipLink.className = 'icon file';
+      zipLink.href = '#';
+      zipLink.textContent = 'Download Zip';
+      zipLink.title = state.total ? `Download ${state.label} (${fmt(state.total)})` : `Download ${state.label}`;
+      zipLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        zipLink.textContent = 'fetching…';
+        try {
+          const got = opts.downloadZip ? await opts.downloadZip() : await saveWholeArchive();
+          status(`saved ${got.name} — ${fmt(got.size)}`);
+        } catch (err) { status(`could not fetch the archive: ${err.message}`, true); }
+        zipLink.textContent = 'Download Zip';
+      });
+      box.appendChild(zipLink);
+      if (opts.downloadDir) box.appendChild(document.createTextNode(' · '));
+    }
+    if (opts.downloadDir) {
+      dirLink = document.createElement('a');
+      dirLink.id = 'download-dir';
+      dirLink.className = 'icon dir';
+      dirLink.href = '#';
+      dirLink.textContent = 'Download current dir as zip';
+      dirLink.addEventListener('click', async (e) => {
+        e.preventDefault();
+        dirLink.textContent = 'zipping…';
+        try {
+          const got = await opts.downloadDir();
+          status(`saved ${got.name} — ${fmt(got.size)}`);
+        } catch (err) { status(`could not zip this folder: ${err.message}`, true); }
+        dirLink.textContent = 'Download current dir as zip';
+      });
+      box.appendChild(dirLink);
+    }
+    body.appendChild(box);
+  }
+
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  headRow.className = 'header';
+  headRow.id = 'theader';
+  const TH = (id, text, cls) => {
+    const th = document.createElement('th');
+    th.id = id;
+    if (cls) th.className = cls;
+    th.tabIndex = 0;
+    th.setAttribute('role', 'button');
+    th.textContent = text;
+    headRow.appendChild(th);
+    return th;
+  };
+  const byName = TH('nameColumnHeader', 'Name');
+  const bySize = TH('sizeColumnHeader', 'Size', 'detailsColumn');
+  const byDate = TH('dateColumnHeader', 'Date Modified', 'detailsColumn');
+  thead.appendChild(headRow);
+  const tbody = document.createElement('tbody');
+  tbody.id = 'tbody';
+  table.append(thead, tbody);
+  body.appendChild(table);
+
+  // Chrome's own sort: a header click flips the order, names as text, size and date as numbers.
+  const sortTable = (column) => {
+    const oldOrder = parseInt(headRow.cells[column].dataset.order || '1', 10);
+    const nextOrder = 0 - oldOrder;
+    headRow.cells[column].dataset.order = String(nextOrder);
+    const rows = [...tbody.rows];
+    rows.sort((r1, r2) => {
+      const a = r1.cells[column].dataset.value;
+      const b = r2.cells[column].dataset.value;
+      if (column) {
+        const x = Number(a), y = Number(b);
+        return x > y ? nextOrder : x < y ? oldOrder : 0;
+      }
+      return a > b ? nextOrder : a < b ? oldOrder : 0;
+    });
+    for (const r of rows) tbody.appendChild(r);
+  };
+  for (const [th, column] of [[byName, 0], [bySize, 1], [byDate, 2]]) {
+    th.onclick = () => sortTable(column);
+    th.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { sortTable(column); e.preventDefault(); }
+    };
+  }
+
+  const addRow = (cls, text, onClick, date, size, href) => {
     const tr = document.createElement('tr');
-    const ic = document.createElement('td');
-    ic.setAttribute('valign', 'top');
-    const img = document.createElement('img');
-    img.src = `/icons/${icon}.gif`;
-    img.alt = alt;
-    ic.appendChild(img);
-    tr.appendChild(ic);
-    const nm = document.createElement('td');
+    const nameTd = document.createElement('td');
+    nameTd.dataset.value = text;
     const a = document.createElement('a');
-    a.href = '#';
+    a.className = `icon ${cls}`;
+    a.style.backgroundImage = `url("${iconUrl(cls === 'dir' ? 'folder' : iconForFile(text))}")`;
     a.textContent = text;
-    if (onClick) a.addEventListener('click', (e) => { e.preventDefault(); onClick(a); });
-    nm.appendChild(a);
-    tr.appendChild(nm);
-    const dt = document.createElement('td');
-    dt.setAttribute('align', 'right');
-    dt.textContent = date + '  ';
-    tr.appendChild(dt);
-    const sz = document.createElement('td');
-    sz.setAttribute('align', 'right');
-    sz.textContent = size;
-    tr.appendChild(sz);
-    const de = document.createElement('td');
-    de.textContent = '\u00a0';
-    tr.appendChild(de);
-    table.appendChild(tr);
+    a.href = href || '#';
+    if (href) {
+      a.target = '_blank';
+      a.rel = 'noopener';
+    } else if (onClick) {
+      a.addEventListener('click', (e) => { e.preventDefault(); onClick(a); });
+    }
+    nameTd.appendChild(a);
+    const sizeTd = document.createElement('td');
+    sizeTd.className = 'detailsColumn';
+    sizeTd.dataset.value = String(Number.isFinite(size) ? size : 0);
+    sizeTd.textContent = fmtSize(size);
+    const dateTd = document.createElement('td');
+    dateTd.className = 'detailsColumn';
+    dateTd.dataset.value = String(date && !isNaN(date) ? Math.floor(date.getTime() / 1000) : 0);
+    dateTd.textContent = fmtDate(date);
+    tr.append(nameTd, sizeTd, dateTd);
+    tbody.appendChild(tr);
     return a;
   };
-
-  const zipLink = addRow('back', '[PARENTDIR]', 'Download Zip', async (a) => {
-    a.textContent = 'fetching…';
-    try {
-      const bytes = await wholeFile();
-      saveBytes(bytes, state.label, 'application/zip');
-      status(`saved ${state.label} — ${fmt(bytes.length)}`);
-    } catch (err) { status(`could not fetch the archive: ${err.message}`, true); }
-    a.textContent = 'Download Zip';
-  }, '', '-');
-  zipLink.id = 'download-zip';
-  zipLink.title = state.total ? `Download ${state.label} (${fmt(state.total)})` : `Download ${state.label}`;
-
-  body.appendChild(table);
-  const addr = document.createElement('address');
-  addr.textContent = 'jarivizero.github.io';
-  body.appendChild(addr);
 
   return {
     // The name can be learned later (an id has none): the heading follows it, nothing is rebuilt.
@@ -1118,25 +1354,27 @@ function indexView(label, total) {
       state.label = next;
       h1.textContent = `Index of ${next}`;
       document.title = `Index of ${next}`;
-      zipLink.title = state.total ? `Download ${next} (${fmt(state.total)})` : `Download ${next}`;
+      if (zipLink) zipLink.title = state.total ? `Download ${next} (${fmt(state.total)})` : `Download ${next}`;
     },
     addMember(f) {
-      const [icon, alt] = iconFor(f.path, f.dir);
-      const text = f.path.replace(/\/$/, '') + (f.dir ? '/' : '');
-      const a = addRow(icon, alt, text, f.dir ? null : async (el) => {
+      const base = f.path.replace(/\/$/, '').split('/').pop() || f.path;
+      const text = base + (f.dir ? '/' : '');
+      // A file and a folder are both ADDRESSES inside the archive — the same shape a `file:///`
+      // listing has — so a click is a new tab at that path, never a save. Only a direct `https://`
+      // archive has no path to spell, and there the row stays a download.
+      const href = src.direct ? null : memberHref(baseLabel, f.path);
+      const a = addRow(f.dir ? 'dir' : 'file', text, f.dir || href ? null : async (el) => {
         el.textContent = text + ' …';
         try {
           const bytes = await memberBytes(f);
-          const base = f.path.replace(/^.*\//, '');
           saveBytes(bytes, base, mimeFromName(base));
           status(`saved ${base} — ${fmt(bytes.length)}`);
         } catch (err) { status(`could not read ${f.path}: ${err.message}`, true); }
         el.textContent = text;
-      }, apacheDate(f.modified), f.dir ? '-' : apacheSize(f.size));
-      if (!f.dir) {
-        a.className = 'member';
-        a.title = `${f.path} (${fmt(f.size)}) — only the bytes this member needs`;
-      }
+      }, f.modified, f.dir ? 0 : f.size, href);
+      a.className += f.dir ? ' folder' : ' member';
+      if (!f.dir) a.title = `${f.path} (${fmt(f.size)}) — opened by its own byte range`;
+      else a.title = `${f.path} — a folder in this archive`;
     },
   };
 }
@@ -1148,27 +1386,293 @@ function indexOf(files, total, label) {
   return view;
 }
 
-// A member of an archive, rendered BY its own byte range. `/file/<base>/bug.gif` lands here.
-async function renderZipMember(baseLabel, memberPath) {
-  const want = String(memberPath || '').replace(/^\/+/, '');
-  status(`Reading the directory of ${baseLabel}…`);
-  let listing = null, whole = null;
-  try {
-    listing = await readZipCentral();
-  } catch (e) {
-    // A packed payload has no byte-for-byte offsets; the whole file is the only way in.
-    whole = await wholeFile();
-    listing = await zipFromMemory(whole);
+// ─── a path INSIDE an archive: a member, a folder, or an archive in an archive ─────────────────
+// The address is the same shape a `file:///` path has — `/file/<archive>/<path>` — so a member is
+// its own tab (the worker answers it with the file ITSELF: right type, `Content-Disposition:
+// inline`, ranges), a folder is an `Index of` page of its direct children, and a `.zip` inside a
+
+function findEntry(files, want) {
+  const w = String(want || '').replace(/\/+$/, '');
+  if (!w) return null;
+  const hit = files.find((f) => f.path === w)
+    || files.find((f) => f.path.toLowerCase() === w.toLowerCase())
+    || files.find((f) => f.path.endsWith('/' + w))
+    || files.find((f) => f.dir && f.path.replace(/\/$/, '') === w);
+  if (hit) return hit;
+  // A folder that only exists as a PREFIX (a zip with no directory entries of its own).
+  const inside = files.find((f) => f.path.startsWith(w + '/'));
+  return inside ? { path: w + '/', size: 0, dir: true, modified: null } : null;
+}
+
+// The rows of the address's own archive: a tt2png index carries the archive's listing already, so
+// that copy is free; otherwise it is the archive's central directory (one tail range).
+async function rootRows() {
+  if (src.tt && Array.isArray(src.tt.files) && src.tt.files.length && !src.tt.inner) {
+    return src.tt.files.map(listedMember);
   }
-  const find = (test) => listing.files.find(test);
-  const entry = find((f) => f.path === want)
-    || find((f) => f.path.toLowerCase() === want.toLowerCase())
-    || find((f) => f.path.endsWith('/' + want));
-  if (!entry) throw new Error(`"${want}" is not in ${baseLabel}`);
-  if (entry.dir) throw new Error(`"${want}" is a folder, not a file`);
-  const bytes = whole ? await extractFrom(whole, entry) : await memberBytes(entry);
-  const name = entry.path.replace(/^.*\//, '');
-  await renderBytes(bytes, name, baseLabel);
+  return (await centralListing()).files;
+}
+
+// `{ files, read(path) }` for the address's archive, read ONCE per page: the directory for a
+// member's byte offsets, and the whole file only when the payload is packed (its offsets are not
+// byte offsets, so nothing below can be a range).
+let central = null;
+function centralListing() {
+  if (!central) central = (async () => {
+    try {
+      const listing = await readZipCentral();
+      return { files: listing.files, read: (f) => memberBytes(f) };
+    } catch (e) {
+      console.warn('the archive directory is not readable by range:', e.message);
+      const bytes = await wholeFile();
+      const listing = await zipFromMemory(bytes);
+      return { files: listing.files, read: (f) => extractFrom(bytes, f) };
+    }
+  })();
+  return central;
+}
+async function rootRead(path) {
+  const archive = await centralListing();
+  const entry = findEntry(archive.files, path);
+  if (!entry) throw new Error(`"${path}" is not in the archive`);
+  return archive.read(entry);
+}
+
+// A member as the INDEX recorded it (`tiktokupload.py`'s listing, which travels in the index).
+function listedMember(f) {
+  const path = String(f.path || '');
+  const when = f.modified ? new Date(f.modified) : null;
+  return { path, size: Number(f.size) || 0, dir: !!f.dir || /\/$/.test(path),
+           modified: when && !isNaN(when) ? when : null };
+}
+
+// The address of one path inside an archive: `/file/<archive>/<path>`.
+function memberHref(label, path) {
+  const rel = String(path).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
+  return siteUrl('file/' + encodeURIComponent(label || 'archive.zip') + '/' + rel);
+}
+// The folder one step up (`''` is the archive root).
+function folderHref(label, prefix) {
+  const up = String(prefix || '').replace(/[^/]+\/$/, '');
+  return up ? memberHref(label, up) : siteUrl('file/' + encodeURIComponent(label || 'archive.zip'));
+}
+
+// One level of a listing: the DIRECT children of `prefix` only, folders first, then by name — what
+// a `file:///` directory tab shows (and what makes a folder worth its own page).
+function fillFolder(view, prefix, files) {
+  const rows = new Map();
+  for (const f of files) {
+    if (!f.path.startsWith(prefix)) continue;
+    const rest = f.path.slice(prefix.length);
+    if (!rest) continue;
+    const cut = rest.indexOf('/');
+    const name = cut < 0 ? rest : rest.slice(0, cut + 1);
+    if (!rows.has(name)) {
+      rows.set(name, { path: prefix + name, size: cut < 0 ? Number(f.size) || 0 : 0,
+                       dir: cut >= 0, modified: f.modified || null });
+    }
+  }
+  const list = [...rows.values()].sort((a, b) =>
+    a.dir !== b.dir ? (a.dir ? -1 : 1) : (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  for (const f of list) view.addMember(f);
+  return list;
+}
+
+// A FOLDER inside an archive: its own `Index of` page, `[parent directory]`, and its own zip.
+// `zipBytes` is set when the archive being listed is one INSIDE another: its Download Zip is those
+
+async function renderZipFolder(label, prefix, files, read, zipBytes, addr) {
+  prefix = String(prefix || '').replace(/^\/+/, '');
+  if (prefix && !/\/$/.test(prefix)) prefix += '/';
+  addr = String(addr || label);
+  const shown = prefix ? `${label}/${prefix}` : label;
+  const innerName = label.replace(/^.*\//, '') || 'archive.zip';
+  const view = indexView(shown, 0, {
+    base: addr,
+    parentHref: prefix ? folderHref(addr, prefix) : null,
+    downloadZip: zipBytes && !prefix ? () => {
+      saveBytes(zipBytes, innerName, mimeFromName(innerName) || 'application/octet-stream');
+      return { name: innerName, size: zipBytes.length };
+    } : null,
+    downloadDir: prefix ? () => downloadFolder(label, prefix, files, read) : null,
+  });
+  fillFolder(view, prefix, files);
+  return view;
+}
+
+// Walk INTO an address: `/file/<outer>/<inner.zip>/<dir>/<file>`. Every archive on the way is
+// opened, so a zip in a zip is listed and entered exactly like the outer one.
+async function resolveArchivePath(rawPath) {
+  const parts = String(rawPath || '').split('/').filter(Boolean);
+  const consumed = [];
+  let files = await rootRows();
+  let read = rootRead;
+  let deepest = null;
+  while (parts.length) {
+    const name = parts[0];
+    const entry = findEntry(files, name);
+    const archive = entry && !entry.dir && /\.(zip|apk|jar|7z)$/i.test(name);
+    if (!archive) break;
+    parts.shift();
+    const bytes = await read(entry.path);
+    const inner = await openInnerArchive(bytes, entry.path);
+    deepest = bytes;
+    consumed.push(name);
+    files = inner.files;
+    read = (p) => inner.read(p);
+  }
+  return { consumed, files, rest: parts.join('/'), read, bytes: consumed.length ? deepest : null };
+}
+
+// `/file/<archive>/<path>` — the page route. A file renders as itself (a `file:///` tab would), a
+// folder becomes an `Index of` page, and an archive inside is listed rather than downloaded.
+async function renderZipPath(baseLabel, rawPath, baseAddr) {
+  const addrBase = baseAddr || baseLabel;
+  const { consumed, files, rest, read, bytes: deepest } = await resolveArchivePath(rawPath);
+  const label = consumed.length ? `${baseLabel}/${consumed.join('/')}` : baseLabel;
+  // Two layers, kept apart on purpose: the heading says the NAME (`Index of Pictures.zip`), the
+  // rows say the ADDRESS it was opened by (`/file/HVdZdhhWUAAmCh6/docs/`) — no decoded name in a url.
+  const addr = consumed.length ? `${addrBase}/${consumed.join('/')}` : addrBase;
+  if (rest === '' || /\/$/.test(rest)) return renderZipFolder(label, rest, files, read, deepest, addr);
+  const entry = findEntry(files, rest);
+  if (!entry) throw new Error(`"${rest}" is not in ${label}`);
+  if (entry.dir) return renderZipFolder(label, entry.path, files, read, deepest, addr);
+  if (/\.(zip|apk|jar|7z)$/i.test(entry.path)) {
+    const bytes = await read(entry.path);
+    const inner = await openInnerArchive(bytes, entry.path);
+    return renderZipFolder(`${label}/${entry.path}`, '', inner.files, (p) => inner.read(p), bytes,
+                           `${addr}/${entry.path}`);
+  }
+  await renderBytes(await read(entry.path), entry.path.replace(/^.*\//, ''), label);
+}
+
+async function downloadFolder(label, prefix, files, read) {
+  const members = files.filter((f) => !f.dir && f.path.startsWith(prefix));
+  if (!members.length) throw new Error('this folder is empty');
+  const entries = [];
+  for (const f of members) entries.push({ path: f.path.slice(prefix.length), bytes: await read(f.path) });
+  const base = prefix.replace(/\/$/, '').split('/').pop() || label.replace(/\.zip$/i, '');
+  const bytes = zipOf(entries);
+  const name = `${base}.zip`;
+  saveBytes(bytes, name, 'application/zip');
+  return { name, size: bytes.length };
+}
+// ─── a 7z INSIDE the archive: listed and read with JS7z (vendored, lazy) ──────────────────────
+// `vendor/js7z/` is 7-Zip 25.01 compiled to WebAssembly, the SINGLE-THREADED build: the multi-
+// threaded one needs SharedArrayBuffer, and a browser only exposes that on a cross-origin-isolated
+// page — GitHub Pages sends no COOP/COEP headers. It is fetched ONLY when a `.7z` is opened, and
+// every operation gets a FRESH runtime: an Emscripten `main()` may run once per runtime.
+let js7zLoading = null;
+function loadJs7z() {
+  if (!js7zLoading) js7zLoading = (async () => {
+    if (typeof window.JS7z !== 'function') {
+      await new Promise((ok, bad) => {
+        const s = document.createElement('script');
+        s.src = siteUrl('js7z.js');
+        s.onload = ok;
+        s.onerror = () => bad(new Error('JS7z could not be loaded'));
+        document.head.appendChild(s);
+      });
+    }
+    return window.JS7z;
+  })();
+  return js7zLoading;
+}
+// One run of 7-Zip over the member's bytes: write them into the virtual /in, run the command line
+// JS7z gets, then read whatever the caller wants out of the virtual file system.
+async function run7z(bytes, name, args, readOut) {
+  const JS7z = await loadJs7z();
+  const lines = [];
+  const rt = await JS7z({
+    print: (t) => lines.push(t),
+    printErr: () => {},
+    locateFile: (f) => siteUrl(f),
+  });
+  rt.FS.mkdir('/in');
+  rt.FS.writeFile('/in/' + name, bytes);
+  const exit = new Promise((ok) => { rt.onExit = (code) => ok(code); });
+  rt.callMain(args.map((a) => a.replace(/\{in\}/g, '/in/' + name)));
+  const code = await exit;
+  const out = readOut ? readOut(rt) : null;
+  // `print` is called ONCE PER LINE with the newline already stripped, so the lines are joined with
+  // one. Joined with '' the whole listing was a single line: `7z l -slt` then found no block and
+  // reported an archive with no members (measured 2026-10-25 — the table came up, empty).
+  return { code, out, log: lines.join('\n') };
+}
+// `7z l -slt` prints one record per member: Path / Size / Modified / Attributes, directories marked
+// `D` in Attributes. That is the whole listing — no member is extracted to build it.
+// Records are separated by a BLANK line, not by the `----------` banner: only that ONE banner exists,
+// between the archive's own header and its first member (measured 2026-10-25). So a record starts at
+// every `Path = ` line, and the header record — the archive itself — is dropped.
+function parse7zList(text, archiveIn) {
+  const rows = [];
+  let cur = null, first = true;
+  const flush = () => {
+    const rec = cur;
+    if (!rec) return;
+    const stamp = String(rec.Path || '');
+    const path = stamp.replace(/^\/+/, '');
+    const itself = first && (stamp === archiveIn || path === String(archiveIn).replace(/^\/+/, ''));
+    first = false;
+    cur = null;
+    if (!path || itself) return;
+    const when = String(rec.Modified || '').slice(0, 19).replace(' ', 'T');
+    const date = when ? new Date(when) : null;
+    const dir = /^D/.test(rec.Attributes || '');
+    // A directory keeps its trailing slash, the way a zip's own directory entry has one: without it
+    // the row is a FILE named `seven-docs` sitting beside a folder of the same name (measured).
+    rows.push({ path: dir ? path.replace(/\/+$/, '') + '/' : path, size: Number(rec.Size) || 0,
+                dir, modified: date && !isNaN(date) ? date : null });
+  };
+  for (const line of String(text).split(/\r?\n/)) {
+    const m = /^([A-Za-z][A-Za-z ]*?) = ?(.*)$/.exec(line);
+    if (!m) continue;
+    if (m[1] === 'Path') { flush(); cur = { Path: m[2] }; continue; }
+    if (cur) cur[m[1]] = m[2];
+  }
+  flush();
+  return rows;
+}
+// `{ files, read(path) }` for a 7z member — the same shape a zip hands out, so the rows, the folder
+// page and "Download current dir as zip" work unchanged.
+async function openSevenZip(bytes, entryPath) {
+  const name = entryPath.replace(/^.*\//, '').replace(/[^\w.\- ]/g, '_') || 'archive.7z';
+  const list = await run7z(bytes, name, ['l', '-slt', '{in}']);
+  if (list.code !== 0) throw new Error(`7-Zip could not list ${name} (exit ${list.code})`);
+  const files = parse7zList(list.log, '/in/' + name).map(listedMember);
+  return {
+    files,
+    read: async (p) => {
+      const want = String(p).replace(/^\/+/, '');
+      const got = await run7z(bytes, name, ['x', '-y', '-o/out', '{in}', want], (rt) => {
+        try { return rt.FS.readFile('/out/' + want).slice(); } catch (e) { return null; }
+      });
+      if (!got.out) throw new Error(`7-Zip could not read ${want} (exit ${got.code})`);
+      return new Uint8Array(got.out);
+    },
+  };
+}
+// Any archive member opened as `{ files, read(path) }`: a zip family by its own directory, a 7z with
+// JS7z.
+async function openInnerArchive(bytes, path) {
+  if (/\.7z$/i.test(path)) return openSevenZip(bytes, path);
+  const listing = await zipFromMemory(bytes);
+  return {
+    files: listing.files,
+    read: async (p) => {
+      const e = findEntry(listing.files, p);
+      if (!e) throw new Error(`"${p}" is not in ${path}`);
+      return extractFrom(bytes, e);
+    },
+  };
+}
+
+// The whole payload, saved under the name the address gave it.
+async function saveWholeArchive() {
+  const bytes = await wholeFile();
+  const name = src.name || 'archive.zip';
+  saveBytes(bytes, name, 'application/zip');
+  return { name, size: bytes.length };
 }
 
 // Member bytes out of an archive that is already in memory (the packed-payload path).
@@ -1215,6 +1719,82 @@ function chunkPayload(bytes) {
     off = end;
   }
   return null;
+}
+// ─── a tt2png ARCHIVE: the listing is in the index, the bytes are ranges of the chunks ─────────
+// `tiktokupload.py` reads an archive's own directory BEFORE uploading it and puts that listing in
+// the index (`archive: true`, `files`, `files_total`), so a zip's Index page costs exactly one
+// payload — the index — and no chunk at all. His 2026-10-25 report: `/file/HVdZdhhWUAAmCh6`
+// (a 5.8 KB packed index for an 8.4 MB `Pictures.zip`) downloaded both chunks before it would list
+// 27 names that were already in the index.
+//
+// A member is still a byte range: the chunks are cut at `chunk_size`, so byte N of the file is a
+// chunk plus an offset, and the worker's `ttPartPayload` reads only the part of that chunk's PNG it
+// needs (the payload starts at the PNG's own IEND). Cached here for the no-worker path.
+const ttWhole = new Map();
+async function ttChunk(i) {
+  if (ttWhole.has(i)) return ttWhole.get(i);
+  const c = src.tt.chunks[i] || {};
+  if (!c.url) throw new Error(`chunk ${i + 1} of ${src.tt.chunks.length} has no url`);
+  const res = await fetch(c.url, { mode: 'cors', credentials: 'omit' });
+  if (!res.ok) {
+    const err = new Error(`chunk ${i + 1}: HTTP ${res.status}`);
+    err.httpStatus = res.status;
+    throw err;
+  }
+  const payload = chunkPayload(new Uint8Array(await res.arrayBuffer()));
+  if (!payload) throw new Error(`chunk ${i + 1} is not a tt2png PNG`);
+  if (Number(c.size) && payload.length !== Number(c.size)) {
+    throw new Error(`chunk ${i + 1} holds ${payload.length} B, the index says ${c.size} B`);
+  }
+  ttWhole.set(i, payload);
+  return payload;
+}
+// ONE plan for this archive, in the worker's cache: it maps a file range to a chunk and fetches only
+// the PNG prefix that carries those bytes. Without a worker there is no prefix decode, so the chunk
+// itself is fetched (correct, just more bytes).
+let ttPlan = null;
+async function ttPlanUrl() {
+  if (ttPlan !== null) return ttPlan || null;
+  ttPlan = '';
+  const reg = await ensureStreamWorker();
+  if (!reg) return null;
+  const id = 'z' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const plan = { id, name: src.name || 'archive.zip', mime: 'application/zip',
+                 cap: Number(src.tt.chunk_size) || Number((src.tt.chunks[0] || {}).size) || CAPACITY,
+                 parts: src.urls, total: Number(src.tt.bytes) || 0, tt: true };
+  try {
+    const cache = await caches.open(STREAM_PLAN_CACHE);
+    await cache.put(new URL('__b2p/plan/' + id, streamScriptUrl()).href, new Response(JSON.stringify(plan), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+  } catch (e) { return null; }
+  ttPlan = new URL('__b2p/stream/?id=' + id, streamScriptUrl()).href;
+  return ttPlan;
+}
+// Tell the worker which bytes make up THIS archive, so `/file/<archive>/<member>` is answered with
+// the member itself — its type, `Content-Disposition: inline; filename="…"`, ranges — instead of a
+
+// is exactly the path segment the member address carries. Fire and forget: without the plan the
+// page route renders a member anyway (one directory read, then its bytes).
+async function shareArchivePlan(label) {
+  if (src.direct || src.packed) return;
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  try {
+    const plan = {
+      id: null, name: label, mime: 'application/zip',
+      cap: src.tt ? (Number(src.tt.chunk_size) || CAPACITY) : CAPACITY,
+      parts: src.urls,
+      total: await sourceSize(),
+      tt: !!src.tt,
+    };
+    const key = new URL(
+      '__b2p/plan/archive-' + (await sha256(new TextEncoder().encode(label))),
+      streamScriptUrl()).href;
+    const cache = await caches.open(STREAM_PLAN_CACHE);
+    await cache.put(key, new Response(JSON.stringify(plan), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+  } catch (e) { /* the renderer's own member route still works */ }
 }
 // ─── a tt2png video STARTS ON A BYTE RANGE, not on a whole part ───────────────────────────────
 // Until 2026-10-23 this page fetched every chunk, joined them, checked the sha256 and only then had
@@ -1533,6 +2113,41 @@ function followManifest(bytes) {
   };
 }
 
+// ─── an address that points at a LIST, not at the file ────────────────────────────────────────
+// Two payloads name other payloads: a bin2png MASTER (`#bin2png-manifest v1`, one small part) and a
+// tt2png INDEX (JSON naming chunks on a CDN, which also carries the archive's own listing).
+// Following it is what makes the listing cost one small payload instead of every part — his
+// 2026-10-25 report, `/file/HVdZdhhWUAAmCh6` (a 5.8 KB packed index for an 8.4 MB zip) read both
+// chunks before it would show a single name. `head` is the payload's first bytes, which every
+// caller has already read.
+let indexHops = 0;
+async function followIndex(head) {
+  if (!head || src.tt || indexHops >= 2) return false;
+  const plain = isPacked(head) ? (await unpackPrefix(head).catch(() => null)) || head : head;
+  // 1. a MASTER: the file's parts, tab separated.
+  if (isManifestHead(plain)) {
+    const master = followManifest(await wholeFile());
+    if (!master) return false;
+    indexHops++;
+    src = { ...src, name: master.name, urls: master.urls, direct: false, guess: false };
+    partCache.clear();
+    return true;
+  }
+  // 2. a tt2png INDEX. Only an ARCHIVE is taken over here: a media index keeps its own streaming
+  //    player (renderMedia), which already reads ranges.
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(plain.subarray(0, 64)).trimStart();
+  if (text.charAt(0) !== '{') return false;
+  const index = parseTt2png(await wholeFile());
+  if (!index || !/\.(zip|apk|jar)$/i.test(String(index.name || ''))) return false;
+  indexHops++;
+  src = { ...src, name: mimeFromName(src.name) ? src.name : (index.name || src.name),
+          urls: index.chunks.map((c) => c.url), direct: false, guess: false, tt: index };
+  partCache.clear();
+  ttWhole.clear();
+  ttPlan = null;
+  return true;
+}
+
 // ─── the router ───────────────────────────────────────────────────────────────────────────────
 let manifestDepth = 0;    // one hop only: a master that names a master is a bug, not a file
 let pendingVideo = null;  // the optimistic player: the SAME element gets the real stream
@@ -1701,10 +2316,15 @@ async function run() {
   // The first frame is decided by the ADDRESS alone: `,` says video, an extension in the path or in
   // `?name` says which element, `.` says the index page. Nothing is fetched to find out.
   const firstMime = where.hint ? mimeFromName(where.hint) : (ranged ? '' : mimeFromName(raw));
-  let index = null, indexLabel = '';
+  // The address AS TYPED, which is what every url this page writes keeps — an id stays an id, and
+
+  const typedToken = raw.split('/')[0];
+  let index = null;
   if (ranged) {
-    indexLabel = /\.[A-Za-z0-9]+$/.test(raw) ? raw : `${raw}.zip`;
-    index = indexView(indexLabel, 0);
+    // `.` says archive, the way `,` says video: an EMPTY `Index of /` is on screen before a byte is
+    // read — the heading a file manager opens with — and the rows arrive when the directory does.
+
+    index = indexView('/', 0, { base: typedToken });
   }
   let player = null;
   if (forceMedia) player = bareMedia('video');
@@ -1765,16 +2385,28 @@ async function run() {
 
   if (!mime && !zipByName) {
     try {
-      const probe = await sniffSource();
-      if (probe.packed) src.packed = true;
-      if (probe.zip) zipByName = true;
-      else if (probe.mime) {
-        mime = probe.mime;
-        const ext = { 'video/mp4': 'mp4', 'video/x-matroska': 'mkv', 'video/webm': 'webm',
-                      'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/flac': 'flac' }[mime] || '';
-        // Only when the existing suffix is not already a media type: an id has none, `clip.dat`
-        // has a useless one. The name is what a save will be called, so it should say what it is.
-        if (ext && !mimeFromName(src.name)) src.name = `${src.name}.${ext}`;
+      // TWO hops at most: an address can point at a LIST of parts (a master) or at a tt2png index,
+      // and what gets rendered is the file that list NAMES. The head those probes read is what says
+      // so — no second download.
+      for (let hop = 0; hop < 2 && !mime && !zipByName; hop++) {
+        const probe = await sniffSource();
+        if (probe.packed) src.packed = true;
+        if (probe.zip) { zipByName = true; break; }
+        if (await followIndex(probe.head)) {
+          mime = src.ranged ? '' : mimeFromName(src.name);
+          zipByName = !src.ranged && /\.(zip|apk|jar)$/i.test(src.name);
+          if (!player && !index) document.title = src.name;
+          continue;
+        }
+        if (probe.mime) {
+          mime = probe.mime;
+          const ext = { 'video/mp4': 'mp4', 'video/x-matroska': 'mkv', 'video/webm': 'webm',
+                        'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/flac': 'flac' }[mime] || '';
+          // Only when the existing suffix is not already a media type: an id has none, `clip.dat`
+          // has a useless one. The name is what a save will be called, so it should say what it is.
+          if (ext && !mimeFromName(src.name)) src.name = `${src.name}.${ext}`;
+        }
+        break;
       }
     } catch (e) {
       // A failed probe still leaves the whole-file path — but say WHY on the console, or a broken
@@ -1803,25 +2435,31 @@ async function run() {
     }
     if (mime === 'application/zip' || zipByName) {
       if (player) player.remove();
+      // A name that says `.zip` can still be an INDEX that names the archive — a tt2png index
+      // carries the archive's own name (`Pictures.zip`). ONE part tells, and it is the part the
+      // archive's own directory read would fetch anyway, so nothing is read twice.
+      if (!src.tt && !src.direct && src.urls.length === 1) {
+        await followIndex(await partPayload(0).catch(() => null));
+      }
       // An id (or a `.bin`) has no archive suffix; the archive still saves as one.
       const label = /\.(zip|apk|jar)$/i.test(src.name) ? src.name : `${src.name}.zip`;
+      // A path INSIDE the archive: `/file/<archive>/docs/readme.txt` or `/file/<archive>/docs/`.
       if (member) {
         if (index) resetPage();
-        await renderZipMember(label, member);
+        await renderZipPath(label, member, typedToken);
         return;
       }
       // The page is already up for a `.` address; only the rows were missing.
       if (index) index.setLabel(label);
       else index = indexView(label, 0);
-      let listing;
-      try {
-        listing = await readZipCentral();
-      } catch (e) {
-        // A packed payload has no byte-for-byte offsets: fall back to the whole file.
-        status(`${e.message} — fetching the whole archive instead…`);
-        listing = await zipFromMemory(await wholeFile());
-      }
-      for (const f of listing.files) index.addMember(f);
+      // Hand the worker this archive's plan: from here on `/file/<archive>/<member>` is answered
+      // with the member AS a file (its own type, `Content-Disposition: inline`, ranges).
+      // Shared under the ADDRESS the rows link to, so the worker answers `/file/<id>/<member>`
+      // without re-reading the archive's own directory first.
+      shareArchivePlan(typedToken || label);
+      // The rows: a tt2png index carries the archive's listing, so that copy costs no archive byte
+      // at all; anything else reads the central directory (one tail range).
+      fillFolder(index, '', await rootRows());
       return;
     }
     if (mime.startsWith('image/')) {
