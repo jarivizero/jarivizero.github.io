@@ -860,14 +860,35 @@ function ttWinPut(key, off, bytes) {
 // cache (neither has finished) and the chunk is fetched twice — measured 2026-10-25 on his 267 MB
 // index: 10 chunk reads for 7 chunks, 52.5 MiB instead of 32.3 MiB. Same for the 512-byte probe,
 // which two racing callers both ran.
-const TTLOCK = new Map();       // "<url>@<off>+<want>" -> promise
+const TTLOCK = new Map();       // "<url>#head" -> promise (the 512-byte probe)
+const TTFLIGHT = new Map();     // url -> promise of { off, bytes }: one fetch of a chunk at a time
 function ttWindow(plan, i, off, want) {
-  const lock = plan.parts[i] + '@' + off + '+' + want;
-  const cur = TTLOCK.get(lock);
-  if (cur) return cur;
-  const job = ttWindowNow(plan, i, off, want).finally(() => TTLOCK.delete(lock));
-  TTLOCK.set(lock, job);
-  return job;
+  const key = plan.parts[i];
+  const serve = async () => {
+    const hit = ttWinGet(key, off, want);
+    if (hit) return hit;
+    const known = payloadOf.get(key);
+    if (known) return known.subarray(off, off + want);
+    return ttWindowNow(plan, i, off, want);
+  };
+  const cur = TTFLIGHT.get(key);
+  if (cur) {
+    // Somebody is already fetching this chunk. Wait for THEIR bytes and slice if they cover us;
+    // otherwise take our own turn. A plain per-window lock was not enough: the prefetch asks for the
+    // whole chunk (want = cap) and the read that follows asks for exactly what is left (want =
+    // end-at+1), so the two keys differed and the chunk went out twice — measured 2026-10-25.
+    return cur.then(
+      (w) => (w && off >= w.off && off + want <= w.off + w.bytes.length
+        ? w.bytes.subarray(off - w.off, off - w.off + want)
+        : serve()),
+      () => serve(),
+    );
+  }
+  const job = serve()
+    .then((bytes) => ({ off, bytes }))
+    .finally(() => { TTFLIGHT.delete(key); });
+  TTFLIGHT.set(key, job);
+  return job.then((w) => w.bytes);
 }
 async function ttWindowNow(plan, i, off, want) {
   const key = plan.parts[i];
