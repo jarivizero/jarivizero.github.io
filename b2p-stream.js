@@ -805,6 +805,7 @@ async function fetchPrefix(url, from, want) {
   const body = new Uint8Array(await res.arrayBuffer());
   netBytes.set(url, (netBytes.get(url) || 0) + body.length);
   noteReq('prefix', url, from, want, body.length);
+
   // 200 = the server ignored Range and sent the whole file, which is also a fine answer.
   return { bytes: body, whole: res.status !== 206 };
 }
@@ -877,7 +878,7 @@ async function ttWindow(plan, i, off, want) {
   if (!res.ok && res.status !== 416) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
   const body = new Uint8Array(await res.arrayBuffer());
   netBytes.set(key, (netBytes.get(key) || 0) + body.length);
-  noteReq('window', key, off, want, body.length);
+  noteReq('win:' + String(plan.name || plan.id || '?').slice(0, 12), key, off, want, body.length);
   // A read that covers the whole chunk keeps it (payloadOf is checked before any fetch), so the next
   // reader of this chunk — a second stream, or the member after its directory — costs nothing.
   if (off === 0 && plan.cap && body.length === plan.cap) {
