@@ -92,7 +92,7 @@ const FILE_PAGE = /(?:^|\/)file(?:\/.*)?$/;
 //
 // This is the ONE branch that can swallow somebody else's page, because a scope-`/` worker cannot
 // know what else the site holds. So it is as narrow as a pbs media id really is: EXACTLY 15
-// characters of `[A-Za-z0-9_-]` (`HU3i7XEWEAAav21`, `HU8rfVgXAAAIJm-`), optionally with one
+
 // extension. It used to accept `{10,}`, which ate `TwitterMP4Extractor` (19 chars) and
 // `randomfilename` (14) — measured 2026-10-20: the first came back as a blank renderer with status
 // 200, the second as the 404 art, while the server was serving the real page both times.
@@ -107,7 +107,7 @@ async function serveFilePage(extraScript) {
     .then((r) => (r.ok ? cache.put(PAGE_URL, r.clone()) : null)).catch(() => {});
   const res = hit || await fetch(PAGE_URL);
   if (!extraScript) return res;
-  // The renderer, with the logger spliced in just before </body>. Everything the page already does
+  
   // — the player, the byte ranges, the zip listing — is untouched.
   const html = await res.text();
   const at = html.lastIndexOf('</body>');
@@ -123,34 +123,22 @@ async function serveFilePage(extraScript) {
 // this file can hold the digest and the ciphertext while holding neither the id nor the script.
 //
 
-// watch a video while it being logged" — the first cut answered the navigation with a sealed PAGE,
-// which replaced the whole DOM, so the video never loaded and all it did was log). /file/<id> must
-// behave exactly as it always did: same renderer, same player, same bytes; the logger only rides
-// along. It logs `?file=<id>`, `?file=ua:…`, `?file=ref:…`, `?file=fullurl:…`, `?file=swver:…`,
 // `?file=window:<window.name>`.
 //
-// Sealed with projects/bin2png/canary.mjs (the source script is canary-payload.js there):
-//   node canary.mjs seal <preimage> canary-payload.js
+
 // A digest says nothing about the id, and the blob nothing about the script.
-const CANARY = {
-  // The real id. The digest is known; the sealed page is empty until somebody who has the
+const TBL = {
+  
   // preimage seals it — sealing needs the key, which is the id itself. Empty = no branch.
   'f0c84741842fec749395f74d62bfe2ada0a1dca710aa9c8c10471134ae9d273f': 'v1.7bOstgRywJF-2nrf.OV_4luGHov_bCUKctoZaeazjg2ZRYGIspS50cyNKmR47cmfFYwn_ct0cXiy5gsGx0aYbsuPDaw736R9tOyocZkK-ALK3EfzMhNSUZW4AAVp9tZ2yK1XtCKa_yWA_TSOxJvEGMHbwCf4mJNaMnVHbujSYx4j4T5g-lZ0beB3kXBnMbmuKeYP2Mt6KsU2VS2F-QDxyy1RQiXIc4GXixRevWDnS_QVjFR8ACbMl2GT-2cKnGqkBLxd4bpDkllAwN7ymvlPwLRklZ19DAvcR2x-0b-F6ZdS7Urp58DkphCmsoUOhltmrs-UMueqoEvHQTrdxmSgIruTwYtAA6jMQF7uAZ9uhOuf40Ixj5zOP5TFKxuPRJ8puBkRhOvUwNnmWZd35z8o8e_TFjlTNCPy6mYF0fyccMLGMJl1NY2mMbF0mrlt4X-T7Bq0VpKaT4Il2p_Wd3TqGAJAanzkCfW68-v8NRgM9wNYKMEzVUSCT6dTLEdmAV5UhHb4FCBZx3BoIAgvFBBV8iP5ffOSvqacTNJslg3sum2FP2RFZQYUVr8WFIcs8s9V1IBXf5ZYiTE4q57gvUmhyW9owhT-fWRL7vgAKyFopxGECGm6nS20YVtGHH56sqs2TMPYogme2CoCaKIF2gZuF_GK3P27Mml2kCNbL6QlB6vgoOO6YcCTr6OXC3irhBcyvTsMsk9E16aRwH4Fi0LfSxweOhqZnEPVMoLtYISdP_z0nZG9DMQsj_ZaAIbr127PY_shBARE1yLYFmpwJ2hslHgeSvlxS-F3z2l0Vh--Se32tD5wEOG_lVMBjEQyRMGeIgeZSn2dI9aqFMnit56-yXarh-BX_SMITgX00GndqOGzUnFB368Ofrz48rj4BOlMoOk8S4OpTEmSJfce2TRCLEtPIZbHN68zLA7CRJuf0M-OsYTz9HClghDWcBG_NYnUMil2r-JcbN-_PQaD4S5hV0itdZBApgYxmhsKzBFoIyPGYVS-ZJOceM_HgZYDbw_9o04VFp_jjPLDdpXuzOywMqqP3Hwf0rHms9WN-dh0y7XaqaTAZyLDOvsvaGWQXgiUYHSo48Fidc9yBldctQjL6WgeWoLuc5mG1gqIym_NldEq3wXlHq6OFSXcE3TVUzOnqWcF5-L2tQvwKh9kr1DNU7au5YM-M9kqJWoMa_S1SaqNeZPKY2vV5zsB55mEEMfTrxKEHdBwKA7TrFQT3WKHF0Q8eZgHyPTQZNlxFIbOu9qaHWwZEgHr-T1xNZgEtwJ0wykaVz0lIh3gbqnz-WTPEPCQZf0P7e9SOcq7sKZoOvpCiTCM5_0sun_YpWqoqTggrGdPQQ0-sbPlNTf-pxn3iK_e-14ZFwNAREvQaf2KCv2D2uZRErpHiVlcY85OHAYosqkF4S8ibaXYkeOwcFvU-K53L3BYLnjuIcKxcPE9ynPenSiAxMhg4zom8TL2hXw7ka_krQtRBQD8dYS625ClukDX1ADMRxmrQFyvF7D8cbpSHfkaIIH2zQ5Vo5-13lWcbt5mwLDt-4JcXwTA3VBgpvSJgS9L4lQ-bLo-bM7ebiUi2AIiBlF6LJ_tLWrybUjXePFEF-czIOP2IfcHbN_qAHhf0rUkeTWoPFCXhMaQiAaB-2c85r7oADyDZonJbWTU7JzqEd8W5xzxrOUJkFBxA9WQhVppQZoyOl-BpHCmxxQj9CZmOZ45CbEtsoGdRbuWUd0tNKP4XHRS5eAfYTOtI0aa5ZedL_UWUuhY3M4tgRli0Zjqgs4EglcCmZzHm4iwxxTGZsvl26Gjt7dkFXfWk1FeFcv8e5eMrSLb9VD01TRHf26TJIgx0cjGg9G4SaJSVlxb5nTg_xVStUd7ox7FR2huV-nyGbiyb9eJF1Ul94knb4oHVtykAnFwBucx9iB4Dx5BYazXZz0umlXXxmoCSnE0Ha4M69wwvtablTNIcp8a_kwUfloOkO2_za2KM0BgZ9yww5wTITXFre3ao0bSWnZBNuI3fREC9iN3MVDtzKXrMNFRQUef4kv3sq5KfaTm0PrGpVl7KOGvm3OmJFHJpZzCJUyityb0Ah5YmhSj6cFIxQmk8SrEegnt83sJACiyNx1lXUgP6C9Wqo-IYTBlDku1T4f5lkSiH_vDnthJdR0RcqY98MfpSTCiTdXrHMLvxmQFfkOHE5wPNjMtK6jISC9d6nFYFnL30HuLrnrGI-dXE25nIgEltJPGXV2PpqThDaKwn8XEfAsL1A0ZlhXOCr_5DPmz6axNJOYxKtXuV02qoJSeVE_rQpV9USESmL3COHJaaB1WNjV53jW8tybyTW1pPNVT0SXTys3DvLoB7hGYbqiN147ian08IYtlGthqB3F36BdUjF_IUeNjvMl43VEC5dIMyj39N6jvFnn85K3XV-qytaJKMXLoG5H_FKtQWpzfnocngl_0i2JOrF0SX80hQPwZaVI6eOTE5G9RAq6_sQr_8nzFRrK_qADQA_7q9cZFNYUFK8YlW2F8idAQ9Ba0GPm0Ccyx_VYZSHR8CmoVfEh8M-v98RSNbphepq5nXaVxsjMYL5LQkRnnALnJlS19VixocCUVWQYkk-WllUfIxlSXJEdHuoW_2SLBRWc5xvDRF6WBqjCDt4537IfYks3fF6woL0g2Dnx3OjMeLlJYBywu8CxNiNHCvPmDM6fin-LncMaG1XDUW4FNCigDwPUjzlVkhdru8O11xhYwgE-_2qHYdvBMDponsywCPnL6Rq2J2T4p1z_C8Tduf50BzCU8bxUbi49iheaKiH1vnutozQR5kxJop2zztPK6XnQbb4bOAWLdGubDuMjnUj21PVHnugzAjI4-7u9Umtrzzs25hYBDt3iA1CRegVr5kHuqusXn_Mp8vfiHgMBO_5BLbalZMMIT6HeY2eI73iFAUG5pi_anQGMfXC8e1VLAb1FrvH8NFN_frDRN3aq3jTgkhBiiN_4Qte1TYNb9JKV_nYCXwZlByHGFnfZfINKbODh3wGwQOfwV4kPUZxIPqnQPsb8xMpGDmxn5aEOqXaBX2cg',
-
-  // joins the ids that log. Same payload, sealed for its own digest; nothing else changes.
-'3f563941b47cd309eb11de9cf2021496aab4c0272f77124556d5a2ba030aabaa': 'v1.zpAE3J5ecRyR62wc.agVshNxf7PAwyFGAGN4W_Qh3hxvOIwOoOIHVzKm-wYRSg8RMSNLdAG7edWAf3tD-cHu-ti7uw3qZRlrFux6O3LT1gWzdwsZZg_gl6A8S6DWssjGhsxsFIauY0cZHoZwS5YGnQBqjivjBizN1jdpMhWR7-DKCiIQx_J3373JiR-cffYinfz6EqEAkumbHqfMtFdM_u1eCoDydPWFdWVPyRJ6fnYg1hhquXI-7lkDtF3yHWQHPpuUzBpEV6CiBAVqFFG-j4XjQB-sjZoSh6kNy3L1_u8dTP_Jc0huI-q3t0sVKz8Ul1J-vHJ97RE4a5V3G1Rtb21X40wPQ0VglBKBfK3_iGuP3jSxRGGt_hjBgpGQraG_6ZK20UxWIz0jUjZSr-b156T74GPxycDC0sQgO5090PcREFscmPD0Zg8OcfkqPwKgf65ijVE8-36f3AYqXVAsoQrQaMylduLGfw8SOuewb-JU17eLC8cZI7no7xBZzyArRbUOWjcQNR4g8LnYA1mfnYElzQz8xddzWLMT4Ep-so-2ScS5pZTPu9bZcIBgqYiwhvaMWaOKVgoPRGNgCgEBfwN6q8hvQRmXOXvhAInh8wHQW_zU4ZaQ0NOT78m3KvA_jgTj8SSn23i-MI327b_tbWRYrEaUo-YBgB_GxHWq3z7MBzPs8AmMTt6A26_zqxlqgrPITWiH14KzvDVXZxq4uept1GPQ-JoNC4GK_p0YOJu2TGdJmZNKGz-tmpCAPR6cSUc3x0cZsbfxiTpSwm14wWh8KTezXZRAGCYS61dqWKq2JmPReTYrqM2DFiONfz-ILXTGKmU4nbCvtIVi5nLm3oBPwvw7Dh8f3COkZ0e2UgSIDuki-c4ltUM1ltzK2sYAGsigQoPiGKvYxFUAKPBs0w0DYjVkRIm88wZFKEgAvoJSzsRvNUM1Vg3VwTW_0jI9iVlUheWqvg8WNKK_I7TjSxbq15pAQ1jT3FfO600QuhWU7BZlpWirV2-OSGrcgMpH7NX9E1lm3sWgGh_VQlWfuGeL8ypoq30I1oSxWwu73bE4Hzqen3iufedc-o70QbdaBwJCu48ZTbAGXpmrIJQroczdMGyr733nhjuCuZir0MiyxOliYcONxEBnwxuwBa8GLObXCTiBVeJrLCT76dVVzaqb2NOWYn_779tHmYIS9h1u99IG5kqn8MD5whVMIJDP6R0wfOyMiC_CM6AX288krHdmgturPoqHlzm1NPWJ_uH7MmDXZCY1I843lXfH8EDPPs3vt1DnCXp7iFpVDncPI4gjoiwTvZGDo0s36Wo4tK71z4zYdLiG30IYOPs5sVQ_zXD88KOO6I4z4rD4-Fa2EZSbUSpIOh5Lu5Xyw_Q_mrQmm20th-bwtdVO0sxeVlMtLKbCda30asuua-xfqEaKDZBYUS6yiBJZMPhTBraIt5DmBoM-NbWmSeDVMXj9trVm3koXnjWXmieVAxpD8VTrpU4lJdWQ5qwzK3bVsa9V9sLyQgoC3arhwmWNygYItPpdSI64Uxi9q4qu4icXcMN0xPZrqijDBFwlTPW7NjvBb2RyD5huR3pcir7zK5BfrVhbnZVT96_5DuvmjbALLZJIVOBsSSeeyVapNTLAzwdf8uADR2gTaZA9tFSCTV-7_4_rrqAUMXi4qnA3b7MfLmsP81m7cKn5LAMFr8ODZMWovwOttsSMIxPYxayn7DGHHOIhgG4iqrVd9_21lUeP5LvKcD_J4HabD3F-HBET8mH7p6qniT5x0YEkzNKzWo8a5cdJn5c2kjD8r9nhHdmvBdP9t0S5T6XPkQ99YRDbRGPr99MdK1TQDiRENrHPqfcCw9JyUpJR1fL6TBF4azBZ87J3WmkqY0fTxZ-3148M-d57Xmi-OOgwTby2TnG8PARrHllWIR0kvcfN7W4GYmt8WDfFjNBxzuynMAX-X0wo1cWlq-HpYEBfn4UOmFAaMwO5vy7A6aMrumVeTddtel1EVkY9QQhRt8s4dAXA7-BBCQxA9Cb-n5bsfVzo9ZSQMiRx4PxMFnqFxPUqDS30Eax4FbuWNjWQu7myz3Sx6ySND-UqMbm7JweHG1eiJgWUaM64b48OaEUuZhAJUHubzS75bo-DLwDJ0A9Tsu4uZrVqb0sZRBXv-WIFEijzTUyNNmqOfGMj4Bc_h7k3I-HHXQ2m9DjL_ccv2L9aYR3drpL-lf_5L3DPaehu3Ar8DoTKjyGx6Y1Z8sINRtWZndQtDRWRPyyBJwovrvih36lMMSltO02jQAkWK9wdDfdRynMlRLNpXj-Vj5oDovu1K8OThj8UV5k6O_PtxhjQUO3xWKzVQWds0_HLofv3imLpesMon5-Do2_urujNo8dpFfOuNuWhp34H2eWwShwfrswdUeUC9bgjehc3d9APgcQeKHtBp7g1iPM6FLi99Z6ZIsTBwIFOr6jSW7FfLtDY6iyX_J8-JHxEfnPbaPOWR0YIph3Y3nS-N4xuKl6IqfWmUpolRLBQzjszD2dhVPks4Cm6ePKM_P-I1I-SxUEluZYYU2uTqsHT2UGy6Y7SxIk9QDkuhkuneruT93zgn0F2v8fX0Tyu9GJ9eGuXRpp_EoKODpRFkxzY-pVZnW4fVjBf2tlFCxGvnkYwEAjmlS0SmMNnaWuaub2zqO9rPSJXU6c7if8oJrZM-NjbO_9Ga435Y6M4BAjQXY2pvC8dcdFeM5PRfqUERN4bcWVkc2flivQOz5Kpl1XUjjWERB1DhQcH2ZpK526AKJzmgP-RdC7vFq3vEe7PpKC5u0TfyVGz2ApMsSlBL3Dq1dnuAqjMIu-uKSkakmKo5t2wgAtuGg9n2RYgJvOHUmiUY_eDmlL8yg5HOzJgSCxvv75evc-9H9cEBzYr_DDZSvAp_SZ2f49K_qIb7oL3rRcDZCGQ-xT8dThmoveSbMhuIOBDNE-fibA0ZZOZEe1A7gIOcalkQlVU5YwWoaYzfINVUuKICV-m8lmX1mCS2mgGovCya9_vj9IeaHoIOxazDxcJI7hS0syaZOC_-S02gr8TnccTe_IIwugKn4y6xdEAZg5T5tQchdih4ZC2zKBw58jO6AOqt5Vxy5wsIfNZqRjtCZsDBNz959QgdlxPaH89GSdqPME44iK8aRVC-ILsUpQPfXaOfWopmec77mCet29ymP8jNKlfRUvPQBjgEvDL1eYthNXTAXlCW1eJndaTbgXiKv5SoiBHgq4LC5mVWCo_nOEWwr5YMOF0SjRt47kfvLMfEnxQQD-tXRzHqzo4xTtWBElWXZ6wKGmQ7aHEMJ_z-KMXYDvwxxM0oS0frBdWAWzvdMkWfGzmTcakRhjh46Vpw5yAeMfrzp-mDv6n5eqG0eNQSKM_oQ4BD8sQKf3ockli3Vx0OYjeQnHuAgjRZmavrxXz3mcFa9Fk2VHDeZ6khnuNWxSGQjCEAWyReXS3Ubefl66Y7st8zT6mLdpwjp5gAw4y7yCFkuuRzm4lkAFMdTTwjkQRt9cpm3nDN9JfZBButTyFZiQnNV__yVS16ojx6os9RIT_1lndAXzMuZtKfwuSKdPZbJRVKvlK5uf_e_sZvk0gP6w_Ci5qAylDTvniMuuSCyEQgv31u3f8TmWEkcyiPsODk9zY_YSjFi2yynJT8X12-36G9ZTf4eL1IN7HOZl2ZtV0STSAaDkOfkFFOT02WBK9lZ-xheZBICYpfa0dGl5mikUJ6NQXi0Onx86VyKkcrt9VsoLw57vQQW0wxrMb0O0_d2WRqNU58NRQAdAex-lVrE2hp37zy8Jem3Y3zEwlF74gi21N3VnfDvgNwID0QcgVelDiL8W11c0GTvfNjD97xDJ43wGvDDcN9qlY5PqyRkTpB1qTpsNADWdrGYMmVLEBtz6DnDH1bH1SS6ubh_J1oE7PUQeJlzVeoGjZADITh3eEtVu6r72l2HonriFCkmiRJVlmAuEfaQRiTGsZGSk0y9AwFRqjtMtEAvA5LVB2lHGXgEIKYdilJe0MKg7LqhPmMIaYTj648I8GL3WATyIegt5d6ahkB_l85sfOR-zSpwTV34ZpKNoEC47jXejSyq5F5N2Cazx8kYftCpQnRb6NmhoQAoP8lUlmUwMUbt9Hw7oXA16lrEeTHKLl_NkQRiaNvFinxh8WEZfkyteHV21Ow2tmva4h6flbJQyZcEmRGfr1lEF8MCwuSGw2niMjmqSyYW5mtwFSu',
-  // TEMPORARY, and the round-trip proof: preimage `b2p-canary-test` (15 chars, so it is reachable
-  // in BOTH address forms — /file/b2p-canary-test and /b2p-canary-test). Delete it once the real
-  // entry above is sealed; it is in this repo, so treat any entry here as public.
-  '7ff2059c3cb657ab6586144b95d386a41f001c336218b7170fa41f29ec8599ff': 'v1.c35PjQBGaDZ0vHjY.ZgmAxG8TtE322_4zGUWjx9UsnhKuDEJv_2nV7NbfNmJQicNJETPtDVf5eJG0-CLVHLIVkbg9ycdFAPzPENXTt6kTtWJSWxc-ZdpYHlUHwutHe4s7md0w4gRhKFuNMKNIHMBy2b9NnRKVD6V041jZ-GmIeWyYviNoPGP6Aaj7xr5oMP9B6csBVpQAjnTExppVTsf9xM15_JG3O4xOAN2LY8hWxnVRjUJl6EG8Hy7so_hOsUXiL9UGRYVh1GiBIzBYuhJlnIe3RzAmoEjmwLnDLHuLH5XZaejgehh8wHLeYZFfNQsAoht1YJXU97nOjFrkf-3pJs0SfBx9OzR0LFPgdEAtJd2YyaqXkLylt2-ESDN4ZXqsBBKaW3SKq2ynkQNiN8a83_IGz6IOk4oVByqgQ2Mqi5a4Zhn4GDHSG8MICl8Af-DuYnnxqH4mxZa-sinUinVQl3Cpd2T6AJj5rLd5sUuWoDQgvFtnTI__j4INQM-LZCnlt4SkcWEz1tU0wFm80jB-HYLu_OxvCQttdmzWKQza24nnPX9bHMYfDIbPwLGnbz74Ck8dy8RwI4Je0i7y2Uid_fsvYO1-ILrmCOq-9O-OIbnt_UTVTP3zpKAWTGtn9CwHCauBRMtxGs7FY0kV1NuGXHAYb3OKHo1yfEaBrXwsw05GY4Qf32YQxpmK8xRMlNAEOR_yaKItkgyXhtDKFZMpnEPPXPnx9k2u6ITmgZACFetFKx57u9MS8IroPMQE_DzT-YcSfxykjkmAhK_uFAI20Gtn-NehU3sFtduH2I1-nmQAbiGuy2199h8AE2E4m5UPaYai37J9rGGE-zq_o4-qyH_RMxZNfAS5boQvBoHtE-muF14B-irJdQ31jEc7RJe9n7C-tm4L8wKC8kblyD2iiwcDEjmugXJ-uMhC3lyDvMts4a5nX1Lt3DGBvTC5wb_05BvsQY2pl1mdzGTKBh41m2pXfBW1qrJBMBf9iB51qsKId_ugMDLXcJYp2BXk5jLst5vWqx9_v9mZVQnAWsSZRuHdQGlemp0b0U9kRsPn8XuejPQnLcTeTDpYkwFqzA5KMfYqnfZ3vYyFoJag8AV08CJlz50FRKNLUEySBTQHZ2vITYTbUUX4iRrk2X9Kgj10449AsMTI5WdYQYS1638G98kQ5eZa9RYWa9FiEhD2zf90K3xXkjLJxXwyqc04UsNxJtVvg7MrAwa_Et0KRUrWZ3Jgvjv-wKsqXcwRPPnxy3EruBGy675-ik75Yz5b-rYV-SKZ0t4qOx2Ans2bGh4_QctKuAjXyZaBSa3YbwjLPu6w_tS-eF3-2oxfOYpeDwvMqAHuyZCH9Y2R7ytiYduZgXlXDcdcH28uzRogh79HnI3Un5zzihfHE8Q9ougel5vTn7tK1I885G8aBaSo3acck8zx3VsKBD4ywSgmh9aRV4MS03yaobjbw8jV_adkmFGYx77gisgHVyprjzEILtYLaLAKGYf7MFX1jxnY4hL4toPdCqWil0FsuUTJSx7VefzPSF0gxYCn9x8nscKuDgKjahJs2QVyeFNuhFTsgW3otpHRSKK8EiRSNqvFoW5WDtl-C7ZQc1PH6yB6wFi55HiZoAv0dyIEVHT3GWDw3yTaSA2Lkp-EJ6W4q5iF6jDNvHh3QUGHDss92IaWyItET1EomVhRZ6szIp2U_cN_S9jUfp5n1B5alV81skMo92YA8DIAhC-ejiyEmBhCvqkCTBCOk7HK-B_-sG1gd9Zu8A7DQv19y5IydFem-G0_CkWhFr_WtEzzG6sYKD0YaflR7B8kHLnwww6lmyMVjVIFHxed44NZIJtXHnHZIXWvMc-D6Bh-l3Xoz1dnmLSJHIKs8skfsytXDivZO1D4Io3kWemuz0MASf7gU0F8DtioJFm2ILFQU6Bk3nX5CcpLCLkhnFDJFZGtH2hEU4QfYaMQohjdIJBK8ZoRGidVYrHSZoNbibrntDgSmMkh3iGvSDgNKitYBGP0f0Eg4LTDtMbXRyPaWJw-W2PKMul-E377F6Esx8at6V4smbr6DA3Q7oyOfZvzU_-XPIezoFkq08GsZ_m0byC-eyLfzHHY26thFZxmk5Zomb5TfQPdISxg8rhrtZW-Dkre6SKVy17LBu4KX_Bzh4iiNFfsvXKxZbesqVKi9BiPjs7YI7KwcUO9AOWDzbL2JqXYyxrhbfqD5wXEgeQXY-zoxcff6K5hQzrjG6JtjSATtsPsVpHnhB-gj5ms_z5SHc278vVb0NHGJxMVBmGfcXES5NofpMQOFbf1QZB5igSHMRTKZdHqurSc-VVd_1xAKoUKuvHjsf30R4cqvTE3eAE60575ePNUjMbmUmfNk7adGGmjc23yKKC8Q8tGaAifZcsqOxoQmK-nK85rMPhd2D39ZCcGBCZMVNiX36Z0L_s22hU_Agc9dAyDzU6xILg19v2qHD_R8680PmxO7c--C59nSnKkLcuPUL4U1t1Hmgx_Pbx-Z8-fAUtE9ncZ3tE5TeHktev0uq48Iz56fQzNEpFrBHv_HxmPjiN1eGJlYLpVUvtsCd0umFN7NYwfBK2rrzqSSA8dNvtQWiXt7XyKwLmpM29qfhZ1ugJYNyNhJsLPVEyrn-hCwyqpGxl5sxaXHt_Usmgn0N9dU4dmzOdE4yT1_mGtc1LimMskHY4kUueUQrPO8f3V92e7ZQwz_J3AuCzA9qa-UklSWIiV2ziiSNgi71jQMlXLNmJy2jAPxHWFzPshdsgrc7w7FcZh07MrbFGiBXU97rkH8UGfJBToxs2owp-JlzV7s0k8u8dJ5ZIBrzV55z1njwNDdQIJ99S-6U1_i2XxfDd-9v2WwQlIkWybCQ40yqDYqgxkqP5yFKelyqJo-lo2AmOHvlj92yjEPTRdKNqRNUBoruBLoGI6BGZHByvTXkkyCDlGxwy8xj2ApR4lmt80NERl-7HrBmLxJv1M5GjM_pnRVLVuz6XRf-mm0G9-KC3zw9aEcHkRMcPPdD17UrsRsNkqwbkztyTdQDwlS2wolEQ-7iqOWEgkG3URrE_NRV623eDb4U-Mh-MH-sPIQyBo7vlajMWcFc81gqbef6R0UPFpxwtAd8EFsC_UrztCqwwYiydWefyYz8OKPclEqwb5koaSivXqA_kFmyCP8JiGJGO-aJ7TBchl9QzHOV8CquIxpdeP78fbMYAVzZBmlGRsSYKI3trv71ITCoc9eAzvE2amNhjOtvWF0ib58FtugPvu4nei3B2F7tnSUZae7eFYe9bmhN8RaX1KEhTMejSv4S19TxTO4DpqTw2UKE-dEuYZ7o2a4-0vH1W0-aTszJZsjHvWejWBqYYOfnqJCW7XqIFIR_4c2Z6F8wr5Rf94sfAkMZMAjm6l-pPiepYJLYq3CCHTiEyrUWTE5yLF3DVSSiL8_HGMuFtelgrdTankxrHGv1XzM7eRmNQp5wA0tPnfyO5-fX8uSA171HzFlMmYG307Mb34LdoiwswNp3Q0fPLgv5Spbd25UzWPg2_O_C1Mbgzaje37K-V9_SlPpxKh-wAXtLWjofCMSgu8MW3m26ZK3Mk4p5FBJxbB0ZJS8-Y3AY2gFbDCUpZX3WupBjA_haGvEq8HME1OKg27krfFgqMUBNm6sCUnmqoGcOZy6C-B0dzK1HLvcK-rk0dIGA4QZ5N1uhEAQaAbNlK1MNmdmnnUvxOwqH-wj7HEbiaP1ej-0eJ3Dc7lnvTh4VEj_WUBtdbffq_EIT49tnqBjfZsk8ANo6YbZ6WiywdRz9oKHdkIzBSmW6LDIq1mo11InL6NNCWhXJjLOyLrkDDRkpiVgNzhyH50PAFAgmGKzArd1n5NS4zlxqOqND7wbqjXq0vSswXctP_qrcDczglwcnL_gpoTGGWjevUnQzgZ6k2dgIrqw2QhM8JJ8LBCLDJBBuJpNzrHSh9z3plw16J5yfd_ND3vkTVY-7Yl3Ss26v42vA_Kszw0QOlBPVcQhaAhSCfV7tkuHYPi0T31cpIuOp7s19dZbpQ34oLHF0oz2aiAAyyiv36qoMmhiFbCf21vPwdpK_Czsr_TadtNZya3T9hOeTj8yRT8soqshCqN3KwcV72SOTvC96mapUqyxA_p1odIlEqdy0LRw4Tr4PPMvmI0hynXX_ONTSWoqxdxNJQQkGz0HU3gMdBCe3j5lRd4UmWKHYylZi7k13BdqpU3yCQ1XFQyui17',
-  // His 2026-10-25 ask: the CM3D2 mod-repo archive (``) logs through the same sealed
-  // logger as the real entry above. Sealed with `node canary.mjs seal 
-  // canary-payload.js`; the digest is sha256 of that id.
+  // A second id, added 2026-10-25 (the CM3D2 mod-repo archive): the digest is sha256 of that
+  
+  // shell history or a comment that a deploy could publish. Nothing else changes.
 '3f563941b47cd309eb11de9cf2021496aab4c0272f77124556d5a2ba030aabaa': 'v1.6CeUHJZVmRUFpHSP.lAd2O216uNZEZraHw1xhARHSLMaSYwvC4jSAet8GAx9twif_e-SUfjoIj3-n-sVX1MSCBZTKcyooCoEjdlpFNTIoa5tnCkEBP4S4f50SjMXegbo8mBsBQO2enPdi5exOlspm9yzVCOwSu53f5wTF02A6p7FDx8vJHehlCObXuDqYB7rFXpiZvPmVIm4sciMPs0kUZk2_Tv-Mbwn0sSHUaQaG0P2_bQL1aDy8MBivyE2x6bTnv4lx6pbbAddN34v81U0eIjVm4jSZpgcR2JGbBEBdQVJ39dFFNGmgfB2UWn7QNZabGpptoWHgAEs0JHoXeqH3n6lW36EjeR_Xwg4CEc78USwYfXXvz7I5Q0yNJHz2OpSEDjKQUnmAw8q2xI3xbbUxnEYndh11Mf_pkUBFdLtWtc6h05YkTKpyRczSoh0vHd0yALmcjBiKm8vS_NuBJn1apSDrhlcl4ka2gVIxaLuBEDwpYoy0hCVDN0mP8MeKAP9d7sE5MFnDUHnrES7CdkGXXzNLHQ2ZJz9qkNhYC_3wcDsTSWgNJUnL4u-tHofeRoWztp7zZSGLZ26G7esMdqvAHsq3-YEieKCM6AxR8cbSu30-Qp7WV9eX_AFBf_h039anTfTlu9v9Z-4jdA71JjMxtTQvQ3-Fi28uEhk3uB9hrl7jo-YRZ4hAGQd7kMADFb0_Nsa4nUhAr0C17zbl2JzCA752kkjjyS40hRVZWrJkUCy7fWzjhi_IlCbCUQGgKWJCZvSBgTPKAs8bRHdv8j3B1B8Fg9RDPy7u-4tnulmthaP7wUkcyI115lu053mN2miwT2RAspfkTmmUD-LujLJUmKgEYpMLLO0GoAECirUwvKTaHaYsYd5lG95a_Xojc6cqOW0Gp2-skLZsdlfRmyLW_qUBXNZQzJzcXJ9lyWO9su68vmHfW1mhCwlKbkNQiPmaJUDKZ7XwTYzLNTq0hnF9xMoKFB2CkT4YCLEBlVFtYVEPT2yQOh2c8oyXuQag8BM-7vPYBzZhKSdLYonXLyjtr0UuIlSuH8x34uHEEtmHugZZ6ekVacSqLwH5xJEydiiCgCtoz2jrY2z6G7zgTkzSpYSnzk_xaKrz9vOGKYLU4tNMG6h7oHe8dXzypcsnhncQavszOyjc4AiK8W1ZAlqNkvVJbTq-YuB1cddcx_LCOCqrPCk4WEm2VWu1soCJ0inp3cjTQ5_ei-lGM8vhcdLMW1omHexS1kApd2D8G4M6hDg20EB1mziElTFBuvfxtKRVmbN8IHPJO6kyhz5y3Ygzg31jl6dBXNCJ0NfpTqloBtz-pYCPZkHoHXlifsNPOrArGdiVHDFQhaaz6v_Gmqk5A2PxRbdPckAj0_RQcczQo0RstCLKXbeQKBoxySeRBAz-9uKXmU_5j9Sum68PFMD1VtGNiBwUtvcFZRpAQd64uWDsrv68GJ9Mv9-BBUf1umyMLATpVXs2-d9uLZPRu-0os7_7D3xPv8HkLDCBkHgQH5paF02-HhyMUTL1IAhS3q7pEQvNPkRkT8LfLsXiCR9w9BvX_OwUv7vO3hjxrBqxlSUvHT1dvb8ezbFtkFr4ZsGnZep7lfBLQ0IkSDDOZUQMccOZlLOhcjgpfpZPDdnSStozVf7bEzbPivT9O7CVX_H6_HaB6B3mF7Uyw_0IqJ4ApD-nrD1z5lNM3iDr6XgyT083Nbv_65-kF__DY-ebRqotL25e2VZkO9nYb3X_BFy4R5nZnHMcvVSmFoyuumDdF_8N4nupmlkgSMSZcp5lVFoEPfbJ_iR59y_8cgdWQM-cDLJ3pNlzAG_P5UP5F3DiqudqQyush4mn6WS841v-5a-EFDqwLNbu6G76dYp9qb6Ee9uoEZL4lKMJnA9EDIp8JBAmWRgEb-mgERsv3BPCkblTt8hmZ6Mc3BZB5rwEGXTosmrDrb1bUigbhWCM2l7YCVsfEdcUo7wAYteRgFOcnKwkqaCBodN7d3ccVQU-yQvj7OgmrKwcjof70bg5wtomRrFyPuznDR1AUBNJpNYHZRKTMU9IU1KGGE_W40AhDgMYbcapjGgaM3wKH6SCvS3nyHevYgwUXZhCJtm18xGKEspsreH7Fiv-2UFcVHo1KQXY-Oc1fUPIlr2nW8RmtRuhOZ6T5etL1aS69hIwLqspPS_he2mm15xFC6856XxctVxrIVVHLhN0v0BKO-c7M5SI6EAlzjpnEGMkIJn7nd63rz4G_AnwnOs7VRhxnCbodWVoTYpzmJOMCqzFazI4QsEwgJXZW8LP8gQCPCypAgP0g_JXVZoWiG0_ndCsfiIeaVn7OZRH7RRDfp5gwShVRnxc3V9UtZxtjIz2iEei0Y5mhUfzKSpN25-gy028PeedNYcnipCkJKwGdPVx8YGR2M2zZUfNuF1mIUp4kAvPBzACs_na25ZcaSJ9rk_KGvoj09I6tEvPKjxYmAofi5nqNB2PJesbgy2KccNbp2GnL1wfNdCozGD9Z9k6KPhXp9X0VzpMtWk4f1ulrZ-4s27pcU4t0xrfu6cH8wPQp1c1JtxtEWlDmHu4hAyTDSE53NBQI3it7tSzxhUcTMk9VFWT0fPVxiWXxAJNmdtzUDMe6umwTo5T2II1sCEaZSeH_hiyUMbNGzzz2xWCQWZCDLrRCnhcCmC8-V45Frt8sUzLTtDdNO8P4W4jyICQa41mcKUp0GnpjfMuwlPG-FmtAuWzuqZm9c77hZo1XYej87HYUixsnRlnZDSroi6oEzaXCmnV1gq9C8FCFgVGgKBxt7a-UNYDxv4Bq3nlI1swJVVo9x_FRVKJU9Mjn_g_EPhUazKfPfJ6QFd2U6tOf-YmXL-7ztNqcRbFS_-FtJP064Q4qTwRFVxtJyDEBanPKzceeW3QN0HnThOIVF5x1g8ntHNzmkSiasCc-kzsRPkghVDs988aOgaLlyHjDXpkZsW73fpMDp-8fj6yrnTtz9_urknTPkBgCnhnBpE_d1zakZHreEYpeWViKfMMz-nOAsbgCYzo4TXA7RvOQKpMZdxOQ9PLJ6JHUFNn8jtOTYb6ZvHV6l9IWuV78thHz4OuMgeGjFFw26Xu-XnQ0VOxPlt1lYJ_Uojs_CFkYFV2YL8Xuyz_wMje9ghexMaTdeEXS9dSupnTsHdW4kg21F9wIJAQgMkodMYt1WI24SwsRvsglNq4jN3KCxrqT4tUHZEOPmPIgoouh1IHHFISccAPhgG0i89oK2HLoft6L2bMFBWzNiQklWjjKJEwtp4UKsVm1Nc2rVh6JNo-BCGb4fyVxiVo7fHOLqzHKSC5wwdT0pHQ2nnQWEYipEAn7sELhviiXewipRPQuf-gYPOj7v75iIeoyk62GpIvh4hXLgKiqCwnrArbYgO6YQBkI02InirYG5M4Z-Sso7PPh7ngAeAeC5-EIf44lvfL3l-WctoxtUZVtsXqtm3r9_iUaE1Id7H_bKv5lvGN97W9XxRcRRSN9iwMoDhXl4YPiZ3Kv7bvDeCXX_AzlZUbAP4wXL5Pbrm7nyJQ1JfZubRR3ObSBZoVXHdSYgDhqqgkH-StY6PJ0kpdwjHhN6P-2jvjM5W9tokbICnnmHaZltbzhq0zmIsuTfM2LgdI0aPnNmDkwLNw5Xo75cqmjGWJeYxuUFSAIWXstuWIsC0QOV5a1EUrikYCAS5h28auCERi6H4oIhwy4Jhu_RzUSip4IioxG-2ouKIvgc9369zGoq8OS97CIRRGnsbCP4SkdTF2IDYj7saRuL3A0LLJfCTtKQvTjmYg8jEOCUyH3XGVVUCGp5pRgDF5irArA7gzebmYIYl-57m9iTdbtz-YP53PZNmGdLbqmdsIY_3ptGwVhK04L4JfQMyFcTIppyif9aSccg5tD3JprUrKrzIZZhktxRx69jk1H_W86VGvq8OWKgMFa1Uzn0BYdZsZtUqvrpnwwC7e1RAZysMfIsNi8VpKte3pknV4RZkt4619tl5ZGkHLcEetEpw32UDiXND0T-HVw8KmC6xxdWr4dswpGX7WIAozu_WLWC2H_RAINP_yqM-1GuYWXUYLbhb_A-VoglWk9tSRcOew71X59oiA_JlIn3EaLkBFO4fdOinnF9uUs7IaoAVGa7Ln7MVNfkOhcr5lUmOloBD40G3M_yEJYBVU8BPKlOTfPOQ29q2DD3nsaK6Ix3Yu4siwYq5y3K8DAfMHC59pELOtNOYUkETP',
 };
 
 // base64url → bytes. atob is the only decoder a worker has, so the padding is put back by hand.
-function b64uToBytes(s) {
+function b64u(s) {
   const b = String(s).replace(/-/g, '+').replace(/_/g, '/');
   const bin = atob(b + '='.repeat((4 - (b.length % 4)) % 4));
   const out = new Uint8Array(bin.length);
@@ -158,7 +146,7 @@ function b64uToBytes(s) {
   return out;
 }
 
-async function sha256Hex(text) {
+async function digestHex(text) {
   const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
   let hex = '';
   for (let i = 0; i < d.length; i++) hex += d[i].toString(16).padStart(2, '0');
@@ -166,20 +154,19 @@ async function sha256Hex(text) {
 }
 
 // `v1.<iv-b64url>.<ct-b64url>`, AES-256-GCM, key = the digest of the preimage itself.
-async function unseal(sealed, preimage) {
+async function openBlob(sealed, preimage) {
   const [v, iv, ct] = String(sealed).split('.');
   if (v !== 'v1' || !iv || !ct) throw new Error('not a v1 sealed page');
   const raw = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(preimage));
   const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
-  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64uToBytes(iv) }, key, b64uToBytes(ct));
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64u(iv) }, key, b64u(ct));
   return new TextDecoder().decode(plain);
 }
 
-// The live deploy version, so the logger reports the worker that served it rather than a string a
 // stale b2p-stream.js used to carry. The precache copy first (no network), the network after.
-async function swVersion() {
-
-  // the cache). This is one tiny text file, read only when the canary logger injects, so the round
+async function liveVer() {
+  
+  
   // trip costs nothing on the page's path — and a stale version is exactly the thing that makes a
   // report of "which worker served this" wrong. The cache is the offline fallback, not the answer.
   try {
@@ -194,33 +181,37 @@ async function swVersion() {
   return 'unknown';
 }
 
-// The id is the LAST path segment, as typed (`/file/<id>` and `/<id>`). A trailing extension is
-// tried as a second candidate so a share link that kept `.mp4` still matches its own id.
-// Returns the LOGGER source to inject, or null when this address is not a canary.
-async function canaryScript(pathname) {
+// EVERY segment of the path is a candidate, the last one included: an address into an archive
+// (`/file/<id>/folder/inner.zip/README.txt`) is the SAME archive as `/file/<id>`, so it has to match
+// the id that sits in the middle of it — matching only the last segment logged the root and nothing
+
+// `,` (the address prefixes), and without a trailing extension, so a share link that kept `.mp4`
+// still matches its own id.
+
+async function pickScript(pathname) {
   const segs = String(pathname || '').split('/').filter(Boolean);
-  const raw = segs.length ? segs[segs.length - 1] : '';
-  if (!raw) return null;
-  let id = raw;
-  try { id = decodeURIComponent(raw); } catch (e) { /* use it as it arrived */ }
-  const candidates = [id];
-  const bare = id.match(/^(.*)\.[A-Za-z0-9]{1,8}$/);
-  if (bare && bare[1]) candidates.push(bare[1]);
+  if (!segs.length) return null;
+  const candidates = [];
+  const add = (s) => { for (const c of s) if (c && !candidates.includes(c)) candidates.push(c); };
+  for (const seg of segs) {
+    let id = seg;
+    try { id = decodeURIComponent(seg); } catch (e) { /* use it as it arrived */ }
+    add([id, id.replace(/^[.,]+/, '')]);
+    const bare = id.match(/^(.*)\.[A-Za-z0-9]{1,8}$/);
+    if (bare && bare[1]) add([bare[1], bare[1].replace(/^[.,]+/, '')]);
+  }
   for (const cand of candidates) {
-    const sealed = CANARY[await sha256Hex(cand)];
+    const sealed = TBL[await digestHex(cand)];
     if (!sealed) continue;
-    const src = asScript(await unseal(sealed, cand));
+    const src = scriptBody(await openBlob(sealed, cand));
     // `</script>` inside the source would close the tag it is spliced into; a backslash is the
     // standard escape and JavaScript reads it back as the same string.
-    return src.split('__SWVER__').join(await swVersion()).replace(/<\/script/gi, '<\\/script');
+    return src.split('__SWVER__').join(await liveVer()).replace(/<\/script/gi, '<\\/script');
   }
   return null;
 }
 
-// A blob sealed before the logger became a SCRIPT is a whole HTML page — the first entry was. Its
-// <script> bodies ARE the logger, so taking them out keeps that entry working instead of silently
-// injecting `<!DOCTYPE html>` into a <script> tag. Re-seal afterwards to drop the dead markup.
-function asScript(src) {
+function scriptBody(src) {
   if (!/^\s*(<!doctype|<html)/i.test(String(src))) return src;
   const bodies = [];
   const re = /<script[^>]*>([\s\S]*?)<\/script>/gi;
@@ -261,7 +252,7 @@ self.addEventListener('fetch', (event) => {
   // A MEMBER IS ANSWERED FOR ANY GET, not just a navigation. Ctrl+S in Brave RE-REQUESTS the file
   // (a plain fetch, not a navigation) and the worker used to pass that through to the server, which
   // answered 404 — "File wasn't available on site" while the tab itself showed the file perfectly
-
+  
   if (event.request.method === 'GET' && url.origin === self.location.origin) {
     const inside = archiveAddress(url.pathname);
     if (inside) {
@@ -274,11 +265,11 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
       (FILE_PAGE.test(url.pathname) ||
        (ROOT_ADDRESS.test(url.pathname) && !isRealPath(url.pathname)))) {
-    // A sealed LOGGER for one hashed id is spliced into the renderer; every other address gets the
-    // renderer as it is. A failure to unseal must never take the page down with it — the player is
-    // the thing being served, and logging is the extra.
+    
+    // renderer as it is. A failure to openBlob must never take the page down with it — the player is
+    
     event.respondWith(
-      canaryScript(url.pathname).catch(() => null).then((js) => serveFilePage(js)));
+      pickScript(url.pathname).catch(() => null).then((js) => serveFilePage(js)));
     return;
   }
   // No fallback branch on purpose: a navigation this worker does not own goes to the network.
@@ -341,7 +332,7 @@ function planFromUrl(url) {
 }
 
 // The name a save takes. "Save video as" reads the FILE NAME from here, not from the document that
-// hosts the player — his 2026-10-19 report: the page saved as `yakusoku.htm` even though the video's
+
 // own url ended in `.mp4`. `inline` keeps the bytes playing instead of turning the request into a
 // download; `filename*` carries the real name (a `?somevideo.mp4` address keeps its own name).
 function filenameHeader(name) {
@@ -520,11 +511,11 @@ function archiveAddress(pathname) {
 }
 
 // Which bytes make up the archive. The renderer writes this when it lists an archive (`archive-`
-// plans), so a name — even a sealed one — is already resolved by the time a member is opened.
+
 // Without that plan a bare pbs id resolves on its own: its first part is read as a PREFIX, and what
 // that part holds (a master, a tt2png index, or the archive itself) is followed.
 async function archivePlan(address) {
-  const key = planKey('archive-' + await sha256Hex(address));
+  const key = planKey('archive-' + await digestHex(address));
   const hit = await (await caches.open(PLAN_CACHE)).match(key).catch(() => null);
   if (hit) {
     try { return await hit.json(); } catch (e) { /* resolve it below */ }
@@ -686,7 +677,7 @@ async function serveMember(address, request) {
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const entry = await zipEntry(plan, address.member);
     if (!entry) return null;
-
+    
     // 2026-10-25): the renderer opens it as its own `Index of` page.
     if (/\.(zip|apk|jar|7z)$/i.test(entry.name)) return null;
     return await memberResponse(plan, entry, request);
