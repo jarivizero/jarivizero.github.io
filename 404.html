@@ -107,7 +107,15 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   // Everything this page needs lives INSIDE this function. `/file/<name>` replaces this document
   // with the renderer (`document.open()` keeps the same window and its global scope), and a
   // top-level `const stage` here collided with the renderer's own `const stage` — measured:
-  // "Identifier 'stage' has already been declared", a blank page instead of a player.
+  // "Identifier 'stage' has already been declared", a blank page instead of a player. The two BAKED
+  // constants below sit inside for that same reason: the renderer declares its own `BUILT_VER`.
+  //
+  
+  // built from. They are here so this page can answer "is this address a file at all?" with NO
+  
+  // never a black player waiting on a renderer that was fetched for nothing.
+  const BUILT_VER = "c421b1649c2606a4";
+  const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
   const art = document.getElementById('art');
   const msg = document.getElementById('msg');
   const home = document.getElementById('home');
@@ -118,13 +126,56 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     home.innerHTML = '<a href="/bin2png">click me to go home</a>';
   };
 
-  // ── 1. /file/<name> ─────────────────────────────────────────────────────────────────────────
-  const asPath = location.pathname.match(/^\/file\/(.+)$/);
-  // `jarivizero.github.io/<id>` — no `/file` in the path, and still a file address.
-  const asRoot = !asPath && /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
-  if (asPath || asRoot) {
-    const name = (asPath ? asPath[1] : location.pathname.slice(1)).replace(/\/+$/, '');
-    if (!name) { location.replace('/file'); return; }
+  // ── the baked dictionary: the first answer, and it costs nothing ──────────────────────────
+  function dictMap(text) {
+    const map = new Map();
+    for (const line of String(text || '').split('\n')) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const p = t.split(/\s+/);
+      if (p.length === 3 && p[0] === 'v1') map.set(p[1], p[2]);
+    }
+    return map;
+  }
+  const BAKED = dictMap(DICT_INLINE);
+  async function digestHex(text) {
+    if (!(self.crypto && crypto.subtle)) return '';
+    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  // The prefixes the address grammar allows (`.` archive, `,` video, `n:` / `name:` / `id:`), gone.
+  function cleanToken(name) {
+    let t = String(name || '').replace(/\/+$/, '').trim();
+    for (;;) {
+      if (t.length > 1 && (t.charAt(0) === '.' || t.charAt(0) === ',')) { t = t.slice(1); continue; }
+      break;
+    }
+    return t.replace(/^(?:n|name|id):/i, '');
+  }
+  // In the list this page was built with ⟺ it is a file. No request, no crypto for a hash the
+  // dictionary already spells out. NOT BAKED (`BAKED.size === 0`: the editor's copy, a local server)
+  // means this page cannot answer the question at all, so it must not claim "no" — the renderer is
+  // asked instead, exactly as before. Only a baked page gets to say "art, now".
+  async function knownName(bare) {
+    if (!BAKED.size || !bare) return !BAKED.size;
+    const h = await digestHex(bare);
+    return !!h && BAKED.has(h);
+  }
+  // A pbs id is EXACTLY 15 characters — the shape the worker's own root route accepts, so this can
+  // never call somebody else's page a file. `id+id+…` is a stitched file; a bare url is a file.
+  function looksLikeId(bare) {
+    const t = String(bare || '').trim();
+    if (!t) return false;
+    if (/^https?:/i.test(t)) return true;
+    return t.split('+').map((s) => s.trim()).filter(Boolean)
+      .every((p) => /^[A-Za-z0-9_-]{15}$/.test(p.replace(/\.[A-Za-z0-9]+$/, '')));
+  }
+  // The renderer takes THIS document over — same url, same document, no iframe to paint first. It
+  // reads the name from the path, and its own pre-paint script keeps the window black.
+  // The `/file` SEGMENT, not `lastIndexOf('/file')` — that also matches the start of a later
+  // segment, so `/file/<id>/x/files/` asked for `…/x/file.html` (404) and the page stayed blank
+  // (measured live 2026-10-25).
+  async function openRenderer(name, root) {
     document.title = decodeURIComponent(name);
     // The player goes up in THIS document, before anything is fetched: a media name is a player
     // address, so the first paint is the black window with its controls — not "a blank page, then a
@@ -141,13 +192,6 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
       document.body.textContent = '';
       document.body.appendChild(v);
     }
-    // Then the renderer takes THIS document over — same url, same document, no iframe to paint first.
-    // It reads the name from the path, and its own pre-paint script keeps the window black.
-    // The `/file` SEGMENT, not `lastIndexOf('/file')` — that also matches the start of a later
-    // segment, so `/file/<id>/x/files/` asked for `…/x/file.html` (404) and the page stayed blank
-    // (measured live 2026-10-25).
-    const atFile = location.pathname.match(/\/file(\/|$)/);
-    const root = atFile ? location.pathname.slice(0, atFile.index + 1) : '/';
     try {
       const res = await fetch(root + 'file.html', { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -164,8 +208,55 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
       document.body.textContent = '';
       document.body.style.cssText = 'margin:0;padding:0;background:#000';
       document.body.appendChild(frame);
+    }
+  }
+
+  // ── 1. /file/<name> ─────────────────────────────────────────────────────────────────────────
+  const asPath = location.pathname.match(/^\/file\/(.+)$/);
+  // `jarivizero.github.io/<id>` — no `/file` in the path, and still a file address.
+  const asRoot = !asPath && /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
+  if (asPath || asRoot) {
+    const name = (asPath ? asPath[1] : location.pathname.slice(1)).replace(/\/+$/, '');
+    if (!name) { location.replace('/file'); return; }
+    const atFile = location.pathname.match(/\/file(\/|$)/);
+    const root = atFile ? location.pathname.slice(0, atFile.index + 1) : '/';
+    const bare = cleanToken(name);
+    
+    // exists in the 404.html local dictionary … if it does not exist in the local dictionary see if
+    // it is a pbs id and it fits the format, if it does, fetch it, if it is not a pbs id format then
+    // it should display the real 404 then finally fetch sw-ver and IDSDICTIONARY fresh"):
+    //   1. in the BAKED dictionary  → a file, take the renderer (no request to decide it);
+    //   2. a pbs id, exactly       → take the renderer, pbs is the last word on whether it exists;
+    //   3. neither                 → the art, NOW — and only THEN ask the network whether a deploy
+    //                                moved the version or added this name.
+    if (await knownName(bare) || looksLikeId(bare)) {   // (un-baked: knownName is always true)
+      await openRenderer(name, root);
       return;
     }
+    document.documentElement.className = '';      // the art is not a player's black frame
+    msg.textContent = '';
+    document.title = '404 — not found';
+    // LAST, because both of these are the network and neither can change the art on its own:
+    // sw-ver tells the worker to re-cache, and the fresh dictionary can still turn up the name —
+    // which is exactly what happens the minute a deploy adds one and this page is a build behind.
+    try {
+      const ver = await fetch(root + 'sw-ver.txt', { cache: 'no-store' });
+      if (ver.ok && 'serviceWorker' in navigator) {
+        const live = (await ver.text()).trim();
+        const reg = await navigator.serviceWorker.getRegistration().catch(() => null);
+        const w = reg && (reg.active || reg.waiting || reg.installing);
+        if (live && w) w.postMessage({ type: 'resync', ver: live });
+      }
+    } catch (e) { /* offline: the art stands */ }
+    try {
+      const res = await fetch(root + 'IDSDICTIONARY.txt?fresh=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const fresh = dictMap(await res.text());
+        const h = await digestHex(bare);
+        if (h && fresh.has(h)) await openRenderer(name, root);
+      }
+    } catch (e) { /* still not a file */ }
+    return;
   }
   if (location.pathname === '/file/') { location.replace('/file'); return; }
 
