@@ -1637,7 +1637,11 @@ async function resolveArchivePath(rawPath) {
       const at = walked.concat([name]).join('/');
       const reader = read;
       const getBytes = once(() => reader(entry.path));
-      const inner = await openInnerArchive(getBytes, entry.path, at);
+      // Only the address's OWN archive has offsets `sourceRange` can use; deeper levels are already
+      // in memory, so they keep the whole-bytes path.
+      const stored = reader === rootRead ? await storedSpan(entry) : null;
+      const indexed = src.tt && src.tt.archives && src.tt.archives[at];
+      const inner = await openInnerArchive(getBytes, entry.path, at, stored, indexed);
       deepest = getBytes;
       lastWasArchive = true;
       consumed.push(name);
@@ -1723,7 +1727,9 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
     // to the listing we are on, `base` is that listing's own path.
     const at = (base ? base + '/' : '') + entry.path;
     const getBytes = once(() => read(entry.path));
-    const inner = await openInnerArchive(getBytes, entry.path, at);
+    const stored = read === rootRead ? await storedSpan(entry) : null;
+    const indexed = src.tt && src.tt.archives && src.tt.archives[at];
+    const inner = await openInnerArchive(getBytes, entry.path, at, stored, indexed);
     // `entry.path` is relative to the listing we are on (`rest`, which already holds the folders
     // walked into), so only the part PAST them is appended to the address.
     const tail = within && entry.path.startsWith(within) ? entry.path.slice(within.length) : entry.path;
@@ -1859,6 +1865,62 @@ async function openSevenZip(getBytes, entryPath, stamp) {
     },
   };
 }
+// ─── a STORED member is a byte range, so its own directory is too ────────────────────────────
+// `…/CM3D2 mod repo/Robomaid.zip/README.txt` moved 7,273 KB for a 45 KB answer (his measurement
+// 2026-10-25). The entry in the outer archive is method 0 — stored, size == csize == 7,386,123 B —
+// so its bytes are a plain range of the outer file and NOTHING is decompressed. The cost was
+// `openInnerArchive` only knowing `getBytes()`: read the whole member, then parse it in memory.
+//
+// These two read the inner archive the way the outer one is read: the end-of-directory record is
+// the last ≤64 KB of the member, the central directory is one read after it, and a member's bytes
+// are its own range. `parseCentral` already takes "block byte 0 is absolute offset `at`", so it
+// parses a block that starts AT the directory.
+async function zipDirRanged(range, size) {
+  const tailLen = Math.min(size, 65557);
+  const tail = await range(size - tailLen, size - 1);
+  const eocd = findEocd(tail);
+  if (eocd < 0) throw new Error('no zip end-of-directory record in the last 64 KB of the member');
+  const entries = u16(tail, eocd + 10);
+  const cdSize = u32(tail, eocd + 12);
+  const cdOff = u32(tail, eocd + 16);
+  if (cdOff === 0xffffffff || cdSize === 0xffffffff) throw new Error('ZIP64');
+  if (!cdSize || cdOff >= size) throw new Error('the central directory is not inside the member');
+  const cd = await range(cdOff, Math.min(size - 1, cdOff + cdSize - 1));
+  return parseCentral(cd, cdOff, entries, cdSize, cdOff, size).files;
+}
+async function zipReadRanged(range, f) {
+  const head = await range(f.localOff, f.localOff + 29);
+  if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) {
+    throw new Error('the member local header is not where the directory says it is');
+  }
+  const start = f.localOff + 30 + u16(head, 26) + u16(head, 28);
+  if (!f.csize) return new Uint8Array(0);
+  const comp = await range(start, start + f.csize - 1);
+  if (f.method === 0) return comp;
+  if (f.method === 8) return inflate(comp, 'deflate-raw');
+  throw new Error(`member uses compression method ${f.method}, which this page cannot unpack`);
+}
+
+// The span of a STORED member of the address's own archive, as a `range(a, b)` over the file.
+// `null` for anything else — a deflated member has no offsets to trust, and a method this page does
+// not know has to go through the whole-bytes path.
+async function storedSpan(f) {
+  if (!f || f.method !== 0 || !Number.isFinite(f.localOff) || !f.size) return null;
+  try {
+    const head = await sourceRange(f.localOff, f.localOff + 29);
+    if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) return null;
+    const start = f.localOff + 30 + u16(head, 26) + u16(head, 28);
+    return { size: Number(f.size), range: (a, b) => sourceRange(start + a, start + b) };
+  } catch (e) { return null; }
+}
+
+// One entry as the INDEX states it: the display fields plus where its bytes are.
+function indexedEntry(f) {
+  return { path: String(f.path || ''), size: Number(f.size) || 0, dir: !!f.dir || /\/$/.test(f.path || ''),
+           modified: f.modified ? new Date(f.modified) : null,
+           localOff: f.off, csize: f.csize, method: f.method };
+}
+
 // What a memoized listing has to carry to be USABLE: a zip member is read by its `localOff`,
 // `csize` and `method`, and an entry rebuilt from the five display fields has none of them — his
 // report 2026-10-25, `…/back_zipper.zip/img20180525120905.png` on the second visit said "the member
@@ -1877,15 +1939,24 @@ function reviveEntry(o) {
 // Any archive member opened as `{ files, read(path) }`: a zip family by its own directory, a 7z with
 // JS7z. Same getter-and-stamp contract as `openSevenZip` — a zip's listing is its own central
 // directory, so it is remembered the same way and its members are extracted once.
-async function openInnerArchive(getBytes, path, stamp) {
+async function openInnerArchive(getBytes, path, stamp, stored, indexed) {
   if (/\.7z$/i.test(path)) return openSevenZip(getBytes, path, stamp);
   const tag = `zip|${stamp || path}`;
   let files = null;
   const listed = await memoGet(tag + '|list');
   if (Array.isArray(listed && listed.json)) files = listed.json.map(reviveEntry);
+  // The INDEX already knows this archive's directory (the uploader lists every archive inside the
+  // one it uploads), so a nested listing can cost nothing at all — stored or deflated, first visit
+  // or tenth. `off`/`csize`/`method` travel with each entry, so a member is still a byte range.
+  if (!files && indexed && Array.isArray(indexed.files) && indexed.files.length) {
+    files = indexed.files.map(indexedEntry);
+  }
   if (!files) {
-    const listing = await zipFromMemory(await getBytes());
-    files = listing.files;
+    // The cheap way first: a stored member's own directory, straight out of its bytes.
+    if (stored) {
+      try { files = await zipDirRanged(stored.range, stored.size); } catch (e) { files = null; }
+    }
+    if (!files) files = (await zipFromMemory(await getBytes())).files;
     await memoPut(tag + '|list', files.map(keepEntry));
   }
   return {
@@ -1896,7 +1967,11 @@ async function openInnerArchive(getBytes, path, stamp) {
       if (memo && memo.bytes) return memo.bytes;
       const e = findEntry(files, p);
       if (!e) throw new Error(`"${p}" is not in ${path}`);
-      const out = await extractFrom(await getBytes(), e);
+      // Every entry carries `localOff`/`csize`/`method` (keepEntry/reviveEntry), so a stored member
+      // is read by range whichever listing produced it — index, memo or whole bytes.
+      let out = null;
+      if (stored) { try { out = await zipReadRanged(stored.range, e); } catch (err) { out = null; } }
+      if (!out) out = await extractFrom(await getBytes(), e);
       await memoPut(what, out);
       return out;
     },
