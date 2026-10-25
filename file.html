@@ -86,7 +86,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-25T09:35';
+const BUILD = '2026-10-25T09:38';
 // ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
 // `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
@@ -1492,6 +1492,12 @@ function folderHref(label, prefix) {
   const base = String(label || 'archive.zip').split('/').map(encodeURIComponent).join('/');
   return siteUrl('file/' + base);
 }
+// The address of an ARCHIVE's own page (no member behind it): what `[parent directory]` on a nested
+// archive's page points at.
+function archiveHref(label) {
+  const base = String(label || 'archive.zip').split('/').map(encodeURIComponent).join('/');
+  return siteUrl('file/' + base);
+}
 
 // One level of a listing: the DIRECT children of `prefix` only, folders first, then by name — what
 // a `file:///` directory tab shows (and what makes a folder worth its own page).
@@ -1616,8 +1622,10 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
     // An ARCHIVE opened from inside another gets the address of the listing it came from, or its page
 
     // folder of a zip). A folder's own parent is computed from its prefix, as before.
-    const up = lastWasArchive && walked.length ? walked.slice(0, -1).join('/') : '';
-    const containing = up ? `${addrBase}/${up}` : addrBase;
+    const up = lastWasArchive && walked.length > 1 ? walked.slice(0, -1).join('/') : '';
+    // An ABSOLUTE url, both ways: a bare label resolved against the current path and produced
+    // `/file/<id>/<id>` (measured live 2026-10-25).
+    const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
     return renderZipFolder(label, rest, files, read, deepest,
                            lastWasArchive ? addrWalk : addrArch,
                            lastWasArchive ? containing : null);
@@ -1632,8 +1640,8 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
     // walked into), so only the part PAST them is appended to the address.
     const tail = within && entry.path.startsWith(within) ? entry.path.slice(within.length) : entry.path;
     // The page it came FROM is the walk without its last segment (`walked` ends with this archive).
-    const up = walked.slice(0, -1).join('/');
-    const containing = up ? `${addrBase}/${up}` : addrBase;
+    const up = walked.length > 1 ? walked.slice(0, -1).join('/') : '';
+    const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
     return renderZipFolder(`${label}/${entry.path}`, '', inner.files, (p) => inner.read(p), bytes,
                            `${addrWalk}/${tail}`, containing);
   }
