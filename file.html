@@ -86,7 +86,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-25T08:25';
+const BUILD = '2026-10-25T08:49';
 // ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
 // `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
@@ -497,6 +497,17 @@ async function partPayload(i) {
   })();
   partCache.set(i, p);
   try { return await p; } catch (e) { partCache.delete(i); throw e; }
+}
+
+// A part read WITHOUT the capacity assertion. A short part is not a broken file — a tt2png index or
+// a master list lives in the payload exactly like a data part does, and its 5 KB is legitimate. Code
+// that only needs to LOOK at part 1 (a probe) must not fail on the length check.
+async function partPayloadLoose(i) {
+  const res = await fetch(src.urls[i], { mode: 'cors', credentials: 'omit' });
+  if (!res.ok) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
+  const payload = await decodePngExact(new Uint8Array(await res.arrayBuffer()));
+  if (!payload) throw new Error(`part ${i + 1} is not a bin2png PNG`);
+  return payload;
 }
 
 async function sourceSize() {
@@ -1028,14 +1039,25 @@ async function sniffSource() {
     }
     // No worker (a `file://` page, or one refusing service workers): fall back to the parts.
   }
-  const tail = await partPayload(src.urls.length - 1);
-  if (looksLikeZipTail(tail)) return { zip: true };
-  const head = await partPayload(0);
-  // Part 1 alone is not the whole deflate stream of a PACKED payload, so this is the tolerant
-  // prefix inflate, not unpackPayload — otherwise a 7.75 MB packed webm sniffed as "binary".
-  const packed = isPacked(head);
-  const unpacked = packed ? await unpackPrefix(head) : null;
-  return { mime: sniffMime(unpacked || head), packed, head };
+  try {
+    const tail = await partPayload(src.urls.length - 1);
+    if (looksLikeZipTail(tail)) return { zip: true };
+    const head = await partPayload(0);
+    // Part 1 alone is not the whole deflate stream of a PACKED payload, so this is the tolerant
+    // prefix inflate, not unpackPayload — otherwise a 7.75 MB packed webm sniffed as "binary".
+    const packed = isPacked(head);
+    const unpacked = packed ? await unpackPrefix(head) : null;
+    return { mime: sniffMime(unpacked || head), packed, head };
+  } catch (e) {
+    // THE LIVE BUG OF 2026-10-25. An id whose parts are a tt2png INDEX (his `HVdZdhhWUAAmCh6`) has
+    // a tiny part 1, so the capacity check threw "part 1 holds 0 B" and the whole address fell
+    // through to "application/zip — this page cannot render it": no listing, no `Index of /`.
+    // A part that is short is a DESCRIPTION, not corruption — read it without the assertion and let
+    // `followIndex` decide what it describes.
+    const head = await partPayloadLoose(0).catch(() => null);
+    if (!head) throw e;
+    return { head, mime: '', packed: isPacked(head), short: e.message };
+  }
 }
 
 function parseCentral(block, at, entries, cdSize, cdOff, total) {
@@ -2374,8 +2396,13 @@ async function run() {
   // previous file's part 1 (measured: `#hello.txt` then `#bundle.zip` listed the text's bytes as the
   // zip's first member). A new address starts with an empty cache.
   partCache.clear();
-  let mime = src.ranged ? '' : mimeFromName(src.name);
-  let zipByName = !src.ranged && /\.(zip|apk|jar)$/i.test(src.name);
+
+  // "let the two ends decide" for a FILE whose name may lie — but here the resolved name already says
+  // `.zip`, and probing it as an image decoded part 1 to 0 B (it is not an image at all), which threw
+  // and replaced the `Index of /` shell with a bare download page.
+  const namedArchive = /\.(zip|apk|jar)$/i.test(src.name);
+  let mime = src.ranged && !namedArchive ? '' : mimeFromName(src.name);
+  let zipByName = namedArchive;
   // A media or index view owns its own title (none for media, "Index of …" for an archive).
   // Assigning one here would insert a <title> INTO the bare head — measured: `META:viewport,TITLE:`.
   if (!player && !index) document.title = src.name;
@@ -2393,8 +2420,12 @@ async function run() {
         if (probe.packed) src.packed = true;
         if (probe.zip) { zipByName = true; break; }
         if (await followIndex(probe.head)) {
-          mime = src.ranged ? '' : mimeFromName(src.name);
-          zipByName = !src.ranged && /\.(zip|apk|jar)$/i.test(src.name);
+          // The index just named the file. If that name says `.zip`/`.apk`/`.jar` it IS an archive,
+          // dot address or not — the same rule as `namedArchive` above, and the second half of the
+          // 2026-10-25 live bug: following the index and then still refusing to list it.
+          const nowArchive = /\.(zip|apk|jar)$/i.test(src.name);
+          mime = src.ranged && !nowArchive ? '' : mimeFromName(src.name);
+          zipByName = nowArchive;
           if (!player && !index) document.title = src.name;
           continue;
         }
@@ -2449,9 +2480,11 @@ async function run() {
         await renderZipPath(label, member, typedToken);
         return;
       }
-      // The page is already up for a `.` address; only the rows were missing.
+      // The page is already up for a `.` address; only the rows were missing. Both branches carry
+      // the ADDRESS it was opened by as the href base — without `base`, a listing opened by id wrote
+
       if (index) index.setLabel(label);
-      else index = indexView(label, 0);
+      else index = indexView(label, 0, { base: typedToken });
       // Hand the worker this archive's plan: from here on `/file/<archive>/<member>` is answered
       // with the member AS a file (its own type, `Content-Disposition: inline`, ranges).
       // Shared under the ADDRESS the rows link to, so the worker answers `/file/<id>/<member>`
