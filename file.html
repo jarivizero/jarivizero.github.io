@@ -86,7 +86,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-25T08:49';
+const BUILD = '2026-10-25T09:01';
 // ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
 // `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
@@ -1238,8 +1238,9 @@ function indexView(label, total, opts) {
     a.id = 'parentDirLink';
     a.className = 'icon up';
     a.href = opts.parentHref;
-    a.target = '_blank';
-    a.rel = 'noopener';
+    // A folder is walked in the SAME tab: the url becomes the folder's address and the page becomes
+    // its `Index of` — exactly what a file manager does. Only a FILE (an image, a text, a video) is a
+
     const span = document.createElement('span');
     span.id = 'parentDirText';
     span.textContent = '[parent directory]';
@@ -1350,7 +1351,9 @@ function indexView(label, total, opts) {
     a.style.backgroundImage = `url("${iconUrl(cls === 'dir' ? 'folder' : iconForFile(text))}")`;
     a.textContent = text;
     a.href = href || '#';
-    if (href) {
+    if (href && cls !== 'dir') {
+      // A FILE opens its own tab — the worker answers that url with the file ITSELF, so the tab is
+      // the browser's own viewer. A FOLDER stays in this tab and the page turns into its listing.
       a.target = '_blank';
       a.rel = 'noopener';
     } else if (onClick) {
@@ -1471,12 +1474,18 @@ function listedMember(f) {
 // The address of one path inside an archive: `/file/<archive>/<path>`.
 function memberHref(label, path) {
   const rel = String(path).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
-  return siteUrl('file/' + encodeURIComponent(label || 'archive.zip') + '/' + rel);
+  // The label may itself be a PATH (`<id>/folder/inner.zip`), so it is encoded SEGMENT BY SEGMENT.
+  // Encoded whole, its slashes became `%2F` and the address was one 90-character name that resolved
+  // nowhere — his error report 2026-10-25, a png inside a zip inside a folder.
+  const base = String(label || 'archive.zip').split('/').map(encodeURIComponent).join('/');
+  return siteUrl('file/' + base + '/' + rel);
 }
 // The folder one step up (`''` is the archive root).
 function folderHref(label, prefix) {
   const up = String(prefix || '').replace(/[^/]+\/$/, '');
-  return up ? memberHref(label, up) : siteUrl('file/' + encodeURIComponent(label || 'archive.zip'));
+  if (up) return memberHref(label, up);
+  const base = String(label || 'archive.zip').split('/').map(encodeURIComponent).join('/');
+  return siteUrl('file/' + base);
 }
 
 // One level of a listing: the DIRECT children of `prefix` only, folders first, then by name — what
@@ -1524,26 +1533,52 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr) {
 
 // Walk INTO an address: `/file/<outer>/<inner.zip>/<dir>/<file>`. Every archive on the way is
 // opened, so a zip in a zip is listed and entered exactly like the outer one.
+//
+
+// BD style dildo.7z/README.txt` stopped at the first segment because it was not an archive, so the
+// rest of the path was looked up in the OUTER zip and reported as missing. Folders are plain
+// prefixes of the same listing — stepping into one changes nothing but the path.
 async function resolveArchivePath(rawPath) {
   const parts = String(rawPath || '').split('/').filter(Boolean);
-  const consumed = [];
+  const consumed = [];     // archive names opened on the way (a 7z costs a run of JS7z)
+  const walked = [];       // every segment stepped through, folder or archive, for label + address
+  let dirSince = [];       // folders stepped into SINCE the last archive was opened
   let files = await rootRows();
   let read = rootRead;
   let deepest = null;
+  let lastWasArchive = false;
   while (parts.length) {
     const name = parts[0];
     const entry = findEntry(files, name);
     const archive = entry && !entry.dir && /\.(zip|apk|jar|7z)$/i.test(name);
-    if (!archive) break;
+    if (archive) {
+      parts.shift();
+      const bytes = await read(entry.path);
+      const inner = await openInnerArchive(bytes, entry.path);
+      deepest = bytes;
+      lastWasArchive = true;
+      consumed.push(name);
+      walked.push(name);
+      dirSince = [];
+      files = inner.files;
+      read = (p) => inner.read(p);
+      continue;
+    }
+    // A folder: a real entry (a zip records them), or just a prefix of the member paths.
+    const dir = !!entry && entry.dir;
+    const prefixOnly = !entry && files.some((f) => f.path.startsWith(name + '/'));
+    if (!dir && !prefixOnly) break;
     parts.shift();
-    const bytes = await read(entry.path);
-    const inner = await openInnerArchive(bytes, entry.path);
-    deepest = bytes;
-    consumed.push(name);
-    files = inner.files;
-    read = (p) => inner.read(p);
+    lastWasArchive = false;
+    dirSince.push(name);
+    walked.push(name);
   }
-  return { consumed, files, rest: parts.join('/'), read, bytes: consumed.length ? deepest : null };
+  // The path STILL TO RESOLVE, relative to the listing the loop ended on: the folders stepped into
+  // since the last archive, then whatever is left. Losing those folders was the regression this
+  // caught — `/file/x.zip/docs/` came back as the ARCHIVE ROOT, so the folder page listed its parent.
+  const within = dirSince.length ? dirSince.join('/') + '/' : '';
+  return { consumed, walked, files, rest: within + parts.join('/'), read,
+           bytes: lastWasArchive ? deepest : null };
 }
 
 // `/file/<archive>/<path>` — the page route. A file renders as itself (a `file:///` tab would), a
@@ -1551,6 +1586,9 @@ async function resolveArchivePath(rawPath) {
 async function renderZipPath(baseLabel, rawPath, baseAddr) {
   const addrBase = baseAddr || baseLabel;
   const { consumed, files, rest, read, bytes: deepest } = await resolveArchivePath(rawPath);
+  // The label and the address carry the ARCHIVES opened, never the folders stepped through: a folder
+  // stays in `rest`, which is already relative to the listing we ended on (`docs/readme.txt`), so the
+  // page's own prefix and its heading agree. Mixing the two showed `Index of x.zip/docs/docs/`.
   const label = consumed.length ? `${baseLabel}/${consumed.join('/')}` : baseLabel;
   // Two layers, kept apart on purpose: the heading says the NAME (`Index of Pictures.zip`), the
   // rows say the ADDRESS it was opened by (`/file/HVdZdhhWUAAmCh6/docs/`) — no decoded name in a url.
