@@ -59,8 +59,7 @@ try {
   /* What this page BUILDS is all it styles: Apache's index table, a status line under it, the 404
      art, a PDF's embed. A text, image or media view removes this stylesheet entirely (`bareHead`),
      so what is left is exactly what a `file:///` tab has — nothing but the payload element. */
-  /* The LISTING's own stylesheet (INDEX_CSS, injected with the view) owns table/th/td, because it is
-     Chrome's `file:///` page copied node for node — nothing here may add padding or alignment to it. */
+  
   .status { margin: 6px 0 0; font-size: 12px; }
   .status.error { color: #b42318; }
   img { max-width: 100%; }
@@ -121,7 +120,7 @@ window.addEventListener('load', () => { checkSiteVersion(); });
     // The REAL file, never the `/file` route: that one can be answered by the worker from its own
     // precache, which is exactly the copy this check has to see past.
     //
-
+    
     // comparing the BUILD constant costs the first 8 KB, and only a REAL change then pays for the
     // whole file — which is still fetched with `reload` below, because that copy is what gets put
     // back into the worker's cache.
@@ -182,7 +181,7 @@ function hex(n, w = 2) { return n.toString(16).padStart(w, '0'); }
 
 // ─── the page is the file, and nothing else ──────────────────────────────────────────────────
 // The document used to carry `<header id="where">`, `<div id="kind">`, `<div id="meta">` and
-// `<main id="stage">` around every payload. His 2026-10-19 report, verbatim: "a regular just contains
+
 // meta name viewport, and video html, does it need those? I'm pretty sure not". They are gone: each
 // view builds exactly the node it is — a <pre>, an <img>, a <video>, or Apache's table — directly in
 // the body, and a payload view strips the stylesheet and the script that built it.
@@ -337,7 +336,7 @@ async function resolveToken(token) {
     const hash = await sha256(new TextEncoder().encode(name));
     const record = (await dictionary()).get(hash);
     if (record) return { name, urls: pbsUrls(await idsDecrypt(name, record)) };
-    // NOT IN THE DICTIONARY. His 2026-10-19 case: `/file/HTuOfF1W4AA6UfM.mp4` — a pbs id with an
+    
     // extension on it. Strip the extension; if what is left is a pbs id, that IS the media id, so the
     // player stays up and pbs answers. Only a 404 from pbs may end on the art.
     const stem = name.replace(/\.[A-Za-z0-9]+$/, '');
@@ -763,7 +762,7 @@ function isManifestHead(bytes) {
   return t.startsWith('#bin2png-manifest');
 }
 // ONE read of the payload's head, answering both questions a player start has to ask: is the payload
-// DEFLATE-wrapped (`src.packed`), and is this address really a MASTER file (a name can lie — `file/
+
 // blindspots.webm` is a .webm by name and a manifest by content)? The raw head is what tells the first
 // one; the second needs the INFLATED prefix, because a packed head reads `B2PZ…` and says nothing.
 // Measured 2026-10-19: `x-draft.py` packs the master, so `/file/<id>.webm` peeked at `B2PZ`, never saw
@@ -793,8 +792,8 @@ async function renderMedia(mime) {
   }
   // The OTHER payload that wears a media name: a tt2png index. The FILE lives on TikTok's CDN and the
   // payload is the JSON that names its chunks, so a player handed those 1 KB cannot decode anything.
-  // His 2026-10-19 report, verbatim: `/file/,HU95H5ZWcAED4gK` works and the same function should
-  // happen for `/HU95H5ZWcAED4gK?1hour.webm` and `/file/HU95H5ZWcAED4gK.webm`. It did for the comma
+  
+  
   // form because run()'s SNIFF saw JSON and took the index path, while a `.webm` name went straight
   // to a player. A media container never begins with `{`, so this cannot catch a real video.
   if (head.plain) {
@@ -825,7 +824,7 @@ async function renderMedia(mime) {
     else setMediaSource(el, URL.createObjectURL(new Blob([await wholeFile()], { type: mime })), mime);
   }
   // The one address that can still turn out not to exist: a pbs id guessed from `id.mp4`. The player
-
+  
   // the art). `run()` asks pbs first; this is the fallback when that request could not answer.
   if (src.guess) {
     el.addEventListener('error', () => { if (!el.readyState) show404(); }, { once: true });
@@ -1049,7 +1048,7 @@ async function sniffSource() {
     const unpacked = packed ? await unpackPrefix(head) : null;
     return { mime: sniffMime(unpacked || head), packed, head };
   } catch (e) {
-    // THE LIVE BUG OF 2026-10-25. An id whose parts are a tt2png INDEX (his `HVdZdhhWUAAmCh6`) has
+    
     // a tiny part 1, so the capacity check threw "part 1 holds 0 B" and the whole address fell
     // through to "application/zip — this page cannot render it": no listing, no `Index of /`.
     // A part that is short is a DESCRIPTION, not corruption — read it without the assertion and let
@@ -1303,7 +1302,7 @@ function indexView(label, total, opts) {
     a.href = opts.parentHref;
     // A folder is walked in the SAME tab: the url becomes the folder's address and the page becomes
     // its `Index of` — exactly what a file manager does. Only a FILE (an image, a text, a video) is a
-
+    
     const span = document.createElement('span');
     span.id = 'parentDirText';
     span.textContent = '[parent directory]';
@@ -1452,7 +1451,7 @@ function indexView(label, total, opts) {
       // archive has no path to spell, and there the row stays a download.
       const href = src.direct ? null : memberHref(baseLabel, f.path);
       // An archive row is a LISTING too: `.zip`/`.apk`/`.jar`/`.7z` inside an archive opens its own
-
+      
       // opening a new tab even though nothing about it is a file you view).
       const listsHere = f.dir || /\.(zip|apk|jar|7z)$/i.test(f.path);
       const a = addRow(listsHere ? 'dir' : 'file', text, f.dir || href ? null : async (el) => {
@@ -1544,7 +1543,7 @@ function memberHref(label, path) {
   const rel = String(path).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
   // The label may itself be a PATH (`<id>/folder/inner.zip`), so it is encoded SEGMENT BY SEGMENT.
   // Encoded whole, its slashes became `%2F` and the address was one 90-character name that resolved
-  // nowhere — his error report 2026-10-25, a png inside a zip inside a folder.
+  
   const base = String(label || 'archive.zip').split('/').map(encodeURIComponent).join('/');
   return siteUrl('file/' + base + '/' + rel);
 }
@@ -1586,6 +1585,7 @@ function fillFolder(view, prefix, files) {
 // A FOLDER inside an archive: its own `Index of` page, `[parent directory]`, and its own zip.
 // `zipBytes` is set when the archive being listed is one INSIDE another: a GETTER for its bytes, its
 // Download Zip — never the outer payload, and never fetched until somebody clicks it. `addr` is the
+// address the page was OPENED with — the id he typed,
 
 async function renderZipFolder(label, prefix, files, read, zipBytes, addr, parentHref) {
   prefix = String(prefix || '').replace(/^\/+/, '');
@@ -1597,7 +1597,7 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
     base: addr,
     // A folder's parent is the folder above it. An ARCHIVE opened from inside another has no prefix of
     // its own, so it is handed the address of the listing it came from — otherwise its page had no
-
+    
     parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
     downloadZip: zipBytes && !prefix ? async () => {
       const bytes = await zipBytes();
@@ -1613,7 +1613,7 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
 // Walk INTO an address: `/file/<outer>/<inner.zip>/<dir>/<file>`. Every archive on the way is
 // opened, so a zip in a zip is listed and entered exactly like the outer one.
 //
-
+// A FOLDER is walked too, and this is the bug he hit on 2026-10-25: `/file/<id>/CM3D2 mod repo/
 // BD style dildo.7z/README.txt` stopped at the first segment because it was not an archive, so the
 // rest of the path was looked up in the OUTER zip and reported as missing. Folders are plain
 // prefixes of the same listing — stepping into one changes nothing but the path.
@@ -1676,10 +1676,10 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   // Two different things, and they must not be mixed:
   //   the LABEL says the archives opened (`Index of x.zip/inner.7z`) — a folder is not a file;
   //   the ADDRESS carries EVERY segment (`/file/<id>/folder/inner.zip/docs/`), because that is what
-
+  
   const label = consumed.length ? `${baseLabel}/${consumed.join('/')}` : baseLabel;
   // Two layers, kept apart on purpose: the heading says the NAME (`Index of Pictures.zip`), the
-  // rows say the ADDRESS it was opened by (`/file/HVdZdhhWUAAmCh6/docs/`) — no decoded name in a url.
+  
   //
   // And two ADDRESSES, because a row's href is `<address>/<member path>` where the member path already
   // carries its folders: a folder page hands its rows the ARCHIVE's address (`…/<id>/x.zip`), while a
@@ -1692,7 +1692,7 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   // those rows spell their own prefixes.
   if (rest === '' || /\/$/.test(rest)) {
     // An ARCHIVE opened from inside another gets the address of the listing it came from, or its page
-
+    
     // folder of a zip). A folder's own parent is computed from its prefix, as before.
     const up = lastWasArchive && walked.length > 1 ? walked.slice(0, -1).join('/') : '';
     // An ABSOLUTE url, both ways: a bare label resolved against the current path and produced
@@ -1703,7 +1703,20 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
                            lastWasArchive ? containing : null);
   }
   const entry = findEntry(files, rest);
-  if (!entry) throw new Error(`"${rest}" is not in ${label}`);
+  if (!entry) {
+    
+    // `…/back_zipper.zip/jj` said the file was missing and then left no `[parent directory]`, so
+    // there was no route out of it). Throw nothing: draw the folder it was meant to be in, with the
+    // reason as the status line — the rows, the parent link and the address all still work.
+    const dir = rest.replace(/[^/]+$/, '');
+    const up = lastWasArchive && walked.length > 1 ? walked.slice(0, -1).join('/') : '';
+    const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
+    await renderZipFolder(label, dir, files, read, null,
+                          lastWasArchive ? addrWalk : addrArch,
+                          lastWasArchive ? containing : null);
+    status(`"${rest}" is not in ${label}`, true);
+    return;
+  }
   if (entry.dir) return renderZipFolder(label, entry.path, files, read, deepest, addrArch);
   if (/\.(zip|apk|jar|7z)$/i.test(entry.path)) {
     // The archive's path from the ROOT, for what gets remembered about it: `entry.path` is relative
@@ -1735,7 +1748,7 @@ async function downloadFolder(label, prefix, files, read) {
   return { name, size: bytes.length };
 }
 // ─── a 7z INSIDE the archive: listed and read with JS7z (vendored, lazy) ──────────────────────
-// `vendor/js7z/` is 7-Zip 25.01 compiled to WebAssembly, the SINGLE-THREADED build: the multi-
+
 // threaded one needs SharedArrayBuffer, and a browser only exposes that on a cross-origin-isolated
 // page — GitHub Pages sends no COOP/COEP headers. It is fetched ONLY when a `.7z` is opened, and
 // every operation gets a FRESH runtime: an Emscripten `main()` may run once per runtime.
@@ -1902,7 +1915,7 @@ async function extractFrom(block, f) {
 // `tiktokupload.py` stores a file as chunks on TikTok's CDN and posts a small JSON index naming them:
 //   {"tool":"tt2png","name":"1hour.webm","bytes":12302071,"sha256":"…","chunks":[{url,size,sha256}]}
 // Each chunk is a 1×1 PNG with the payload APPENDED after its IEND, so the index has to be followed to
-// see the file. His 2026-10-19 report is exactly this one — `.HU95H5ZWcAED4gK` showed the JSON, and the
+
 // video was one level down.
 function parseTt2png(bytes) {
   let text = '';
@@ -1932,7 +1945,7 @@ function chunkPayload(bytes) {
 // ─── a tt2png ARCHIVE: the listing is in the index, the bytes are ranges of the chunks ─────────
 // `tiktokupload.py` reads an archive's own directory BEFORE uploading it and puts that listing in
 // the index (`archive: true`, `files`, `files_total`), so a zip's Index page costs exactly one
-// payload — the index — and no chunk at all. His 2026-10-25 report: `/file/HVdZdhhWUAAmCh6`
+
 // (a 5.8 KB packed index for an 8.4 MB `Pictures.zip`) downloaded both chunks before it would list
 // 27 names that were already in the index.
 //
@@ -2064,7 +2077,7 @@ async function renderTt2pngProgressive(index, mime) {
     if (have <= 1) return p0;
     return concat([p0, ...parts.slice(1, have)]);
   };
-  const play = () => el.play().catch(() => { el.muted = true; el.play().catch(() => {  }); });
+  const play = () => el.play().catch(() => { el.muted = true; el.play().catch(() => { /* he can press it */ }); });
   // Swap in whatever is in hand. The position is carried across, or the picture would restart at 0
   // every time the prefix grows.
   const show = () => {
@@ -2326,7 +2339,7 @@ function followManifest(bytes) {
 // Two payloads name other payloads: a bin2png MASTER (`#bin2png-manifest v1`, one small part) and a
 // tt2png INDEX (JSON naming chunks on a CDN, which also carries the archive's own listing).
 // Following it is what makes the listing cost one small payload instead of every part — his
-// 2026-10-25 report, `/file/HVdZdhhWUAAmCh6` (a 5.8 KB packed index for an 8.4 MB zip) read both
+
 // chunks before it would show a single name. `head` is the payload's first bytes, which every
 // caller has already read.
 let indexHops = 0;
@@ -2366,7 +2379,7 @@ let dictFreshOnce = false;  // one forced dictionary re-read per page, never a l
 // body is rebuilt first so a player or an index cannot sit underneath it.
 // The rules live HERE, not in the stylesheet: a media address strips <head> whole (`bareHead`),
 // and then a missing file used to paint in Times New Roman, hard against the left edge, with a
-// default blue link (his 2026-10-19 report: "the not found is on the left now … click me to go home
+
 // has not styled"). It is the SAME page 404.html shows: the art, then one way home.
 const NOTFOUND_CSS = `
   html, body { margin:0; min-height:100%; background:#fff; color:#1b1b1f;
@@ -2490,7 +2503,7 @@ function addressFromLocation() {
   const hash = location.hash.replace(/^#/, '');
   if (hash) return { raw: decodeURIComponent(hash).trim(), hint: '' };
   // `/file/<id>` and a bare `/<id>` at the site root are the same address; the second is the short
-
+  
   const idAtRoot = /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
   const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
     || (idAtRoot ? location.pathname.slice(1) : '');
@@ -2506,7 +2519,7 @@ async function run() {
   const where = addressFromLocation();
   let raw = where.raw;
   // Prefix grammar, left to right: `.` = an archive (its index page is up before the bytes arrive),
-  // `,` = a video (its player is up before the bytes arrive). Both are his 2026-10-19 ask:
+  
   // `/file/,<id>` prepares like the worker checks for webm/mp4, `/file/.<id>` is an archive.
   let ranged = false, forceMedia = false;
   for (;;) {
@@ -2527,11 +2540,11 @@ async function run() {
   // `?name` says which element, `.` says the index page. Nothing is fetched to find out.
   const firstMime = where.hint ? mimeFromName(where.hint) : (ranged ? '' : mimeFromName(raw));
   // The address AS TYPED, which is what every url this page writes keeps — an id stays an id, and
-
+  
   const typedToken = raw.split('/')[0];
   let index = null;
   // A PATH inside an archive puts the empty `Index of /` up IMMEDIATELY, the way a `.` address does
-
+  
   // already says so: there is a segment after the archive name, and a folder link always ends in `/`
   // (our own rows write it that way). A last segment with an extension is a FILE — those keep their
   // own blank tab and get no listing shell.
@@ -2545,7 +2558,7 @@ async function run() {
   if (ranged) {
     // `.` says archive, the way `,` says video: an EMPTY `Index of /` is on screen before a byte is
     // read — the heading a file manager opens with — and the rows arrive when the directory does.
-
+    
     index = indexView('/', 0, { base: typedToken });
   }
   let player = null;
@@ -2564,7 +2577,7 @@ async function run() {
     const cut = raw.indexOf('/');
     if (cut <= 0) {
       // NOT FOUND — and a dictionary one deploy behind is the one fixable reason: re-read it ONCE
-
+      
       // loaded and it says 404, recache to check if video does actually exist").
       if (isNameToken(raw) && !dictFreshOnce) {
         dictFreshOnce = true;
@@ -2573,7 +2586,7 @@ async function run() {
           token = await resolveToken(raw);
         } catch (e2) { console.warn('address not resolved:', e2.message); show404(); return; }
       } else {
-
+        
         console.warn('address not resolved:', e.message);
         show404();
         return;
@@ -2596,7 +2609,7 @@ async function run() {
   // previous file's part 1 (measured: `#hello.txt` then `#bundle.zip` listed the text's bytes as the
   // zip's first member). A new address starts with an empty cache.
   partCache.clear();
-
+  
   // "let the two ends decide" for a FILE whose name may lie — but here the resolved name already says
   // `.zip`, and probing it as an image decoded part 1 to 0 B (it is not an image at all), which threw
   // and replaced the `Index of /` shell with a bare download page.
@@ -2609,7 +2622,7 @@ async function run() {
 
   // An id carries no extension. Read the two ENDS before deciding — the last part says "zip" when
   // its EOCD ends exactly at the last byte, the first part says video/text/image. Never the whole
-
+  
   if (!mime && !zipByName) {
     try {
       // TWO hops at most: an address can point at a LIST of parts (a master) or at a tt2png index,
@@ -2648,7 +2661,7 @@ async function run() {
   }
 
   // `id.mp4` where the id is not in the dictionary: pbs is the last word. One two-byte range says
-
+  
   // 2026-10-19: "if pbs also is 404, then you can go to the 404 page").
   if (src.guess) {
     try {
@@ -2683,7 +2696,7 @@ async function run() {
       }
       // The page is already up for a `.` address; only the rows were missing. Both branches carry
       // the ADDRESS it was opened by as the href base — without `base`, a listing opened by id wrote
-
+      
       if (index) index.setLabel(label);
       else index = indexView(label, 0, { base: typedToken });
       // Hand the worker this archive's plan: from here on `/file/<archive>/<member>` is answered
@@ -2734,7 +2747,7 @@ async function run() {
     }
     binaryView(bytes);
   } catch (e) {
-    // A 404 from the bytes IS a missing file, not a status line. His 2026-10-19 report:
+    
     // `/file/nothinghere` is a 11-character token, so it passes the pbs-id test, pbs answers 404,
     // and the page printed "part 1: HTTP 404" instead of the art. The status line is left for
     // failures that are NOT "it is not there" (a decode error, a CORS block, an offline fetch).
