@@ -251,10 +251,16 @@ self.addEventListener('fetch', (event) => {
   // `/file/<archive>/<path>`: a FILE is answered with the file itself (its own type,
   // `Content-Disposition: inline`, ranges); a folder — or anything this worker cannot read — falls
   // through to the renderer, which shows the `Index of` page or renders the member by itself.
-  if (event.request.mode === 'navigate' && url.origin === self.location.origin) {
+  // A MEMBER IS ANSWERED FOR ANY GET, not just a navigation. Ctrl+S in Brave RE-REQUESTS the file
+  // (a plain fetch, not a navigation) and the worker used to pass that through to the server, which
+  // answered 404 — "File wasn't available on site" while the tab itself showed the file perfectly
+
+  if (event.request.method === 'GET' && url.origin === self.location.origin) {
     const inside = archiveAddress(url.pathname);
     if (inside) {
-      event.respondWith(serveMember(inside, event.request).then((res) => res || serveFilePage(null)));
+      const nav = event.request.mode === 'navigate';
+      event.respondWith(serveMember(inside, event.request)
+        .then((res) => res || (nav ? serveFilePage(null) : new Response('', { status: 404 }))));
       return;
     }
   }
