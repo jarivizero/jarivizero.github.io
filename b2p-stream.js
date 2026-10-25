@@ -384,6 +384,13 @@ async function serve(request, url) {
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
   }
+  // Every ranged read the worker made, newest last: `who` says which path asked, so a byte that was
+  // fetched twice can be traced to the two callers instead of guessed at from a total.
+  if (url.pathname.endsWith('/__b2p/log')) {
+    return new Response(JSON.stringify(REQLOG, null, 1), {
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    });
+  }
   const id = url.searchParams.get('id');
   // The cache entry first (it may already carry the total size), then the address itself.
   const plan = (await readPlan(id)) || planFromUrl(url);
@@ -722,6 +729,11 @@ function concatBytes(list) {
 }
 
 const netBytes = new Map();    // part url -> bytes actually fetched from the network
+const REQLOG = [];             // the last 300 ranged reads: { who, part, from, want, got }
+function noteReq(who, part, from, want, got) {
+  REQLOG.push({ who, part: String(part).slice(-10), from, want, got });
+  if (REQLOG.length > 300) REQLOG.shift();
+}
 const prefixOf = new Map();    // part url -> { bytes, eof }: the PNG bytes in hand so far
 const payloadOf = new Map();   // part url -> Uint8Array: a part that has been read in full
 const partLocks = new Map();   // part url -> promise, so two ranges never grow one part at once
@@ -781,6 +793,7 @@ async function growPart(plan, i, need) {
 
 async function fetchPrefix(url, from, want) {
   const res = await fetch(url, {
+    // (logged below, once the length is known)
     mode: 'cors',
     credentials: 'omit',
     // EVERY read is a Range request, the first one included. Sending no Range on the first read is
@@ -791,6 +804,7 @@ async function fetchPrefix(url, from, want) {
   if (!res.ok) throw new Error(`part: HTTP ${res.status}`);
   const body = new Uint8Array(await res.arrayBuffer());
   netBytes.set(url, (netBytes.get(url) || 0) + body.length);
+  noteReq('prefix', url, from, want, body.length);
   // 200 = the server ignored Range and sent the whole file, which is also a fine answer.
   return { bytes: body, whole: res.status !== 206 };
 }
@@ -852,6 +866,7 @@ async function ttWindow(plan, i, off, want) {
     if (!res.ok) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
     const head = new Uint8Array(await res.arrayBuffer());
     netBytes.set(key, (netBytes.get(key) || 0) + head.length);
+    noteReq('probe', key, 0, 512, head.length);
     const tail = pngTail(head);
     if (!tail) throw new Error(`part ${i + 1} is not a tt2png PNG`);
     hdr = head.length - tail.length;
@@ -862,6 +877,7 @@ async function ttWindow(plan, i, off, want) {
   if (!res.ok && res.status !== 416) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
   const body = new Uint8Array(await res.arrayBuffer());
   netBytes.set(key, (netBytes.get(key) || 0) + body.length);
+  noteReq('window', key, off, want, body.length);
   // A read that covers the whole chunk keeps it (payloadOf is checked before any fetch), so the next
   // reader of this chunk — a second stream, or the member after its directory — costs nothing.
   if (off === 0 && plan.cap && body.length === plan.cap) {
