@@ -52,7 +52,7 @@ const DICT_URL = urlOf('IDSDICTIONARY.txt');
 //
 // An empty pair means "not baked" (the workspace copy, a local server): then the worker falls back
 // to fetching the .txt exactly as it used to.
-const BUILT_VER = "d4210b38f30263cc";
+const BUILT_VER = "c421b1649c2606a4";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 // A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
 // update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
@@ -95,7 +95,18 @@ async function resync(dictChanged) {
 // The page asks for this after its own load event — never on the critical path. It only asks when
 // IT saw sw-ver.txt move, so the dictionary is part of what it means by "changed".
 self.addEventListener('message', (event) => {
-  if (!event.data || event.data.type !== 'resync') return;
+  if (!event.data) return;
+  // "which client am I?" — a streamed download is started from an IFRAME (Chromium cancels a
+  // `download`-attribute request a worker answers, measured 2026-10-25), so `event.clientId` on that
+  // request is the frame's, not the page's. The page asks for its own id and puts it in the job, so
+  // the "(5/10)" messages reach the link that was clicked.
+  if (event.data.type === 'whoami') {
+    if (event.source && event.source.postMessage) {
+      event.source.postMessage({ type: 'b2p-client', id: event.source.id || '' });
+    }
+    return;
+  }
+  if (event.data.type !== 'resync') return;
   event.waitUntil(resync(true));
 });
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
@@ -177,6 +188,8 @@ const TBL = {
   // k1: the content key, wrapped with this id's own digest.
 '3f563941b47cd309eb11de9cf2021496aab4c0272f77124556d5a2ba030aabaa': 'k1.ylVOALi3qOVZ-iNV.N7U_ZtuPZNO_jP-lqJtle9FWzUUzySxhwQmeJMQg6-NGbOHkxyCvA32gFnICw9li',
 'f311702a0b8348ac3c678c129327908de0d2713fe7b6bb523f628eac870c6924': 'k1.fBmj5sa5z569mVqQ.fugB2JNaZxbSBK-Jj2gBdFNMelEZM-Fa-h1obcYb3Huh2O1afflNnaLArJp03RTZ',
+'cef8facaffff797222567421b14034df5bfbf28d6d14752b1b65e96987117297': 'k1.sRK0ezEhVLRhxKg5.WE2LaT4RJgaL4iE0w8wZNrDq3qbkB1cU2MvRMCC6pikgTo58PN-6mMLW0a5RefKb',
+'644a952e1d7e219642bccababf1d3d13c9e3be544166edae6337ad56b37442b7': 'k1.2P86gMZJw2y5i-u7.t-jp_V77vfMAz5LlMQHONAnha3vwC79e8LyYqRaUtyJSueKb9G6XzOuwM6Gl8S9a',
 };
 
 // base64url → bytes. atob is the only decoder a worker has, so the padding is put back by hand.
@@ -320,6 +333,14 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method === 'GET' && url.href.split('?')[0] === DICT_URL) {
     event.respondWith(serveDictionary(url));
+    return;
+  }
+  // A zip the page asked this worker to build WHILE it downloads ("Download current dir as zip").
+  // Answered here, before the generic range face, because its plan lives under its own key.
+  if (url.pathname.endsWith('/__b2p/zip/')) {
+    // A rejected promise here is a network error in the frame's download; the job's own failures are
+    // already a page that tells the parent why, so this is only the last resort.
+    event.respondWith(serveZipJob(url, event.clientId).catch((e) => zipErrorPage('', e.message)));
     return;
   }
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
@@ -707,7 +728,14 @@ async function zipDir(plan) {
     const nlen = U16(cd, k + 28), elen = U16(cd, k + 30), clen = U16(cd, k + 32);
     const localOff = U32(cd, k + 42);
     const name = new TextDecoder().decode(cd.subarray(k + 46, k + 46 + nlen));
-    if (!dir.has(name)) dir.set(name, { name, method, csize, localOff, dir: /\/$/.test(name) });
+    // crc / size / DOS stamp are what a STREAMED zip needs: its local header is written before the
+    // member's bytes are read, so the values have to come from the directory rather than from the
+    // data (a data descriptor would work too, but every unzip reads a plain header).
+    if (!dir.has(name)) {
+      dir.set(name, { name, method, csize, size: U32(cd, k + 24), crc: U32(cd, k + 16),
+                      time: U16(cd, k + 12), date: U16(cd, k + 14),
+                      localOff, dir: /\/$/.test(name) });
+    }
     k += 46 + nlen + elen + clen;
   }
   DIRS.set(key, dir);
@@ -793,6 +821,220 @@ async function serveMember(address, request) {
     return await memberResponse(plan, entry, request);
   } catch (e) {
     return null;                       // the renderer, which renders a member by itself
+  }
+}
+
+// ─── a zip, built while the browser downloads it ───────────────────────────────────────────────
+
+// through HTTP streaming? … It might be the Chunked Transfer Encoding"*. It is, and the encoding is
+// not the part that decides it — the BODY does. A Blob is handed over only once its last byte
+// exists, so the page sat on "zipping…" with nothing in the browser's download list. This worker
+// answers the download with a ReadableStream instead: the browser saves each member as it is read,
+// its own download bar moves, and `Content-Length` (the layout is known before a byte is fetched)
+// turns that bar into a real percentage. Measured on 2026-10-25: Chromium CANCELS a download
+// started with `<a download>` when a worker answers it, and saves the same response when the request
+// is a NAVIGATION — which is why the page starts it from a hidden iframe.
+//
+// A job is written by the page (POST-free, the Cache API — a plan in memory dies with the worker):
+//   { kind: 'folder'|'file', id, name, client, prefix?, plan }
+// `plan` is the ordinary range plan for the archive's own file, so every member is a byte range and
+// nothing here downloads the archive. The MEMBER LIST is not in the job on purpose: it comes from
+// the archive's own central directory, so it cannot disagree with the file.
+const DOS_TIME_NOON = 12 << 11;              // 12:00:00 when the directory carries no time
+const DOS_DATE_1980 = (1 << 5) | 1;          // 1980-01-01, the zip epoch
+function attachmentHeader(name) {
+  const raw = String(name || 'download.zip').replace(/[\r\n]/g, ' ').replace(/[\\/"]/g, '_').trim() || 'download.zip';
+  const ascii = raw.replace(/[^\x20-\x7e]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(raw)}`;
+}
+
+// One message per member (or per megabyte of a whole-file save) to the page that asked, so the link
+// can read "zipping… (5/10)" while the browser's own bar moves. Never awaited: a stream must not
+// wait on a message.
+function zipProgress(clientId, job, done, total, unit) {
+  if (!clientId) return;
+  try {
+    self.clients.get(clientId)
+      .then((c) => c && c.postMessage({ type: 'b2p-zip', job, done, total, unit }))
+      .catch(() => {});
+  } catch (e) { /* no clients API, or the page is gone */ }
+}
+
+// A ReadableStream over an async iterator: one pull at a time, nothing buffered ahead.
+function fromIterator(it) {
+  return new ReadableStream({
+    async pull(ctrl) {
+      try {
+        const step = await it.next();
+        if (step.done) ctrl.close();
+        else ctrl.enqueue(step.value);
+      } catch (e) { ctrl.error(e); }
+    },
+  });
+}
+async function* readerChunks(stream) {
+  const reader = stream.getReader();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      if (value && value.length) yield value;
+    }
+  } finally {
+    try { reader.releaseLock(); } catch (e) { /* already closed */ }
+  }
+}
+function countingStream(stream, onBytes) {
+  return fromIterator((async function* () {
+    let seen = 0;
+    for await (const c of readerChunks(stream)) { seen += c.length; onBytes(seen); yield c; }
+  })());
+}
+
+// The archive, member by member, as STORED entries. Sizes and CRCs come from the member's central
+// directory record, so each local header is complete before its data is read — no data descriptor,
+// which is what every unzip reads without complaint.
+async function* zipStream(plan, members, prefix, onMember) {
+  const enc = new TextEncoder();
+  const centrals = [];
+  let at = 0;
+  for (const e of members) {
+    const name = enc.encode(e.name.slice(prefix.length));
+    const head = await fileBytes(plan, e.localOff, e.localOff + 29);
+    if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) {
+      throw new Error(`${e.name}: its local header is not where the directory says it is`);
+    }
+    const start = e.localOff + 30 + U16(head, 26) + U16(head, 28);
+    const size = Number(e.size) || 0;
+    const crc = e.crc >>> 0;
+    const time = e.time || DOS_TIME_NOON, date = e.date || DOS_DATE_1980;
+    const lh = new Uint8Array(30 + name.length);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);                  // version needed to extract
+    lv.setUint16(6, 0x0800, true);              // UTF-8 names (the whole site speaks UTF-8)
+    lv.setUint16(8, 0, true);                   // STORED: the folder's bytes are already here
+    lv.setUint16(10, time, true);
+    lv.setUint16(12, date, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, size, true);
+    lv.setUint32(22, size, true);
+    lv.setUint16(26, name.length, true);
+    lh.set(name, 30);
+    yield lh;
+    if (size) {
+      // A member that is DEFLATED in the archive is inflated on the way past and stored plain here:
+      // a second deflate pass would cost CPU and save nothing worth the wait.
+      let body = streamRange(plan, start, start + (Number(e.csize) || size) - 1, plan.total);
+      if (e.method === 8) body = body.pipeThrough(new DecompressionStream('deflate-raw'));
+      let got = 0;
+      for await (const c of readerChunks(body)) { got += c.length; yield c; }
+      if (got !== size) throw new Error(`${e.name}: ${got} B arrived, the directory says ${size}`);
+    }
+    centrals.push({ name, crc, size, time, date, offset: at });
+    at += lh.length + size;
+    onMember();
+  }
+  let cdSize = 0;
+  for (const c of centrals) {
+    const ch = new Uint8Array(46 + c.name.length);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true);
+    cv.setUint16(12, c.time, true); cv.setUint16(14, c.date, true);
+    cv.setUint32(16, c.crc, true); cv.setUint32(20, c.size, true); cv.setUint32(24, c.size, true);
+    cv.setUint16(28, c.name.length, true);
+    cv.setUint32(42, c.offset, true);
+    ch.set(c.name, 46);
+    cdSize += ch.length;
+    yield ch;
+  }
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, centrals.length, true);
+  ev.setUint16(10, centrals.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, at, true);
+  yield eocd;
+}
+
+// The size the response will have, worked out from the directory: local headers + data + central
+// directory + end record. Nothing in it needs a member's bytes, which is what lets Content-Length be
+// sent — and what makes the browser's bar a percentage instead of a spinner.
+function zipTotal(members, prefix) {
+  const enc = new TextEncoder();
+  let total = 22;
+  for (const e of members) {
+    const n = enc.encode(e.name.slice(prefix.length)).length;
+    total += 30 + n + (Number(e.size) || 0) + 46 + n;
+  }
+  return total;
+}
+
+// An error the frame can SHOW: a hidden iframe cannot display anything, so it tells the page instead
+// (same origin, so `parent.postMessage` reaches it) and the page's own status line says why.
+function zipErrorPage(jobId, message) {
+  const text = String(message || 'the zip could not be built');
+  const safe = JSON.stringify(text).replace(/</g, '\\u003c');
+  const id = JSON.stringify(String(jobId || '')).replace(/</g, '\\u003c');
+  const body = `<!doctype html><meta charset="utf-8"><title>zip failed</title><body style="font:16px ui-monospace,monospace;padding:1em">` +
+    `<p>the zip could not be built</p><p>${text.replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</p>` +
+    `<script>try{parent.postMessage({type:'b2p-zip-error',job:${id},message:${safe}},'*')}catch(e){}</script>`;
+  return new Response(body, { status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
+}
+
+async function serveZipJob(url, clientId) {
+  const id = url.searchParams.get('id') || '';
+  const job = id ? await readPlan('zip-' + id) : null;
+  if (!job || !job.plan) return zipErrorPage(id, 'there is no such zip job — its plan is gone from the cache');
+  const plan = job.plan;
+  if (!Array.isArray(plan.parts) || !plan.parts.length) return zipErrorPage(id, 'the zip job carries no payload plan');
+  try {
+    if (!Number(plan.total)) plan.total = await totalBytes(plan);
+    if (!Number(plan.total)) throw new Error('the archive reports no size');
+    const sends = job.client || clientId;
+    if (job.kind === 'file') {
+      // The whole archive as it stands: the same bytes Download Zip used to buffer, streamed instead.
+      const headers = {
+        'Content-Type': job.mime || 'application/octet-stream',
+        'Content-Disposition': attachmentHeader(job.name),
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      };
+      headers['Content-Length'] = String(plan.total);
+      let told = 0;
+      const body = countingStream(streamRange(plan, 0, plan.total - 1, plan.total), (n) => {
+        if (n - told >= 1048576 || n === plan.total) {
+          told = n;
+          zipProgress(sends, job.id, n, plan.total, 'bytes');
+        }
+      });
+      return new Response(body, { status: 200, headers });
+    }
+    const dir = await zipDir(plan);
+    const prefix = String(job.prefix || '');
+    const members = [...dir.values()]
+      .filter((e) => !e.dir && e.name.startsWith(prefix) && e.name.length > prefix.length)
+      .sort((a, b) => a.localOff - b.localOff);
+    if (!members.length) throw new Error(`there are no files under "${prefix}" in ${plan.name || 'the archive'}`);
+    const odd = members.find((e) => e.method !== 0 && e.method !== 8);
+    if (odd) throw new Error(`${odd.name} uses compression method ${odd.method}, which this page cannot unpack`);
+    let done = 0;
+    const body = fromIterator(zipStream(plan, members, prefix, () => {
+      done += 1;
+      zipProgress(sends, job.id, done, members.length, 'files');
+    }));
+    return new Response(body, { status: 200, headers: {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': attachmentHeader(job.name),
+      'Content-Length': String(zipTotal(members, prefix)),
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*',
+    } });
+  } catch (e) {
+    return zipErrorPage(id, e.message);
   }
 }
 
