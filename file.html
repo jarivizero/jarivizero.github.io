@@ -1859,6 +1859,21 @@ async function openSevenZip(getBytes, entryPath, stamp) {
     },
   };
 }
+// What a memoized listing has to carry to be USABLE: a zip member is read by its `localOff`,
+// `csize` and `method`, and an entry rebuilt from the five display fields has none of them — his
+// report 2026-10-25, `…/back_zipper.zip/img20180525120905.png` on the second visit said "the member
+// local header is not where the directory says it is" because `localOff` had not been stored.
+function keepEntry(f) {
+  return { path: f.path, size: f.size, dir: f.dir,
+           modified: f.modified ? f.modified.toISOString() : null,
+           localOff: f.localOff, csize: f.csize, method: f.method };
+}
+function reviveEntry(o) {
+  const f = listedMember(o);
+  if (Number.isFinite(o.localOff)) { f.localOff = o.localOff; f.csize = o.csize; f.method = o.method; }
+  return f;
+}
+
 // Any archive member opened as `{ files, read(path) }`: a zip family by its own directory, a 7z with
 // JS7z. Same getter-and-stamp contract as `openSevenZip` — a zip's listing is its own central
 // directory, so it is remembered the same way and its members are extracted once.
@@ -1867,12 +1882,11 @@ async function openInnerArchive(getBytes, path, stamp) {
   const tag = `zip|${stamp || path}`;
   let files = null;
   const listed = await memoGet(tag + '|list');
-  if (Array.isArray(listed && listed.json)) files = listed.json.map(listedMember);
+  if (Array.isArray(listed && listed.json)) files = listed.json.map(reviveEntry);
   if (!files) {
     const listing = await zipFromMemory(await getBytes());
     files = listing.files;
-    await memoPut(tag + '|list', files.map((f) => ({ path: f.path, size: f.size, dir: f.dir,
-      modified: f.modified ? f.modified.toISOString() : null })));
+    await memoPut(tag + '|list', files.map(keepEntry));
   }
   return {
     files,
