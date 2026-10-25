@@ -52,7 +52,7 @@ const DICT_URL = urlOf('IDSDICTIONARY.txt');
 //
 // An empty pair means "not baked" (the workspace copy, a local server): then the worker falls back
 // to fetching the .txt exactly as it used to.
-const BUILT_VER = "c421b1649c2606a4";
+const BUILT_VER = "b35c3b1ed0d77344";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 // A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
 // update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
@@ -895,14 +895,26 @@ function countingStream(stream, onBytes) {
 // The archive, member by member, as STORED entries. Sizes and CRCs come from the member's central
 // directory record, so each local header is complete before its data is read — no data descriptor,
 // which is what every unzip reads without complaint.
+// A member's local header is 30 bytes, but a folder of small files is CONTIGUOUS: the next member's
+// header starts a few bytes after the previous member's data. One 64 KB read therefore answers many
+// headers, and a 500-file folder costs a handful of requests instead of 500 (his 2026-10-25
+// complaint was exactly this shape: "it fetches each file one by one").
+const ZIPHEAD = 65536;
 async function* zipStream(plan, members, prefix, onMember) {
   const enc = new TextEncoder();
   const centrals = [];
   let at = 0;
+  let headAt = -1, headBuf = null;
+  const headFor = async (off) => {
+    if (headBuf && off >= headAt && off + 30 <= headAt + headBuf.length) return headBuf.subarray(off - headAt);
+    headAt = off;
+    headBuf = await fileBytes(plan, off, Math.min(plan.total - 1, off + ZIPHEAD - 1));
+    return headBuf;
+  };
   for (const e of members) {
     const name = enc.encode(e.name.slice(prefix.length));
-    const head = await fileBytes(plan, e.localOff, e.localOff + 29);
-    if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) {
+    const head = await headFor(e.localOff);
+    if (head.length < 30 || !(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) {
       throw new Error(`${e.name}: its local header is not where the directory says it is`);
     }
     const start = e.localOff + 30 + U16(head, 26) + U16(head, 28);
@@ -980,8 +992,11 @@ function zipErrorPage(jobId, message) {
   const text = String(message || 'the zip could not be built');
   const safe = JSON.stringify(text).replace(/</g, '\\u003c');
   const id = JSON.stringify(String(jobId || '')).replace(/</g, '\\u003c');
-  const body = `<!doctype html><meta charset="utf-8"><title>zip failed</title><body style="font:16px ui-monospace,monospace;padding:1em">` +
-    `<p>the zip could not be built</p><p>${text.replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</p>` +
+  const body = `<!doctype html><meta charset="utf-8"><title>zip failed</title>` +
+    `<body style="font:16px ui-monospace,monospace;padding:1em;max-width:44em">` +
+    `<p><strong>the zip could not be built</strong></p>` +
+    `<p>${text.replace(/[<&]/g, (c) => (c === '<' ? '&lt;' : '&amp;'))}</p>` +
+    `<p><a href="javascript:history.length>1?history.back():location.assign('./')">back</a></p>` +
     `<script>try{parent.postMessage({type:'b2p-zip-error',job:${id},message:${safe}},'*')}catch(e){}</script>`;
   return new Response(body, { status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
