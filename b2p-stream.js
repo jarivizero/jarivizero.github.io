@@ -818,22 +818,33 @@ function pngTail(bytes) {
 // The payload starts right after IEND. Reading it once costs one 512-byte request; after that any
 // window of any chunk is a single ranged request of exactly the bytes asked for.
 const TTHDR = new Map();        // part url -> the payload's byte offset in the PNG
-// The last window fetched from each chunk, so a prefetch and the read that follows it are ONE
-// request. Kept small and newest-last: a long download slides through every chunk it touches.
-const TTWIN = new Map();        // part url -> { off, bytes }
-const TTWIN_MAX = 8;
+// The windows already fetched from each chunk, so a prefetch and the read that follows it are ONE
+// request — and so are two readers on the same chunk at the same time. MORE THAN ONE per url on
+// purpose: a single slot is evicted by whichever reader asked last, and the other then re-fetches a
+// whole 5 MB chunk (measured 2026-10-25: two of nine chunks read twice, ~17 MiB of the 52.5 MiB).
+const TTWIN = new Map();        // part url -> [{ off, bytes }, …] newest first
+const TTWIN_PER_URL = 3;        // a member read touches a chunk from 1-2 offsets; 3 is slack
+const TTWIN_MAX = 12;           // urls kept; a long download slides through more, oldest goes first
 function ttWinGet(key, off, want) {
-  const w = TTWIN.get(key);
-  if (!w || off < w.off || off + want > w.off + w.bytes.length) return null;
-  return w.bytes.subarray(off - w.off, off - w.off + want);
+  for (const w of TTWIN.get(key) || []) {
+    if (off >= w.off && off + want <= w.off + w.bytes.length) {
+      return w.bytes.subarray(off - w.off, off - w.off + want);
+    }
+  }
+  return null;
 }
 function ttWinPut(key, off, bytes) {
   if (!bytes.length) return;
-  TTWIN.set(key, { off, bytes });
+  const list = (TTWIN.get(key) || []).filter((w) => w.off !== off);
+  list.unshift({ off, bytes });
+  TTWIN.set(key, list.slice(0, TTWIN_PER_URL));
   while (TTWIN.size > TTWIN_MAX) TTWIN.delete(TTWIN.keys().next().value);
 }
 async function ttWindow(plan, i, off, want) {
   const key = plan.parts[i];
+  // The whole chunk is already in hand: answer from it, whatever window was asked for.
+  const known = payloadOf.get(key);
+  if (known) return known.subarray(off, off + want);
   let hdr = TTHDR.get(key);
   if (hdr === undefined) {
     const res = await fetch(key, { mode: 'cors', credentials: 'omit',
@@ -851,7 +862,14 @@ async function ttWindow(plan, i, off, want) {
   if (!res.ok && res.status !== 416) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
   const body = new Uint8Array(await res.arrayBuffer());
   netBytes.set(key, (netBytes.get(key) || 0) + body.length);
-  ttWinPut(key, off, body);
+  // A read that covers the whole chunk keeps it (payloadOf is checked before any fetch), so the next
+  // reader of this chunk — a second stream, or the member after its directory — costs nothing.
+  if (off === 0 && plan.cap && body.length === plan.cap) {
+    payloadOf.set(key, body);
+    prefixOf.delete(key);
+  } else {
+    ttWinPut(key, off, body);
+  }
   return body;
 }
 
