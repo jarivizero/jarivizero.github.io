@@ -445,9 +445,19 @@ function streamRange(plan, start, end, total) {
         // Only `want` payload bytes are needed from this part — so only that much of its PNG is
         // fetched. This is the whole point of the prefix fetcher below: playing the first second
         // of a 2.4 MB part costs a few hundred KB, not 2.4 MB.
-        const part = plan.tt
-          ? await ttPartPayload(plan, i, off + want)
-          : await partPayload(plan, i, off + want);
+        if (plan.tt) {
+          // A tt2png part is a 70-byte PNG with the file APPENDED after its IEND, so a window of the
+          // payload is a window of the PNG. Ask for exactly those bytes: reading the tail of a 2.4 MB
+          // chunk used to decode the WHOLE chunk (his 8 MB for a 28 kB png, 2026-10-25).
+          const known = payloadOf.get(plan.parts[i]);
+          const part = known || await ttWindow(plan, i, off, want);
+          const n = Math.min(want, part.length - (known ? off : 0));
+          if (n <= 0) throw new Error(`part ${i + 1} ends before byte ${at}`);
+          ctrl.enqueue(known ? part.subarray(off, off + n) : part.subarray(0, n));
+          at += n;
+          return;
+        }
+        const part = await partPayload(plan, i, off + want);
         const n = Math.min(want, part.length - off);
         if (n <= 0) throw new Error(`part ${i + 1} ends before byte ${at}`);
         ctrl.enqueue(part.subarray(off, off + n));
@@ -781,6 +791,31 @@ function pngTail(bytes) {
     off = end;
   }
   return null;
+}
+
+// The payload starts right after IEND. Reading it once costs one 512-byte request; after that any
+// window of any chunk is a single ranged request of exactly the bytes asked for.
+const TTHDR = new Map();        // part url -> the payload's byte offset in the PNG
+async function ttWindow(plan, i, off, want) {
+  const key = plan.parts[i];
+  let hdr = TTHDR.get(key);
+  if (hdr === undefined) {
+    const res = await fetch(key, { mode: 'cors', credentials: 'omit',
+                                   headers: { Range: 'bytes=0-511' } });
+    if (!res.ok) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
+    const head = new Uint8Array(await res.arrayBuffer());
+    netBytes.set(key, (netBytes.get(key) || 0) + head.length);
+    const tail = pngTail(head);
+    if (!tail) throw new Error(`part ${i + 1} is not a tt2png PNG`);
+    hdr = head.length - tail.length;
+    TTHDR.set(key, hdr);
+  }
+  const res = await fetch(key, { mode: 'cors', credentials: 'omit',
+                                 headers: { Range: `bytes=${hdr + off}-${hdr + off + want - 1}` } });
+  if (!res.ok && res.status !== 416) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
+  const body = new Uint8Array(await res.arrayBuffer());
+  netBytes.set(key, (netBytes.get(key) || 0) + body.length);
+  return body;
 }
 
 async function ttPartPayload(plan, i, need = Infinity) {
