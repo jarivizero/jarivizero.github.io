@@ -1093,7 +1093,70 @@ function parseCentral(block, at, entries, cdSize, cdOff, total) {
   return { files, total };
 }
 
+// ─── an archive INSIDE an archive is unpacked ONCE, per browser ───────────────────────────────
+
+// cached or not. It is not a cache bug in the worker: the inner `.7z` is a COMPRESSED member of the
+// outer zip, so unpacking it means inflating all of it, and nothing remembered the result — each
+// reload paid the whole archive again, then ran 7-Zip over it again.
+//
+// What is remembered, in the page's own Cache API, keyed by the ROOT archive's content (its sha256
+// when the index carries one) plus the member's path: the inflated member bytes, a `.7z`'s listing,
+// and the files extracted out of a `.7z`. So the second visit to that same address costs 0 bytes and
+// no 7-Zip run — the 7 MB is the archive being big, paid once.
+const MEMO_CACHE = 'b2p-memo-v1';
+const MEMO_MAX_BYTES = 64 * 1024 * 1024;   // a member bigger than this is read, never stored
+let memoBase = null;
+async function memoRoot() {
+  if (memoBase) return memoBase;
+  const id = src.tt
+    ? (src.tt.sha256 || (src.tt.chunks || []).map((c) => c.url).join('\n'))
+    : src.urls.join('\n');
+  memoBase = await sha256(new TextEncoder().encode(String(id)));
+  return memoBase;
+}
+const memoUrl = async (what) => siteUrl('__b2p/memo/' + (await memoRoot()) + '/' +
+  (await sha256(new TextEncoder().encode(String(what)))));
+// "Was it remembered, or paid again?" — answerable from outside, the way the worker's own
+// `/__b2p/stats` answers it for pbs. Reset by every page load, so a test reads the current visit.
+const memoStats = { hit: 0, miss: 0, put: 0 };
+window.__b2pMemo = memoStats;
+// `null` = nothing remembered, or the Cache API is not available here (private mode, no quota):
+// every read then costs exactly what it used to, and the page still works.
+async function memoGet(what) {
+  try {
+    const hit = await (await caches.open(MEMO_CACHE)).match(await memoUrl(what));
+    if (!hit) { memoStats.miss++; return null; }
+    memoStats.hit++;
+    if (hit.headers.get('X-Memo') === 'json') return { json: await hit.json() };
+    return { bytes: new Uint8Array(await hit.arrayBuffer()) };
+  } catch (e) { memoStats.miss++; return null; }
+}
+async function memoPut(what, value) {
+  try {
+    const bytes = value instanceof Uint8Array;
+    if (bytes && value.length > MEMO_MAX_BYTES) return;
+    const cache = await caches.open(MEMO_CACHE);
+    await cache.put(new Request(await memoUrl(what)), new Response(bytes ? value : JSON.stringify(value), {
+      headers: { 'Content-Type': 'application/octet-stream', 'X-Memo': bytes ? 'bytes' : 'json' },
+    }));
+    memoStats.put++;
+  } catch (e) { /* over quota, private mode: the visit still works */ }
+}
+// One read per page load, however many callers ask for the same bytes.
+function once(get) {
+  let job = null;
+  return () => (job || (job = Promise.resolve().then(get)));
+}
+
 async function memberBytes(f) {
+  const what = `member|${f.path}|${f.localOff}|${f.csize}|${f.method}`;
+  const memo = await memoGet(what);
+  if (memo && memo.bytes) return memo.bytes;
+  const bytes = await memberBytesFresh(f);
+  if (bytes.length <= MEMO_MAX_BYTES) await memoPut(what, bytes);
+  return bytes;
+}
+async function memberBytesFresh(f) {
   const head = await sourceRange(f.localOff, f.localOff + 29);
   if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04)) {
     throw new Error('the member local header is not where the directory says it is');
@@ -1521,7 +1584,8 @@ function fillFolder(view, prefix, files) {
 }
 
 // A FOLDER inside an archive: its own `Index of` page, `[parent directory]`, and its own zip.
-// `zipBytes` is set when the archive being listed is one INSIDE another: its Download Zip is those
+// `zipBytes` is set when the archive being listed is one INSIDE another: a GETTER for its bytes, its
+// Download Zip — never the outer payload, and never fetched until somebody clicks it. `addr` is the
 
 async function renderZipFolder(label, prefix, files, read, zipBytes, addr, parentHref) {
   prefix = String(prefix || '').replace(/^\/+/, '');
@@ -1535,9 +1599,10 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
     // its own, so it is handed the address of the listing it came from — otherwise its page had no
 
     parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
-    downloadZip: zipBytes && !prefix ? () => {
-      saveBytes(zipBytes, innerName, mimeFromName(innerName) || 'application/octet-stream');
-      return { name: innerName, size: zipBytes.length };
+    downloadZip: zipBytes && !prefix ? async () => {
+      const bytes = await zipBytes();
+      saveBytes(bytes, innerName, mimeFromName(innerName) || 'application/octet-stream');
+      return { name: innerName, size: bytes.length };
     } : null,
     downloadDir: prefix ? () => downloadFolder(label, prefix, files, read) : null,
   });
@@ -1559,7 +1624,7 @@ async function resolveArchivePath(rawPath) {
   let dirSince = [];       // folders stepped into SINCE the last archive was opened
   let files = await rootRows();
   let read = rootRead;
-  let deepest = null;
+  let deepest = null;      // a GETTER: a nested archive's bytes are fetched only when really needed
   let lastWasArchive = false;
   while (parts.length) {
     const name = parts[0];
@@ -1567,9 +1632,13 @@ async function resolveArchivePath(rawPath) {
     const archive = entry && !entry.dir && /\.(zip|apk|jar|7z)$/i.test(name);
     if (archive) {
       parts.shift();
-      const bytes = await read(entry.path);
-      const inner = await openInnerArchive(bytes, entry.path);
-      deepest = bytes;
+      // Where this archive sits from the ROOT (`CM3D2 mod repo/Cat suit.7z`) — the name everything
+      // read out of it is remembered under, so visit two is free.
+      const at = walked.concat([name]).join('/');
+      const reader = read;
+      const getBytes = once(() => reader(entry.path));
+      const inner = await openInnerArchive(getBytes, entry.path, at);
+      deepest = getBytes;
       lastWasArchive = true;
       consumed.push(name);
       walked.push(name);
@@ -1591,7 +1660,10 @@ async function resolveArchivePath(rawPath) {
   // since the last archive, then whatever is left. Losing those folders was the regression this
   // caught — `/file/x.zip/docs/` came back as the ARCHIVE ROOT, so the folder page listed its parent.
   const within = dirSince.length ? dirSince.join('/') + '/' : '';
-  return { consumed, walked, within, files, rest: within + parts.join('/'), read,
+  // `base` is the ROOT-relative path of the listing the loop ended on (the archives opened, without
+  // the folders stepped into since — those are already the prefix of `entry.path`).
+  const base = walked.slice(0, walked.length - dirSince.length).join('/');
+  return { consumed, walked, within, base, files, rest: within + parts.join('/'), read,
            lastWasArchive, bytes: lastWasArchive ? deepest : null };
 }
 
@@ -1599,7 +1671,7 @@ async function resolveArchivePath(rawPath) {
 // folder becomes an `Index of` page, and an archive inside is listed rather than downloaded.
 async function renderZipPath(baseLabel, rawPath, baseAddr) {
   const addrBase = baseAddr || baseLabel;
-  const { consumed, walked, within, files, rest, read, lastWasArchive, bytes: deepest } =
+  const { consumed, walked, within, base, files, rest, read, lastWasArchive, bytes: deepest } =
     await resolveArchivePath(rawPath);
   // Two different things, and they must not be mixed:
   //   the LABEL says the archives opened (`Index of x.zip/inner.7z`) — a folder is not a file;
@@ -1634,15 +1706,18 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   if (!entry) throw new Error(`"${rest}" is not in ${label}`);
   if (entry.dir) return renderZipFolder(label, entry.path, files, read, deepest, addrArch);
   if (/\.(zip|apk|jar|7z)$/i.test(entry.path)) {
-    const bytes = await read(entry.path);
-    const inner = await openInnerArchive(bytes, entry.path);
+    // The archive's path from the ROOT, for what gets remembered about it: `entry.path` is relative
+    // to the listing we are on, `base` is that listing's own path.
+    const at = (base ? base + '/' : '') + entry.path;
+    const getBytes = once(() => read(entry.path));
+    const inner = await openInnerArchive(getBytes, entry.path, at);
     // `entry.path` is relative to the listing we are on (`rest`, which already holds the folders
     // walked into), so only the part PAST them is appended to the address.
     const tail = within && entry.path.startsWith(within) ? entry.path.slice(within.length) : entry.path;
     // The page it came FROM is the walk without its last segment (`walked` ends with this archive).
     const up = walked.length > 1 ? walked.slice(0, -1).join('/') : '';
     const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
-    return renderZipFolder(`${label}/${entry.path}`, '', inner.files, (p) => inner.read(p), bytes,
+    return renderZipFolder(`${label}/${entry.path}`, '', inner.files, (p) => inner.read(p), getBytes,
                            `${addrWalk}/${tail}`, containing);
   }
   await renderBytes(await read(entry.path), entry.path.replace(/^.*\//, ''), label);
@@ -1737,34 +1812,66 @@ function parse7zList(text, archiveIn) {
 }
 // `{ files, read(path) }` for a 7z member — the same shape a zip hands out, so the rows, the folder
 // page and "Download current dir as zip" work unchanged.
-async function openSevenZip(bytes, entryPath) {
+//
+// `getBytes` is a GETTER, `stamp` is the archive's path from the ROOT archive: the listing and every
+// extracted file are remembered under that stamp, so a remembered listing is drawn without touching
+// the archive at all, and a file read once is never unpacked again.
+async function openSevenZip(getBytes, entryPath, stamp) {
   const name = entryPath.replace(/^.*\//, '').replace(/[^\w.\- ]/g, '_') || 'archive.7z';
-  const list = await run7z(bytes, name, ['l', '-slt', '{in}']);
-  if (list.code !== 0) throw new Error(`7-Zip could not list ${name} (exit ${list.code})`);
-  const files = parse7zList(list.log, '/in/' + name).map(listedMember);
+  const tag = `7z|${stamp || entryPath}`;
+  let files = null;
+  const listed = await memoGet(tag + '|list');
+  if (Array.isArray(listed && listed.json)) files = listed.json.map(listedMember);
+  if (!files) {
+    const list = await run7z(await getBytes(), name, ['l', '-slt', '{in}']);
+    if (list.code !== 0) throw new Error(`7-Zip could not list ${name} (exit ${list.code})`);
+    files = parse7zList(list.log, '/in/' + name).map(listedMember);
+    await memoPut(tag + '|list', files.map((f) => ({ path: f.path, size: f.size, dir: f.dir,
+      modified: f.modified ? f.modified.toISOString() : null })));
+  }
   return {
     files,
     read: async (p) => {
       const want = String(p).replace(/^\/+/, '');
-      const got = await run7z(bytes, name, ['x', '-y', '-o/out', '{in}', want], (rt) => {
+      const what = tag + '|file|' + want;
+      const memo = await memoGet(what);
+      if (memo && memo.bytes) return memo.bytes;
+      const got = await run7z(await getBytes(), name, ['x', '-y', '-o/out', '{in}', want], (rt) => {
         try { return rt.FS.readFile('/out/' + want).slice(); } catch (e) { return null; }
       });
       if (!got.out) throw new Error(`7-Zip could not read ${want} (exit ${got.code})`);
-      return new Uint8Array(got.out);
+      const out = new Uint8Array(got.out);
+      await memoPut(what, out);
+      return out;
     },
   };
 }
 // Any archive member opened as `{ files, read(path) }`: a zip family by its own directory, a 7z with
-// JS7z.
-async function openInnerArchive(bytes, path) {
-  if (/\.7z$/i.test(path)) return openSevenZip(bytes, path);
-  const listing = await zipFromMemory(bytes);
+// JS7z. Same getter-and-stamp contract as `openSevenZip` — a zip's listing is its own central
+// directory, so it is remembered the same way and its members are extracted once.
+async function openInnerArchive(getBytes, path, stamp) {
+  if (/\.7z$/i.test(path)) return openSevenZip(getBytes, path, stamp);
+  const tag = `zip|${stamp || path}`;
+  let files = null;
+  const listed = await memoGet(tag + '|list');
+  if (Array.isArray(listed && listed.json)) files = listed.json.map(listedMember);
+  if (!files) {
+    const listing = await zipFromMemory(await getBytes());
+    files = listing.files;
+    await memoPut(tag + '|list', files.map((f) => ({ path: f.path, size: f.size, dir: f.dir,
+      modified: f.modified ? f.modified.toISOString() : null })));
+  }
   return {
-    files: listing.files,
+    files,
     read: async (p) => {
-      const e = findEntry(listing.files, p);
+      const what = tag + '|file|' + p;
+      const memo = await memoGet(what);
+      if (memo && memo.bytes) return memo.bytes;
+      const e = findEntry(files, p);
       if (!e) throw new Error(`"${p}" is not in ${path}`);
-      return extractFrom(bytes, e);
+      const out = await extractFrom(await getBytes(), e);
+      await memoPut(what, out);
+      return out;
     },
   };
 }
