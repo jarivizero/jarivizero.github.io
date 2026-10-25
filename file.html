@@ -168,6 +168,12 @@ window.addEventListener('load', () => { checkSiteVersion(); });
 const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the encoder cuts it
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
+
+// empty pair means "not baked" — the workspace copy, a local server — and the .txt is fetched the
+// way it always was. Baked, a name is resolved with NO request at all, and the list only goes over
+
+const BUILT_VER = "c421b1649c2606a4";
+const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
 const PACK_HEADER = 9;
@@ -277,23 +283,33 @@ async function idsDecrypt(name, payloadB64) {
   return new TextDecoder().decode(await idsXor(key, iv, ct));
 }
 let dictCache = null;
-// `force` asks the worker for the copy it has NOT given us yet (`?fresh=`): the worker answers the
-// dictionary cache-first, so a name added by a deploy is invisible until this runs.
-async function dictionary(force) {
-  if (force) dictCache = null;
-  if (dictCache) return dictCache;
-  const url = siteUrl(IDS_DICT_FILE) + (force ? '?fresh=' + Date.now() : '');
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`no ${IDS_DICT_FILE} next to this page (HTTP ${res.status}) — looked at ${url}`);
+function parseDictionary(text) {
   const map = new Map();
-  for (const line of (await res.text()).split('\n')) {
+  for (const line of String(text || '').split('\n')) {
     const t = line.trim();
     if (!t || t.startsWith('#')) continue;
     const p = t.split(/\s+/);
     if (p.length === 3 && p[0] === IDS_VERSION) map.set(p[1], p[2]);
   }
-  dictCache = map;
   return map;
+}
+// The BAKED list is the first answer, and it is free. `force` asks the worker for the copy it has NOT
+// given us yet (`?fresh=`), which is the ONLY time this page goes to the network for the list — a
+
+async function dictionary(force) {
+  if (!force) {
+    if (dictCache) return dictCache;
+    if (DICT_INLINE) return (dictCache = parseDictionary(DICT_INLINE));
+  }
+  const url = siteUrl(IDS_DICT_FILE) + (force ? '?fresh=' + Date.now() : '');
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`no ${IDS_DICT_FILE} next to this page (HTTP ${res.status}) — looked at ${url}`);
+    return (dictCache = parseDictionary(await res.text()));
+  } catch (e) {
+    if (dictCache) return dictCache;     // a failed refresh must not throw away the list we have
+    throw e;
+  }
 }
 
 // ─── address → the parts that hold the payload ─────────────────────────────────────────────────
@@ -339,7 +355,11 @@ async function resolveToken(token) {
   if (isNameToken(t)) {
     const name = t.replace(IDS_NAME_PREFIX, '');
     const hash = await sha256(new TextEncoder().encode(name));
-    const record = (await dictionary()).get(hash);
+    let record = (await dictionary()).get(hash);
+    
+    // separately if it truly did not find the id it was talking about"). A deploy that added this
+    // name after the page was built is found here — never on the happy path.
+    if (!record) record = (await dictionary(true).catch(() => null) || new Map()).get(hash);
     if (record) return { name, urls: pbsUrls(await idsDecrypt(name, record)) };
     
     // extension on it. Strip the extension; if what is left is a pbs id, that IS the media id, so the
@@ -585,7 +605,7 @@ async function sourceRange(start, end) {
 }
 
 // Every byte, in order — the path for text and small images.
-async function wholeFile() {
+async function wholeFile(onProgress) {
   if (src.direct) {
     const res = await fetch(src.urls[0]);
     if (!res.ok) {
@@ -598,8 +618,17 @@ async function wholeFile() {
   // Every chunk, in order. Only a download (Download Zip) or a packed archive gets here — the
   // directory and a member are ranges.
   if (src.tt) {
-    const pieces = [];
-    for (let i = 0; i < src.tt.chunks.length; i++) pieces.push(await ttChunk(i));
+    // A few chunks at a time, counted out: one after another was the sequential fetch he called out
+    // on 2026-10-25, and `ttChunk` caches per index, so order does not matter.
+    const n = src.tt.chunks.length;
+    const pieces = new Array(n);
+    let done = 0;
+    if (onProgress) onProgress({ done: 0, total: n, unit: 'files' });
+    await poolEach(Array.from({ length: n }, (_, i) => i), 3, async (i) => {
+      pieces[i] = await ttChunk(i);
+      done += 1;
+      if (onProgress) onProgress({ done, total: n, unit: 'files' });
+    });
     const bytes = concat(pieces);
     if (Number(src.tt.bytes) && bytes.length !== Number(src.tt.bytes)) {
       throw new Error(`the chunks hold ${bytes.length} B, the index says ${src.tt.bytes} B`);
@@ -680,6 +709,122 @@ function zipOf(entries) {                 // [{ path, bytes }] → the archive, 
   ev.setUint16(8, entries.length, true); ev.setUint16(10, entries.length, true);
   ev.setUint32(12, cd.length, true); ev.setUint32(16, at, true);
   return concat([...locals, cd, eocd]);
+}
+
+// `saveBytes` hands over a Blob, so the download exists only once its LAST byte does: the page sat
+// on "zipping…" and the browser's download list stayed empty until the whole archive was rebuilt in
+// memory. The worker can answer with a ReadableStream instead — the browser saves each member as it
+// is read, and its own download bar moves. Two things had to be measured rather than assumed
+// (2026-10-25, real Chromium):
+//   * a `<a download>` request answered by a worker is CANCELED — the same response saved fine when
+//     the request was a navigation, so the save is started from a hidden IFRAME;
+//   * `event.clientId` on that request is the FRAME's, so the page asks the worker for its own id
+//     (one `whoami` message) and puts it in the job — that is how "(5/10)" reaches the link.
+const ZIP_JOBS = new Map();          // job id → the function that renders its progress
+let pageClientId = '';
+let clientWaiter = null;              // one in-flight `whoami` ask
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (ev) => {
+    const d = ev.data || {};
+    if (d.type === 'b2p-client') {
+      pageClientId = d.id || '';
+      const w = clientWaiter;
+      clientWaiter = null;
+      if (w) w.resolve(pageClientId);
+      return;
+    }
+    if (d.type === 'b2p-zip' || d.type === 'b2p-zip-error') {
+      const cb = ZIP_JOBS.get(d.job);
+      if (cb) cb(d.type === 'b2p-zip-error' ? { error: d.message } : d);
+    }
+  });
+}
+// This page's own client id, as the worker knows it. No answer is not an error — the download is
+// unaffected, only the "(5/10)" counter is lost.
+function pageClient() {
+  if (pageClientId) return Promise.resolve(pageClientId);
+  const ctl = navigator.serviceWorker && navigator.serviceWorker.controller;
+  if (!ctl) return Promise.resolve('');
+  if (!clientWaiter) {
+    const w = {};
+    w.promise = new Promise((res) => { w.resolve = res; });
+    clientWaiter = w;
+    try { ctl.postMessage({ type: 'whoami' }); } catch (e) { w.resolve(''); }
+    setTimeout(() => {
+      if (clientWaiter === w) { clientWaiter = null; w.resolve(pageClientId); }
+    }, 700);
+  }
+  return clientWaiter.promise;
+}
+// Hand a job to the worker and start it as a real browser download.
+async function startStreamedSave(job, onProgress) {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return null;
+  const reg = await ensureStreamWorker();
+  if (!reg || !navigator.serviceWorker.controller) return null;
+  const id = 'z' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const body = { ...job, id, client: await pageClient() };
+  const key = new URL('__b2p/plan/' + encodeURIComponent('zip-' + id), streamScriptUrl()).href;
+  try {
+    const cache = await caches.open(STREAM_PLAN_CACHE);
+    await cache.put(key, new Response(JSON.stringify(body), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+  } catch (e) { return null; }
+  if (onProgress) ZIP_JOBS.set(id, onProgress);
+  const frame = document.createElement('iframe');
+  frame.name = 'b2p-save-' + id;
+  frame.hidden = true;
+  frame.src = new URL('__b2p/zip/?id=' + encodeURIComponent(id), streamScriptUrl()).href;
+  document.body.appendChild(frame);
+  return { id };
+}
+// The plan this archive's OWN bytes need, in the shape the worker already speaks.
+function planForWorker(name, mime) {
+  return {
+    name: name || src.name || 'archive.zip',
+    mime: mime || 'application/zip',
+    cap: src.tt ? (Number(src.tt.chunk_size) || Number((src.tt.chunks[0] || {}).size) || CAPACITY) : CAPACITY,
+    parts: src.urls,
+    total: Number(src.tt && src.tt.bytes) || 0,
+    tt: !!src.tt,
+  };
+}
+// Byte N of a packed payload is not byte N of the file, a `direct` url is not a bin2png payload at
+// all, and a 7z/tar has no zip directory — none of those can be read as ranges.
+function canStreamArchive() {
+  return !src.packed && !src.direct && Array.isArray(src.urls) && src.urls.length > 0;
+}
+// The link's own text IS the progress line: "zipping… (5/10)", "fetching… 3.2 MB / 16 MB". Both the
+// worker's messages and the in-page loop feed this one function, so the two paths read the same.
+function progressOn(link, label, restore) {
+  return (p) => {
+    if (!p) return;
+    if (p.error) {
+      link.dataset.busy = '';
+      link.textContent = restore;
+      status(`${label.replace('…', '')} failed — ${p.error}`, true);
+      return;
+    }
+    link.dataset.busy = '1';
+    link.textContent = p.unit === 'bytes' ? `${label} ${fmt(p.done)} / ${fmt(p.total)}` : `${label} (${p.done}/${p.total})`;
+    if (p.total && p.done >= p.total) {
+      // The browser is still writing the last bytes; put the link back once it has them.
+      setTimeout(() => { link.dataset.busy = ''; link.textContent = restore; }, 2500);
+      link.dataset.busy = '';
+    }
+  };
+}
+
+// A few at a time, in order: a folder's members used to be read one after another.
+async function poolEach(list, width, fn) {
+  let next = 0;
+  const run = async () => {
+    while (next < list.length) {
+      const i = next++;
+      await fn(list[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(width, list.length) }, run));
 }
 
 function saveBytes(bytes, name, mime) {
@@ -1337,12 +1482,14 @@ function indexView(label, total, opts) {
       zipLink.title = state.total ? `Download ${state.label} (${fmt(state.total)})` : `Download ${state.label}`;
       zipLink.addEventListener('click', async (e) => {
         e.preventDefault();
-        zipLink.textContent = 'fetching…';
+        const shows = progressOn(zipLink, 'fetching…', 'Download Zip');
         try {
-          const got = opts.downloadZip ? await opts.downloadZip() : await saveWholeArchive();
-          status(`saved ${got.name} — ${fmt(got.size)}`);
+          const got = opts.downloadZip ? await opts.downloadZip(shows) : await saveWholeArchive(shows);
+          status(got.stream
+            ? `downloading ${got.name}${got.size ? ` — ${fmt(got.size)}` : ''} in the browser`
+            : `saved ${got.name} — ${fmt(got.size)}`);
         } catch (err) { status(`could not fetch the archive: ${err.message}`, true); }
-        zipLink.textContent = 'Download Zip';
+        if (!zipLink.dataset.busy) zipLink.textContent = 'Download Zip';
       });
       box.appendChild(zipLink);
       if (opts.downloadDir) box.appendChild(document.createTextNode(' · '));
@@ -1355,12 +1502,14 @@ function indexView(label, total, opts) {
       dirLink.textContent = 'Download current dir as zip';
       dirLink.addEventListener('click', async (e) => {
         e.preventDefault();
-        dirLink.textContent = 'zipping…';
+        const shows = progressOn(dirLink, 'zipping…', 'Download current dir as zip');
         try {
-          const got = await opts.downloadDir();
-          status(`saved ${got.name} — ${fmt(got.size)}`);
+          const got = await opts.downloadDir(shows);
+          status(got.stream
+            ? `downloading ${got.name} — ${got.total || got.count} file(s) in the browser`
+            : `saved ${got.name} — ${fmt(got.size)}`);
         } catch (err) { status(`could not zip this folder: ${err.message}`, true); }
-        dirLink.textContent = 'Download current dir as zip';
+        if (!dirLink.dataset.busy) dirLink.textContent = 'Download current dir as zip';
       });
       box.appendChild(dirLink);
     }
@@ -1662,7 +1811,7 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
       saveBytes(bytes, innerName, mimeFromName(innerName) || 'application/octet-stream');
       return { name: innerName, size: bytes.length };
     } : null,
-    downloadDir: prefix ? () => downloadFolder(label, prefix, files, read) : null,
+    downloadDir: prefix ? (onProgress) => downloadFolder(label, prefix, files, read, read === rootRead, onProgress) : null,
   });
   fillFolder(view, prefix, files);
   return view;
@@ -1803,14 +1952,36 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   await renderBytes(await read(entry.path), entry.path.replace(/^.*\//, ''), label);
 }
 
-async function downloadFolder(label, prefix, files, read) {
-  const members = files.filter((f) => !f.dir && f.path.startsWith(prefix));
+//
+// Two paths, in this order:
+//   1. STREAMED by the worker — it reads the archive's own directory and writes each member into a
+//      zip as the browser saves it, so the download shows up immediately and its bar moves. The
+//      member list comes from the file, not from this page, so it cannot disagree with it.
+//   2. In the page, when the worker cannot help (a packed payload, an archive inside another, a 7z,
+//      no service worker at all): the members are read a few at a time and counted out.
+async function downloadFolder(label, prefix, files, read, canStream, onProgress) {
+  const members = files.filter((f) => !f.dir && f.path.startsWith(prefix) && f.path.length > prefix.length);
   if (!members.length) throw new Error('this folder is empty');
-  const entries = [];
-  for (const f of members) entries.push({ path: f.path.slice(prefix.length), bytes: await read(f.path) });
   const base = prefix.replace(/\/$/, '').split('/').pop() || label.replace(/\.zip$/i, '');
-  const bytes = zipOf(entries);
   const name = `${base}.zip`;
+  const count = members.length;
+  if (canStream && canStreamArchive()) {
+    // The size is the WORKER's problem: it can read the archive's last part and answer with the total
+    // still in Content-Length, so the page fetches nothing just to learn how big the file is (a
+    // tt2png index already states it — `planForWorker` passes that through).
+    const plan = planForWorker(label, 'application/zip');
+    const job = await startStreamedSave({ kind: 'folder', name, prefix, plan }, onProgress);
+    if (job) return { name, count, stream: true };
+  }
+  const out = new Array(members.length);
+  let done = 0;
+  if (onProgress) onProgress({ done: 0, total: count, unit: 'files' });
+  await poolEach(members, 4, async (f, i) => {
+    out[i] = { path: f.path.slice(prefix.length), bytes: await read(f.path) };
+    done += 1;
+    if (onProgress) onProgress({ done, total: count, unit: 'files' });
+  });
+  const bytes = zipOf(out);
   saveBytes(bytes, name, 'application/zip');
   return { name, size: bytes.length };
 }
@@ -2179,9 +2350,19 @@ async function openInnerArchive(getBytes, path, stamp, stored, indexed) {
 }
 
 // The whole payload, saved under the name the address gave it.
-async function saveWholeArchive() {
-  const bytes = await wholeFile();
+//
+// STREAMED when the worker can read the file as ranges: the browser saves it as it arrives instead
+// of waiting for the last byte of a blob — and, because nothing is assembled in the page, there is
+
+// fetches each file one by one in the requests if you do Download zip").
+async function saveWholeArchive(onProgress) {
   const name = src.name || 'archive.zip';
+  if (canStreamArchive()) {
+    const plan = planForWorker(name, 'application/zip');
+    const job = await startStreamedSave({ kind: 'file', name, plan }, onProgress);
+    if (job) return { name, size: plan.total, stream: true };
+  }
+  const bytes = await wholeFile(onProgress);
   saveBytes(bytes, name, 'application/zip');
   return { name, size: bytes.length };
 }
