@@ -86,7 +86,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-25T09:01';
+const BUILD = '2026-10-25T09:06';
 // ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
 // `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
@@ -1577,31 +1577,47 @@ async function resolveArchivePath(rawPath) {
   // since the last archive, then whatever is left. Losing those folders was the regression this
   // caught — `/file/x.zip/docs/` came back as the ARCHIVE ROOT, so the folder page listed its parent.
   const within = dirSince.length ? dirSince.join('/') + '/' : '';
-  return { consumed, walked, files, rest: within + parts.join('/'), read,
-           bytes: lastWasArchive ? deepest : null };
+  return { consumed, walked, within, files, rest: within + parts.join('/'), read,
+           lastWasArchive, bytes: lastWasArchive ? deepest : null };
 }
 
 // `/file/<archive>/<path>` — the page route. A file renders as itself (a `file:///` tab would), a
 // folder becomes an `Index of` page, and an archive inside is listed rather than downloaded.
 async function renderZipPath(baseLabel, rawPath, baseAddr) {
   const addrBase = baseAddr || baseLabel;
-  const { consumed, files, rest, read, bytes: deepest } = await resolveArchivePath(rawPath);
-  // The label and the address carry the ARCHIVES opened, never the folders stepped through: a folder
-  // stays in `rest`, which is already relative to the listing we ended on (`docs/readme.txt`), so the
-  // page's own prefix and its heading agree. Mixing the two showed `Index of x.zip/docs/docs/`.
+  const { consumed, walked, within, files, rest, read, lastWasArchive, bytes: deepest } =
+    await resolveArchivePath(rawPath);
+  // Two different things, and they must not be mixed:
+  //   the LABEL says the archives opened (`Index of x.zip/inner.7z`) — a folder is not a file;
+  //   the ADDRESS carries EVERY segment (`/file/<id>/folder/inner.zip/docs/`), because that is what
+
   const label = consumed.length ? `${baseLabel}/${consumed.join('/')}` : baseLabel;
   // Two layers, kept apart on purpose: the heading says the NAME (`Index of Pictures.zip`), the
   // rows say the ADDRESS it was opened by (`/file/HVdZdhhWUAAmCh6/docs/`) — no decoded name in a url.
-  const addr = consumed.length ? `${addrBase}/${consumed.join('/')}` : addrBase;
-  if (rest === '' || /\/$/.test(rest)) return renderZipFolder(label, rest, files, read, deepest, addr);
+  //
+  // And two ADDRESSES, because a row's href is `<address>/<member path>` where the member path already
+  // carries its folders: a folder page hands its rows the ARCHIVE's address (`…/<id>/x.zip`), while a
+  // nested archive's page hands them the address of that archive, folders and all.
+  const addrArch = consumed.length ? `${addrBase}/${consumed.join('/')}` : addrBase;
+  const addrWalk = walked.length ? `${addrBase}/${walked.join('/')}` : addrBase;
+  // The page we are about to draw is the LISTING of the thing the loop ended on. When that thing is an
+  // ARCHIVE (`/file/<id>/folder/inner.zip`), its address is the full walked path — the folder in it is
+  // what makes the url resolve. A folder page hands its rows the archive's address instead, because
+  // those rows spell their own prefixes.
+  if (rest === '' || /\/$/.test(rest)) {
+    return renderZipFolder(label, rest, files, read, deepest, lastWasArchive ? addrWalk : addrArch);
+  }
   const entry = findEntry(files, rest);
   if (!entry) throw new Error(`"${rest}" is not in ${label}`);
-  if (entry.dir) return renderZipFolder(label, entry.path, files, read, deepest, addr);
+  if (entry.dir) return renderZipFolder(label, entry.path, files, read, deepest, addrArch);
   if (/\.(zip|apk|jar|7z)$/i.test(entry.path)) {
     const bytes = await read(entry.path);
     const inner = await openInnerArchive(bytes, entry.path);
+    // `entry.path` is relative to the listing we are on (`rest`, which already holds the folders
+    // walked into), so only the part PAST them is appended to the address.
+    const tail = within && entry.path.startsWith(within) ? entry.path.slice(within.length) : entry.path;
     return renderZipFolder(`${label}/${entry.path}`, '', inner.files, (p) => inner.read(p), bytes,
-                           `${addr}/${entry.path}`);
+                           `${addrWalk}/${tail}`);
   }
   await renderBytes(await read(entry.path), entry.path.replace(/^.*\//, ''), label);
 }
