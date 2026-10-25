@@ -7,12 +7,12 @@
 <script>
 // BEFORE THE FIRST PAINT. `/file/<name>` is a file address dressed as a path: this document is only
 // the frame around the renderer, so it must never paint the 404 art or the home link on its way to
-// the payload (his 2026-10-19 report: "will still load a page, then a video loading"). `/<id>` at the
 
+// site root is the same address as `/file/<id>` (the short form he asked for).
 //
 // WHICH frame is decided by the ADDRESS ALONE, and a text address is a TEXT frame: black is right for
 // a player and wrong for a .txt, whose tab is white in light mode and dark in dark mode because of
-// `<meta name="color-scheme" content="light dark">` (his 2026-10-19 ask: "it does this for video
+
 // files but txt have a special style"). The kinds mirror file.html's pre-paint — keep the two lists
 // in step; they are the same decision made twice, once for the server's 404 and once for the worker's
 // precached renderer.
@@ -128,7 +128,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     document.title = decodeURIComponent(name);
     // The player goes up in THIS document, before anything is fetched: a media name is a player
     // address, so the first paint is the black window with its controls — not "a blank page, then a
-    // black page with no video load UI" (his 2026-10-19 report). The pre-paint above already decided
+    
     // the kind from the same address, so the two can never disagree.
     if (window.__fileKind === 'media') {
       const v = document.createElement('video');
