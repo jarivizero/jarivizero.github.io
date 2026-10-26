@@ -144,7 +144,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "1a451f3ae8f2ca66";
+const BUILT_VER = "311f3a53db2ce6d3";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -923,7 +923,7 @@ async function renderMedia(mime) {
     const master = followManifest(await wholeFile());
     if (master) {
       manifestDepth++;
-      src = { ...src, name: master.name, urls: master.urls };
+      src = { ...src, name: master.name, urls: master.urls, packed: false };
       partCache.clear();
       return renderMedia(mimeFromName(master.name) || '');
     }
@@ -2730,7 +2730,7 @@ async function followIndex(head) {
     const master = followManifest(await wholeFile());
     if (!master) return false;
     indexHops++;
-    src = { ...src, name: master.name, urls: master.urls, direct: false, guess: false };
+    src = { ...src, name: master.name, urls: master.urls, direct: false, guess: false, packed: false };
     partCache.clear();
     return true;
   }
@@ -2743,8 +2743,9 @@ async function followIndex(head) {
   // can be listed from the index with no chunk read at all — the same deal a zip gets.
   if (!index || !/\.(zip|apk|jar|tar)$/i.test(String(index.name || ''))) return false;
   indexHops++;
+  
   src = { ...src, name: mimeFromName(src.name) ? src.name : (index.name || src.name),
-          urls: index.chunks.map((c) => c.url), direct: false, guess: false, tt: index };
+          urls: index.chunks.map((c) => c.url), direct: false, guess: false, packed: false, tt: index };
   partCache.clear();
   ttWhole.clear();
   ttPlan = null;
@@ -3094,7 +3095,7 @@ async function run() {
     const master = manifestDepth < 1 ? followManifest(bytes) : null;
     if (master) {
       manifestDepth++;
-      src = { name: master.name, urls: master.urls, direct: false, ranged: src.ranged };
+      src = { name: master.name, urls: master.urls, direct: false, ranged: src.ranged, packed: false };
       partCache.clear();
       const masterMime = mimeFromName(master.name);
       if (/^(video|audio)\//.test(masterMime)) return renderMedia(masterMime);
