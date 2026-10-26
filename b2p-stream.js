@@ -52,7 +52,7 @@ const DICT_URL = urlOf('IDSDICTIONARY.txt');
 //
 // An empty pair means "not baked" (the workspace copy, a local server): then the worker falls back
 // to fetching the .txt exactly as it used to.
-const BUILT_VER = "317140d7d51ef6fc";
+const BUILT_VER = "e48df226e956a33c";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 // A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
 // update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
@@ -1029,11 +1029,25 @@ async function serveZipJob(url, clientId) {
       });
       return new Response(body, { status: 200, headers });
     }
-    const dir = await zipDir(plan);
     const prefix = String(job.prefix || '');
-    const members = [...dir.values()]
-      .filter((e) => !e.dir && e.name.startsWith(prefix) && e.name.length > prefix.length)
-      .sort((a, b) => a.localOff - b.localOff);
+    // A folder inside the archive ITSELF comes from the archive's own directory — the list cannot
+    // disagree with the file, and it is not capped by anything the page remembers. A folder inside a
+    // STORED archive nested in it is a byte range like everything else, but only the PAGE knows the
+    // offsets (it read that archive's directory to list it), so it sends them: `base` is where the
+    // inner archive starts in this file, and each member's `localOff` is relative to it. Without this
+    // the page had to decode the whole inner archive in memory before the browser's download could
+    // exist at all — his report 2026-10-25: "the downloading to show in the browser is still not
+    // happening, it only does it when all the files are all decoded".
+    const base = Number(job.base) || 0;
+    const members = Array.isArray(job.members) && job.members.length
+      ? job.members.map((e) => ({ name: String(e.name), size: Number(e.size) || 0,
+                                  csize: Number.isFinite(Number(e.csize)) ? Number(e.csize) : Number(e.size) || 0,
+                                  method: Number(e.method) || 0, crc: Number(e.crc) >>> 0,
+                                  time: Number(e.time) || 0, date: Number(e.date) || 0,
+                                  localOff: base + (Number(e.localOff) || 0) }))
+      : [...(await zipDir(plan)).values()]
+        .filter((e) => !e.dir && e.name.startsWith(prefix) && e.name.length > prefix.length)
+        .sort((a, b) => a.localOff - b.localOff);
     if (!members.length) throw new Error(`there are no files under "${prefix}" in ${plan.name || 'the archive'}`);
     const odd = members.find((e) => e.method !== 0 && e.method !== 8);
     if (odd) throw new Error(`${odd.name} uses compression method ${odd.method}, which this page cannot unpack`);
