@@ -22,13 +22,9 @@
 (function () {
   var h = decodeURIComponent(location.hash || '').replace(/^#/, '');
   
-  // at all, it shouldn't load the UI of the normal page". (html) is a result view too — the decoded
-  // document replaces this one, so the encoder UI must not paint first.
   if (/\((openfull|html)\)/i.test(h)) document.documentElement.className = 'result-only';
 })();
 (function checkBuild() {
-  // The service worker only answers `/__b2p/…`; THIS page comes from GitHub Pages' HTTP cache (a
-  // 10-minute max-age), so a deploy could sit behind it. Ask for the file with the cache bypassed
   
   if (!/^https?:$/.test(location.protocol)) return;
   const BUILD = '2026-10-19T04:05';
@@ -36,11 +32,6 @@
   let seen = '';
   try { seen = sessionStorage.getItem(key) || ''; } catch (e) {}
   
-  // shouldn't it do a head request or a range request … just something else"). `cache: 'reload'`
-  // bypassed the HTTP cache, so the build check cost a full 61 KB download on every load after the
-  // document itself had already come back 304. The constant is 2,364 bytes in by construction and
-  // the suite asserts it stays inside these 8 KB; a server that ignores Range answers 200 and the
-  // check still works, one full body later.
   fetch(location.pathname + location.search,
         { cache: 'no-store', headers: { Range: 'bytes=0-8191' } })
     .then((r) => (r.ok ? r.text() : ''))
@@ -765,14 +756,6 @@ function faviconLoop(now) { drawFavicon(now); requestAnimationFrame(faviconLoop)
 requestAnimationFrame(faviconLoop);
 function setFaviconMode(mode) { faviconMode = mode === 'downloading' ? 'downloading' : 'idle'; }
 
-// ─── FILE CACHE — IndexedDB, 50 MB budget ────────────────────────────────────
-// LocalStorage is capped near 5 MB per origin, so a 50 MB budget is only reachable
-// with IndexedDB. Every file fetched from a URL is stored WHOLE, keyed by that URL
-// in its COMPLETE form (exactly the string parseMediaId produced), alongside the
-// bytes, the URL, downloadedAt and accessedAt. A later fetch of the same URL reads
-// the cache instead of the network and only bumps accessedAt. A file larger than
-
-// least-recently-accessed entries are evicted until it fits.
 const CACHE_DB = 'bin2png-cache';
 const CACHE_STORE = 'files';     // url -> { url, bytes }
 const CACHE_META  = 'meta';      // url -> { url, size, downloadedAt, accessedAt, lastModified }
@@ -891,9 +874,6 @@ async function renderCacheInfo() {
   }
 }
 
-// page it is on … the encode or decode"). Only a real TAB CLICK is remembered: a share link or a
-// history "Fetch now" forces the decode tab for that load but must not overwrite the preference,
-// and a hash still wins over the stored tab (an opened link has to decode).
 const TAB_KEY = 'bin2png.tab.v1';
 function savedTab() {
   try {
@@ -908,22 +888,6 @@ function switchTab(name, remember = true) {
   if (remember) { try { localStorage.setItem(TAB_KEY, name); } catch { /* storage refused */ } }
 }
 
-// ─── SHARE LINKS ──────────────────────────────────────────────────────────────
-
-// the hash carries the media id, so opening it fetches and decodes with no click. The
-// id is also written into the input, so the URL stays shareable and re-opened by hand.
-// It does NOT auto-destination the DECODE tab's own placeholder, and a bare `#2` (the
-// legacy redirect from the old /bin2png/ path) parses to nothing and is ignored.
-// A hash may carry SEVERAL media ids joined by `+` — the ORDERED parts of one payload, each PNG a
-// capacity-sized slice of the same file (see bin2png-encode.mjs). Returns the ids IN THE ORDER
-// WRITTEN, or null. One bad part rejects the whole hash: a half-stitched file is worse than a clear
-// refusal, and there is no way to guess which part is missing.
-// `#id+id` may be followed by a MODE: `(newtab)` opens the decoded file in a new tab as a blob,
-// `(openfull)` replaces this page with it (Chromium renders video/audio/text/PDF itself). The mode
-// is not part of the address of the payload, so every parser strips it first.
-
-// replaced by the decoded file's, so its <style>/<script> run and its relative urls resolve against
-// this page's directory. Unanchored on purpose — he said "if (openfull) exists in the url at all".
 const HASH_MODE_RE = /\((newtab|openfull|download|html)\)/i;
 function hashModeOf(hash) {
   const m = decodeURIComponent(String(hash || '').replace(/^#/, '')).trim().match(HASH_MODE_RE);
@@ -1025,13 +989,6 @@ function resultBlobUrl() {
     type: decodedMime || 'application/octet-stream' }));
 }
 
-// `(newtab)` opens THIS page in the new tab, with the mode flipped to `(openfull)` — the new tab is
-// then a black result-only page that decodes on its own. The obvious alternatives all fail on a
-// file:// page: `window.open('')` INHERITS the opener's url (the page reloads and its app fights
-
-// rendered, and writing into a popup's document leaves Chrome free to commit the inherited page
-// over it. A real navigation to `…(openfull)` has none of those problems, and it is also exactly
-// his framing: "decode on the newtab".
 let resultTabOpened = false;
 const STAGE_CSS = 'html,body{margin:0;height:100%;background:#000;color:#e4e4e7;'
   + 'font:13px ui-monospace,SFMono-Regular,monospace}body{display:flex;align-items:center;'
@@ -1049,9 +1006,6 @@ function openResultTab(mode = 'openfull') {
   return resultTabOpened;
 }
 
-// with the code from the decoded file and refresh". document.open() drops the old document entirely
-// (encoder UI, event listeners, timers), so the decoded page's own <script> runs as it would from
-// disk. A binary payload cannot be a document, so it falls back to the native element.
 function openHtmlDocument(bytes) {
   const head = bytes.subarray ? bytes.subarray(0, 4096) : bytes.slice(0, 4096);
   let binary = false;
@@ -1078,10 +1032,6 @@ function openHtmlDocument(bytes) {
   document.close();
 }
 
-// The decoded bytes as the element Chromium renders natively for that type. NEVER a navigation to a
-// blob: url — that is what downloaded instead of rendering (a `blob:null/…` on a file:// page is
-
-// page and pointing it at the blob always renders.
 function resultElement(doc, bytes, mime) {
   // `bytes` may be null: a STREAMED result sets its own src (a byte-range URL), and building a
   // blob for nothing would leave a stray object url behind.
@@ -1108,12 +1058,6 @@ function resultElement(doc, bytes, mime) {
   return el;
 }
 
-// Fill a whole document with the result, black to the edges and nothing else.
-// The name to save as, in priority order: the zip member, the stream's own name, the index's name,
-// the name the address was opened by, then `<ID or url>.<ext from the mime>`.
-
-// hard-coded `decoded.<ext>`, and a name that already carries an extension was given a second one.
-// A name that already ends in an extension is never re-suffixed.
 function decodeName() {
   if (decInnerName) return decInnerName;
   if (decStream && decStream.name) return decStream.name;
@@ -1211,8 +1155,6 @@ function handleEncodeText() {
 let encPackNote = '';
 async function encodeBytesToCanvas(bytes, name) {
   
-  // decoder unpacks it by itself (see packPayload / presentDecoded). A file that does not compress
-  // — an mp4, a zip — is stored untouched.
   const packed = await packPayload(bytes);
   bytes = packed.bytes;
   encPackNote = packed.note;
@@ -1228,10 +1170,6 @@ async function encodeBytesToCanvas(bytes, name) {
     : `auto · up to ${W}×${H} · ${TOTAL_PIXELS * BYTES_PER_PX.toLocaleString()} B per PNG`;
 
   
-  // instead of pointing at the CLI). A file bigger than one canvas is cut into capacity-sized
-  // slices, IN ORDER, and each slice is written as its own PNG (`name.part1ofN.png` …). The slices
-  // are the raw bytes of the file concatenated — nothing added — so the decoder re-joins them from
-  // a `#key1+key2` link with exact recovery. A file that fits stays one PNG.
   const slices = [];
   if (total === 0) slices.push(bytes);
   else for (let i = 0; i < total; i += maxBytes) slices.push(bytes.subarray(i, i + maxBytes));
@@ -1319,14 +1257,7 @@ async function deflateBytes(u8) {
   const stream = new Blob([u8]).stream().pipeThrough(new CompressionStream('deflate'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
-// Pack the payload into 8-bit RGBA scanlines (each prefixed with filter byte 0).
 
-// proven 899x898. A small file used to be written into a full 899x898 canvas whose remaining pixels
-// were transparent padding; those cost almost nothing in deflate, but the canvas ITSELF still had to
-// be read and validated by X, and a 1-row canvas for a 1 KB text is a much smaller PNG to upload.
-// The decoder is unchanged: it already reads w and h out of IHDR, so every size <= 899x898 decodes.
-// A hand-chosen canvas (claudesays.txt item 1). Both fields or neither: one empty means "fit".
-// It is validated against the codec's own ceiling, so >899x898 is refused here, before any work.
 function readCanvasOverride() {
   const wEl = document.getElementById('enc-w'), hEl = document.getElementById('enc-h');
   const wRaw = (wEl && wEl.value || '').trim(), hRaw = (hEl && hEl.value || '').trim();
@@ -1571,12 +1502,6 @@ function renderModified(lastModified) {
   el.textContent = `Last-Modified: ${new Date(lastModified).toUTCString()} (${relTime(lastModified, Date.now())})`;
 }
 
-// A Wayback Machine url is a FETCH TARGET, not a pbs id to re-derive. `…/web/<ts>if_/<url>` is the
-// RAW archived file; without the `if_` the archive answers with an HTML page (banner + rewritten
-
-// pbs url by the matcher below, so the archive copy was never fetched — useless exactly when the
-// live media is gone. Only web.archive.org is treated this way; any other host still goes through
-// the generic "already a complete URL" path.
 function archiveUrl(raw) {
   // The flag rides on the TIMESTAMP (`/web/20261017232721if_/https://…`), never on its own
   // segment — matching it as a separate group is what produced `/if_/if_https://…`.
@@ -1603,11 +1528,7 @@ function parseMediaId(raw) {
     return raw;   // already a complete URL — use it verbatim (this is the cache key)
   }
   if (!id) return null;
-  // `?format=png` is the file AS UPLOADED. Measured on live pbs media (2026-10-04): it returns
-  // BYTE-IDENTICAL bytes to `?name=orig` wherever that works (5/5, up to 1.7 MB) and a 200 where
-  // `?name=orig` returns 404 — so it is the first request, and `?name=orig` is the fallback
   
-  // payload — never use it.
   return `https://pbs.twimg.com/media/${id}?format=png`;
 }
 
@@ -1638,15 +1559,6 @@ function concatParts(parts) {
   return out;
 }
 
-// Fetch the image bytes for a media URL. `?format=png` is the primary (see parseMediaId);
-// `?name=orig` is the fallback for the few media where the format form fails. The cache key stays
-// the canonical primary URL, so a fallback download is still a cache hit on the next lookup.
-// Download a list of part URLs — cache-first, IN PARALLEL, in order. The parts are independent
-
-// 2026-10-17: "add parallel downloading"): X answers a part in ~0.5-1s, which a 4-part link used to
-// pay four times over. Cache hits still download nothing, the shared callers keep the same
-// progress/status feedback, and a failure is reported with the part number that failed.
-// Returns { parts, cachedParts, tooLarge, lastModified } or { error }.
 async function fetchParts(urls, label) {
   const parts = new Array(urls.length);
   let cachedParts = 0, tooLarge = false, lastModified = null, done = 0, error = null;
@@ -1677,8 +1589,6 @@ async function fetchParts(urls, label) {
   return { parts, cachedParts, tooLarge, lastModified };
 }
 
-// The MIME a name already says. A manifest carries real names, so the extension IS the type —
-
 const MIME_BY_EXT = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
   bmp: 'image/bmp', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
@@ -1697,12 +1607,6 @@ function mimeFromName(name) {
   return (ext && MIME_BY_EXT[ext.toLowerCase()]) || 'application/octet-stream';
 }
 
-// Save bytes to disk under a name. The NAME carries the type; the blob's type is deliberately
-// NEUTRAL, because Chrome/Brave hand a saveable blob of a type they can render (`video/webm`,
-
-// on a webm tt2png index: "it should've downloaded and decoded … not played in browser".
-// `application/octet-stream` is always a save; the file lands with `name`, so its extension and
-// the app that opens it later are unaffected. `mime` is still logged by callers, not sent.
 function saveBytes(bytes, name, mime) {
   const blob = new Blob([bytes], { type: 'application/octet-stream' });
   const a = document.createElement('a');
@@ -1728,7 +1632,6 @@ async function fetchImageBytes(url) {
       const res = await fetch(u);
       if (!res.ok) { lastErr = new Error(`HTTP ${res.status} ${res.statusText} (${u})`); continue; }
       
-      // cross-origin fetch (pbs.twimg.com sends it: the upload time of the file).
       const lm = res.headers.get('Last-Modified');
       let t = lm ? Date.parse(lm) : null;
       if (Number.isNaN(t)) t = null;
@@ -1738,15 +1641,6 @@ async function fetchImageBytes(url) {
   throw lastErr || new Error('fetch failed');
 }
 
-// A video used to be downloaded part by part, joined, and only then handed to a <video>. On a
-// 5-part file that is the whole wait; on a 16-part one it is minutes before the first frame.
-// `#yakusoku.mp4` already tells us the type from its NAME, so there is nothing to discover first:
-// the player is put on screen immediately, pointed at a URL the service worker answers, and the
-// worker fetches a part only when a byte range actually reaches it (see b2p-stream.js).
-//
-// Two things this fixes besides the wait: the URL ends in the file's own name, so the browser's
-// "Save video as …" offers `yakusoku.mp4` (a blob: url offered a uuid), and the panel's filename is
-// the same name instead of `decoded.mp4`.
 const STREAM_PLAN_CACHE = 'b2p-plan-v1';
 const STREAM_SCRIPT = 'b2p-stream.js';
 let streamWorker = null;   // Promise<registration|null>, cached so one page registers once
@@ -1848,10 +1742,7 @@ async function startStreamDecode(urls, name, mime) {
                      'so it starts after part 1 instead of after the whole file. ' +
                      'Right-click → Save video as offers this file\u2019s own name.';
 
-  // A video stays IN THE PANEL here; `(openfull)` is the only thing that takes the window. His
-  // rule 2026-10-19: "it just opens in fullscreen even on bin2png no matter what, it's not supposed
-  // to do that, only on file/ pages". A 2026-10-18 report had pushed the opposite way; that was
-  // about /file/ and is fixed there by the renderer's own media mode.
+  
   if (hashModeOf(location.hash) === 'openfull') {
     document.documentElement.classList.add('result-only');
     const stage = document.getElementById('result-stage');
@@ -1914,13 +1805,6 @@ function streamTools(name, urls) {
   return tools;
 }
 
-// first part's HEAD through the worker — one byte range, decoded from a PNG prefix — and the file
-// is known without downloading a single part. The LAST part's end is read by the same worker when
-// it works out the total, which is what the player needs anyway.
-// A PACKED payload is a DEFLATE stream with a 9-byte header. A PREFIX of it still inflates to a
-// prefix of the file — every complete block comes out before the truncation error — which is all a
-// sniff needs. `unpackPayload` refuses a cut stream on purpose (it cannot prove the recorded
-// length), so the probe cannot use it: a 7.75 MB webm answered "binary" for exactly that reason.
 async function unpackPrefix(bytes) {
   if (!isPacked(bytes)) return null;
   const chunks = [];
@@ -1976,9 +1860,7 @@ async function handleDecodeUrl() {
     return;
   }
   const multi = targets.length > 1;
-  // A DOT address: find out what it is from a byte range, and if it is media, put the player up
   
-  // downloaded every part before it would play).
   if (dotAddress && !names.resolved.length) {
     try {
       const probe = await rangedProbe(targets);
@@ -2050,15 +1932,9 @@ async function handleDecodeUrl() {
   setDecProgress(90);
   await decodeBytes(bytes);
   
-  // decode every file it names, the same path the ⬇ Fetch all button takes, and save each under
-  // its own name (the sha256 check inside manifestFetchFile still applies). EVERY master, not only
-  
   if (decManifest) {
     const files = decManifest;
-    // A MASTER that names exactly ONE file is not a list to browse: it is that file, wrapped. Render
-    // it — the player for media, the stitched bytes for anything else — instead of showing "Master
     
-    // master names the four parts of the webm).
     if (files.length === 1 && (files[0].parts || []).length && !masterFollowed) {
       masterFollowed = true;
       const only = files[0];
@@ -2092,8 +1968,6 @@ async function handleDecodeUrl() {
       setDecStatus(`${only.name} — ${fmtBytes(payloads.reduce((n, b) => n + b.length, 0))} from its master file`, 'success');
       return;
     }
-    // `(html)` on a master file means "show me the page it lists", not "save every file": fetch the
-    // HTML member (the first one whose name says so, else the first file) and replace this document
     
     if (hashModeOf(location.hash) === 'html') {
       const pick = files.find((f) => /\.x?html?$/i.test(f.name || '')) || files[0];
@@ -2211,9 +2085,6 @@ async function presentDecoded(bytes, depth = 0, fromCodec = false) {
     ttRawJson = new TextDecoder().decode(bytes);   // verbatim, for the Raw manifest button
     showDecodedResult();
     
-    // the zip file … just no downloading without clicking download"). What it costs instead is the
-    // TAIL: a zip's directory sits at the end, so one part lists it. A playable payload still
-    
     const archive = Array.isArray(tt.files) || /\.(zip|apk|jar|7z|rar|tar|tgz|bz2|xz|gz)$/i.test(tt.name || '');
     if (archive) {
       setDecStatus(`tt2png — ${tt.name}, ${fmtBytes(tt.bytes)} in ${tt.chunks.length} TikTok part(s). ` +
@@ -2227,8 +2098,6 @@ async function presentDecoded(bytes, depth = 0, fromCodec = false) {
     setDecStatus(`tt2png — ${tt.name}, ${fmtBytes(tt.bytes)} in ${tt.chunks.length} TikTok part(s). ` +
                  'Reassembling it from TikTok and checking the sha256 in this index …', 'info');
     
-    
-    // once per index so a re-render or the canvas fallback cannot fetch the same parts twice.
     const got = await tt2pngAutoFetch();
     const b = document.querySelector('#dec-body button.btn.primary');
     if (b) b.textContent = got ? '⬇ Fetch and verify again'
@@ -2372,13 +2241,6 @@ async function decodePngExact(bytes) {
   } catch (e) { return null; }
 }
 
-// The payload bytes of ONE codec PNG: the exact reader first, canvas as the fallback for the
-// re-encoded forms it cannot parse (palette+tRNS, 16-bit, interlaced). Returns null when the bytes
-
-// ── tt2png: a file whose bulk lives on TikTok's CDN ──────────────────────────
-// TikTok's chunk URLs run to hundreds of characters of signed query, so they are not what a
-// person shares: the index (this JSON) is. It is small enough for one pbs PNG, so the share
-
 function parseTt2png(bytes) {
   if (!bytes || bytes.length < 12 || bytes[0] !== 0x7B) return null;   // 0x7B = '{'
   let text = '';
@@ -2392,9 +2254,6 @@ function parseTt2png(bytes) {
   } catch (e) { return null; }
 }
 
-// Run `fn` over `items` with at most `limit` in flight — the page used to walk a package one file
-
-// would be more efficient"). Limit, not unbounded: 5,000 files must not open 5,000 requests.
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
   let next = 0;
@@ -2408,7 +2267,6 @@ async function mapLimit(items, limit, fn) {
   return out;
 }
 
-// into a list you can download. Same payload wrapper as a single file, so ttPayload() reads it.
 function parseTtPackage(bytes) {
   if (!bytes || bytes.length < 12 || bytes[0] !== 0x7B) return null;   // '{'
   let j;
@@ -2427,8 +2285,6 @@ function parseTtPackage(bytes) {
   return { tool: 'ttbackup', created: j.created || '', files, dirs,
            root: j.root || '', total: files.reduce((n, f) => n + (f.bytes || 0), 0) };
 }
-
-// One package entry → its exact bytes, or an Error with what was wrong. Verifies TWICE: each chunk
 
 async function packageEntryBytes(entry) {
   const chunks = [...entry.chunks].sort((a, b) => a.index - b.index);
@@ -2544,10 +2400,6 @@ function ttPayload(png) {
   return null;
 }
 
-// "it saves every time but I wanted it played in the page". So the reassembled bytes go through
-// the same native renderer a plain decoded payload uses (<video>/<audio>/<img>/<pre>), with a
-// Save button beside it. A type Chromium cannot render (zip, apk, exe) is still saved — there is
-// no other way to hand it over — and the status names that instead of pretending it played.
 function showTt2pngPayload(bytes, mime, name) {
   const body = document.getElementById('dec-body');
   if (!body) return null;
@@ -2592,7 +2444,6 @@ function showTt2pngPayload(bytes, mime, name) {
     }
   }
   if (!el) {
-    // NEVER save on its own. A 75 MB zip index used to start a download the moment it decoded
     
     const note = document.createElement('div');
     note.className = 'zip-note';
@@ -2623,12 +2474,6 @@ async function tt2pngAutoFetch() {
   return tt2pngFetchAll();
 }
 
-// ─── the #<id> panel plays the file as ONE worker stream ───────────────────────────────────────
-// `tt2pngFetchAll` used to pull every TikTok part, join them and hand the result over as a Blob,
-// which re-loads the media element whenever it runs out of bytes. `/file/<id>` stopped doing that on
-// 2026-10-23 (his "Fix the refresh"): the index goes into the service worker's plan cache and one
-// `<video src=/__b2p/stream/?id=…>` is never touched again. This is the same move for this page —
-// the worker streams the parts with real Range support, and the browser asks for windows as it plays.
 async function tt2pngStreamUrl(t, mime) {
   if (!('serviceWorker' in navigator) || !navigator.serviceWorker) return '';
   const swUrl = new URL('b2p-stream.js', location.href).href;
@@ -2956,11 +2801,6 @@ async function decodePngBlob(blob, depth = 0) {
         const imgData = ctx.getImageData(0, 0, offscreen.width, offscreen.height);
         URL.revokeObjectURL(url);
 
-        // Fallback path only (canvas premultiplies, so partial-alpha pixels here are inexact).
-        // It goes through presentDecoded for the SAME reason the exact path does: this is the
-        // shape X returns for some uploads — it re-encodes a codec PNG as a PALETTE image (PLTE
-        // + tRNS), which decodePngExact refuses — and a master file that lands here was shown as
-        // raw text instead of being recognised (found 2026-10-17 on the real posted master,
         
         const payload = alphaBytes(imgData.data);
         presentDecoded(payload, depth, true).then(resolve, reject);
@@ -3010,11 +2850,6 @@ function readZipEntries(bytes) {
   return entries;
 }
 
-// A file that compresses is stored deflated, with a 9-byte header so the decoder can tell:
-//   "B2PZ" + codec byte (1 = zlib deflate) + 4-byte original length (big endian) + deflate stream
-// It is only used when it actually wins (compressed + 9 < raw). A payload that merely STARTS with
-// those bytes stays raw: the inflated length must equal the recorded one, or the container is
-// rejected and the bytes are presented as they are.
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];
 const PACK_HEADER = 9;
 // how many files a package restore keeps in flight (each file also fetches its chunks at once)
@@ -3109,13 +2944,6 @@ function parseManifest(bytes) {
   return out;
 }
 
-// ── IDSDICTIONARY: a file NAME is the key to a pbs id ─────────────────────────
-
-// `bin2png.html#yakusoku.mp4`: the name is sha256'd to find its line in IDSDICTIONARY.txt, and the
-// id on that line is decrypted with the SAME name. One thing to remember, nothing extra to share.
-// The file never names a file, so it does not reveal what is in it — but the name IS the secret,
-// so anything private needs an unguessable name. This is obfuscation with a shared secret, not
-// access control, and the plan doc says so in the same words.
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 const IDS_ITERATIONS = 100000;
@@ -3233,8 +3061,6 @@ async function idsResolve(name) {
   let payload = (await idsDictRecords()).get(hash);
   if (!payload) {
     
-    // added after this page's worker cached the file must not need a hard reload. One fresh read,
-    // then the miss is real — the cached copy is rewritten by the worker, so it is fresh next time.
     payload = (await idsDictRecords(true)).get(hash);
   }
   if (!payload) throw new Error(`${name} is not in ${IDS_DICT_FILE} (its hash starts ${hash.slice(0, 12)}…)`);
@@ -3380,7 +3206,6 @@ function renderTt2pngBody(body) {
   sum.textContent = t.sha256 ? `sha256 ${t.sha256} — checked after the TikTok parts are joined`
                              : 'no sha256 in this index, so the assembled file cannot be checked';
   body.appendChild(sum);
-  // WHAT IS INSIDE, when the index carries it: tiktokupload.py lists an archive's members (name,
   
   const inside = Array.isArray(t.files) ? t.files : null;
   if (inside) {
@@ -3444,11 +3269,7 @@ function renderTt2pngBody(body) {
     btn.disabled = false;
   });
   tools.appendChild(btn);
-  // A ZIP whose index carries NO listing (an older upload) can still be listed cheaply: a zip's
-  // central directory sits at the END of the file, so the LAST part alone names every member.
   
-  // A `Range: bytes=-65536` would cut that to 64 KB — TikTok answers the CORS preflight for a
-  // `Range` header with 403, so the browser cannot ask for it (curl can; both measured 2026-10-18).
   if (!inside && /\.zip$/i.test(t.name || '')) {
     const last = t.chunks[t.chunks.length - 1] || {};
     const tail = document.createElement('button');
@@ -3466,8 +3287,6 @@ function renderTt2pngBody(body) {
     tools.appendChild(tail);
   }
   
-  // The index is rarely worth reading on its own, but with an archive's listing inside it is the
-  // only place the whole metadata is visible. textContent, never innerHTML — it is untrusted input.
   const raw = document.createElement('button');
   raw.className = 'btn';
   raw.id = 'tt-raw-btn';
@@ -3768,13 +3587,6 @@ function selectedHistory(rows) {
   return rows.filter(r => histSelected.has(r.url));
 }
 
-// THE MASTER FILE for the ticked rows — one artifact, two forms (the two buttons below). Its
-// `file` blocks come straight from the urls each entry already carries, so NOTHING IS FETCHED:
-// both buttons work with the network unplugged and a cached entry is no special case.
-//
-
-// So `Download encoded` encodes THIS text, never each file the text names. A stitched entry is
-// listed as its parts, so a stitched file and a plain one read the same way.
 function historyMasterFile(rows) {
   const at = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
   const lines = ['#bin2png-manifest v1', `# at\t${at}`, '# profile\tpage',
@@ -3833,7 +3645,6 @@ async function historyDownloadEncoded() {
 async function historySaveDictionary() {
   const rows = await historyAll();
   
-  // carrying the same name. Grouping by row would write one part and silently drop the rest.
   const byName = new Map();
   for (const r of rows) {
     if (!r.name) continue;
@@ -3924,10 +3735,8 @@ async function renderHistory() {
     tools.appendChild(b);
   };
   
-  // there is nothing to disambiguate (the old three said master / OG / encoded).
   mk('⬇ Download predecoded', 'The master file itself — the .bin2png text listing every ticked entry', historyDownloadPredecoded);
   mk('⬇ Download encoded', 'The SAME master file through the codec, as PNG part(s) ready to post', historyDownloadEncoded);
-  // Not a master file: the keyring. Every named entry in the history, as one publishable
   
   mk('🔑 Save IDSDICTIONARY.txt', 'Every named entry in this history as a published keyring — one record per name, each encrypted with a key derived from its own name', historySaveDictionary);
   const stale = wrap.querySelector('.hist-tools');
@@ -3946,8 +3755,6 @@ async function renderHistory() {
     row.appendChild(box);
     const main = document.createElement('div'); main.className = 'hist-main';
     const id = document.createElement('div'); id.className = 'hist-id';
-    // The NAME the file would be saved as, when the entry knows one (a manifest carries it).
-    // BOTH, when the row came from a master file: the file name is the useful half, the media id
     
     id.textContent = r.name ? `📄 ${r.name} · ${r.mediaId || r.url}` : (r.mediaId || r.url);   // untrusted -> textContent
     id.title = r.url;
@@ -4014,10 +3821,7 @@ function guessMime(bytes) {
   if (sig(0, 0xD0, 0xCF, 0x11, 0xE0)) return 'application/msword';
   if (sig(0, 0x7F, 0x45, 0x4C, 0x46)) return 'application/x-elf';
   if (sig(0, 0x4D, 0x5A)) return 'application/x-msdownload';
-  // Try text. NOT "every byte is ASCII 32..126": a real HTML file has a UTF-8 em dash or an
-  // accented name in its first 512 bytes, and that used to make a whole web page come back as
   
-  // basket-random-offline.html). A NUL still means binary; a few control bytes are tolerated.
   const sample = bytes.slice(0, 4096);
   let ctrl = 0;
   for (const b of sample) {
@@ -4136,7 +3940,6 @@ function showDecodedResult() {
     code.textContent = text;
     pre.appendChild(code);
     
-    // say what it is and offer the new tab, which is `(html)` on the same address.
     if (mime === 'text/html' && !hashModeOf(location.hash)) {
       const note = document.createElement('div');
       note.className = 'zip-note';
@@ -4185,7 +3988,6 @@ function downloadDecoded() {
   // A streamed video has no bytes in memory yet: the button means "give me the whole thing".
   if (decStream) { saveStreamedFile(decStream.name, decStream.parts); return; }
   if (!decodedBytes) return;
-  // Through saveBytes, so the panel's Download is a SAVE like every other one on the page — under
   
   saveBytes(decodedBytes, resultFileName(), decodedMime);
 }
@@ -4224,9 +4026,6 @@ function fmtBytes(n) {
   return (n/1024/1024).toFixed(2) + ' MB';
 }
 
-// Last lines of the script, so every handler above is already defined. A page opened with a share
-
-// restored from localStorage (default: encode, which is what the markup ships with).
 if (!parseMediaIds(hashBody(location.hash))) {
   const t = savedTab();
   if (t) switchTab(t, false);
