@@ -6,17 +6,7 @@
 <title>404 — not found</title>
 <noscript><style>html.file-address body > main { display:block; }</style></noscript>
 <script>
-// BEFORE THE FIRST PAINT. `/file/<name>` is a file address dressed as a path: this document is only
-// the frame around the renderer, so it must never paint the 404 art or the home link on its way to
 
-// site root is the same address as `/file/<id>` (the short form he asked for).
-//
-// WHICH frame is decided by the ADDRESS ALONE, and a text address is a TEXT frame: black is right for
-// a player and wrong for a .txt, whose tab is white in light mode and dark in dark mode because of
-
-// files but txt have a special style"). The kinds mirror file.html's pre-paint — keep the two lists
-// in step; they are the same decision made twice, once for the server's 404 and once for the worker's
-// precached renderer.
 (function () {
   const path = location.pathname;
   const inFile = path.match(/\/file\/(.+)$/);
@@ -43,10 +33,7 @@
   else if (raw.charAt(0) === '.') kind = 'text';
   else if (e) kind = IMAGE.includes(e) ? 'image' : 'text';
   document.documentElement.className = 'file-' + kind;
-  // A file ADDRESS is not the 404 art until the name is found to be unknown — so the art must not be
   
-  // split second, it should not"). The class hides it from the FIRST paint; the decision below
-  // either takes the renderer or clears every class, which brings the art back.
   document.documentElement.classList.add('file-address');
   if (kind === 'text') {
     const meta = document.createElement('meta');
@@ -91,41 +78,14 @@
 </main>
 <script>
 'use strict';
-// 404.html — one page with three jobs, all of them "the url was not a file".
-//
-// 1. `/file/<name>` — the path spelling of a renderer address. The renderer is loaded in place, so
-//    the address a person typed and will copy stays exactly what it is (a redirect to `/file#<name>`
-//    would rewrite it).
-// 2. `/__b2p/<name>?…` — a STREAM address. Its answer lives in `b2p-stream.js`, and a browser only
-//    asks a service worker after registering one. A visitor who never opened /file or /bin2png has
-//    no worker, so this page installs it, waits for it to control the page, proves the address
-//    answers a byte range, and reloads — the reload is served by the worker and the video plays.
-//    The plan rides in the url (`p=` ids, `u=` urls, `m=` type), so nothing has to be cached here.
-// 3. anything else — the 404 art (catbox.moe's), and one way home.
-// Install the worker on ANY 404, not only a stream address: a file address (`/file/<name>`, `/<id>`)
-// reached later is then answered from the worker's own copy instead of waiting for this page again.
-// Fire and forget — nothing on this page waits for it.
-//
 
-// "broke" `/TwitterMP4Extractor` and other pages on this origin): this page IS GitHub's answer for
-// anything that is not a file, and a worker that guessed the same thing ate every page it did not
-// happen to know about.
 if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('/b2p-stream.js', { scope: '/' }).catch(() => {});
 }
 
 (async () => {
-  // Everything this page needs lives INSIDE this function. `/file/<name>` replaces this document
-  // with the renderer (`document.open()` keeps the same window and its global scope), and a
-  // top-level `const stage` here collided with the renderer's own `const stage` — measured:
-  // "Identifier 'stage' has already been declared", a blank page instead of a player. The two BAKED
-  // constants below sit inside for that same reason: the renderer declares its own `BUILT_VER`.
-  //
   
-  // built from. They are here so this page can answer "is this address a file at all?" with NO
-  
-  // never a black player waiting on a renderer that was fetched for nothing.
-  const BUILT_VER = "e48df226e956a33c";
+  const BUILT_VER = "cf4018c281d35725";
   const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
   const art = document.getElementById('art');
   const msg = document.getElementById('msg');
@@ -188,10 +148,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
   // (measured live 2026-10-25).
   async function openRenderer(name, root) {
     document.title = decodeURIComponent(name);
-    // The player goes up in THIS document, before anything is fetched: a media name is a player
-    // address, so the first paint is the black window with its controls — not "a blank page, then a
     
-    // the kind from the same address, so the two can never disagree.
     if (window.__fileKind === 'media') {
       const v = document.createElement('video');
       v.controls = true;
@@ -232,18 +189,8 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     const atFile = location.pathname.match(/\/file(\/|$)/);
     const root = atFile ? location.pathname.slice(0, atFile.index + 1) : '/';
     
-    // archive `HVgz…` plus a folder, and asking the dictionary about the whole string found nothing
-    // — so a fresh visit showed the art and only a refresh (worker installed) recovered it (his
-    // report 2026-10-25). The archive token decides; the rest of the path is the listing's business.
     const bare = cleanToken(name).split('/')[0] || '';
     
-    // exists in the 404.html local dictionary … if it does not exist in the local dictionary see if
-    // it is a pbs id and it fits the format, if it does, fetch it, if it is not a pbs id format then
-    // it should display the real 404 then finally fetch sw-ver and IDSDICTIONARY fresh"):
-    //   1. in the BAKED dictionary  → a file, take the renderer (no request to decide it);
-    //   2. a pbs id, exactly       → take the renderer, pbs is the last word on whether it exists;
-    //   3. neither                 → the art, NOW — and only THEN ask the network whether a deploy
-    //                                moved the version or added this name.
     if (await knownName(bare) || looksLikeId(bare)) {   // (un-baked: knownName is always true)
       await openRenderer(name, root);
       return;
