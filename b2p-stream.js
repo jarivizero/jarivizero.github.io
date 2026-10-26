@@ -30,29 +30,12 @@ const PART_CACHE = 'b2p-part-v1';
 const MARK = '/__b2p/';
 
 const PAGE_CACHE = 'b2p-page-v1';
-// What this worker answers from its OWN copy — so all of it has to be refreshable. `sw-ver.txt` is a
-// hash of the page, the 404 art and the DICTIONARY: when it moves, the page asks for a resync (his
-// ask 2026-10-19) and this worker asks itself the same question on install.
-//
-// The DICTIONARY is deliberately NOT in this list: deploy bakes it into this very file (see
-// DICT_INLINE), so an ordinary visit fetches no dictionary at all and the .txt only goes over the
 
-//
-// `404.html` is still refreshed here (a stale copy is a wrongly-styled art page after a deploy), but
-// the worker no longer SERVES it: unknown addresses now come from GitHub Pages itself — see the note
-// above REAL_PATH for why that branch had to go.
 const PRECACHE = ['404.html', '404.png', 'file', 'sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-// ONE copy of the records is baked here at deploy time, together with the sw-ver it was built from,
-// so every reader — this worker's own handler, bin2png.html and file.html all go through it — gets
-// the list with NO request. Three copies of the same list (one per published file) could disagree
-// with each other; this is one.
-//
-// An empty pair means "not baked" (the workspace copy, a local server): then the worker falls back
-// to fetching the .txt exactly as it used to.
-const BUILT_VER = "e48df226e956a33c";
+const BUILT_VER = "cf4018c281d35725";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 // A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
 // update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
@@ -111,16 +94,6 @@ self.addEventListener('message', (event) => {
 });
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
-// The paths that really exist. They must never be mistaken for a media id, so they are tested
-// before the short root address below.
-//
-
-// and other similar urls"): it used to answer EVERY navigation to a path that was not on this list
-// with its precached 404 — including the rest of the site's pages, which are not on the list
-// either, and including every extensionless page through the `/<id>` form below. A worker with
-// `scope: '/'` sees the whole origin, and this one owns only its own addresses. A navigation it
-// does not own must fall through to the network (GitHub Pages already serves the same 404.html for
-// anything unknown, one round trip later).
 const REAL_PATH = new RegExp('^/(?:' +
   'index\.html|bin2png(?:\.html)?|file(?:\.html)?|404\.html|404\.png|b2p-stream\.js|' +
   'IDSDICTIONARY\.txt|icons/.*|sitemap\.xml|robots\.txt|favicon\.ico' +
@@ -131,15 +104,7 @@ const isRealPath = (p) => p === '/' || REAL_PATH.test(p);
 // no iframe, so nothing paints between the address and the player. The renderer reads the name from
 // the path, and the typed address is never rewritten.
 const FILE_PAGE = /(?:^|\/)file(?:\/.*)?$/;
-// The short form: an id at the site root, `/<id>` or `/<id>.mp4`. It is the same address as
 
-//
-// This is the ONE branch that can swallow somebody else's page, because a scope-`/` worker cannot
-// know what else the site holds. So it is as narrow as a pbs media id really is: EXACTLY 15
-
-// extension. It used to accept `{10,}`, which ate `TwitterMP4Extractor` (19 chars) and
-// `randomfilename` (14) — measured 2026-10-20: the first came back as a blank renderer with status
-// 200, the second as the 404 art, while the server was serving the real page both times.
 const ROOT_ADDRESS = /^\/[A-Za-z0-9_-]{15}(?:\.[A-Za-z0-9]+)?$/;
 const PAGE_URL = new URL('file', self.location.href).href;
 
@@ -152,7 +117,6 @@ async function serveFilePage(extraScript) {
   const res = hit || await fetch(PAGE_URL);
   if (!extraScript) return res;
   
-  // — the player, the byte ranges, the zip listing — is untouched.
   const html = await res.text();
   const at = html.lastIndexOf('</body>');
   const tag = '<script>' + extraScript + '</script>';
@@ -163,26 +127,9 @@ async function serveFilePage(extraScript) {
   });
 }
 
-// The id in the address IS the key: `sha256(<id>)` gates the branch AND unwraps the AES-256-GCM
-// key, so this file holds digests and ciphertext while holding neither an id nor the script.
-//
-
-// wrapped with the id's own digest, 80 characters instead of a 4 KB copy each. Two consequences
-
-// every existing id keeps working, because a wrap is about the key, not about the payload.
-//
-
-//
-
-// `?file=window:<window.name>`.
-//
-
-// A digest says nothing about the id, and the blob nothing about the script.
-
 const BLOB = 'v1.J3uBft0IJa2i7umz.N88U95IcmOb0Cx2S-4BIdYYE1TLYrdg7k1-c1EgX_aogcjsH1MopLtuPCzRwjqFcE0BycuWIduddRQvl8__TEa1oEi17CYamNguF7WgV30VwcrKBK3vwEPVcCZ-sNafZsjCMBHginWQB-iOFzjvYYV5k1yXacwAN7ennHMhldwpOsCdYIRhXk6HAkKfXN009enzU8JVWWCMPnwCnvGBp9iceCcmwtWcAgrSs5DlHqKtZQipooNxjk7paGJzZiSdSpm22Zjo3svuyFWwd6SXP_GU3vvk_c6eOJULIRtmVLiA0dFibl6DicFdGUx6ujKNYijA3ENX3NHWIUZ04oO13CAvL3blaIhg1N71A0Vy6TifwHG7UvU14nxSR7XQwSmWLhhDdcwnwOYNdXWhN44SbWZ-f2BoNusYwe6TUpakhHXkyAkG6Z-qXxEeUSVrM9ONCI0a4Yy_idGwgKfVXG9vEKYb-KDV8npZ3U2xO5dLGmHrXjDvGVtfkVEo0rOsOfcJITyPwv6d7hFieo0s_etAq57Y-ajEuFrv4dpsjwZDnx6JqHbL9B0gGzAwO9lkE-fstWjPnqyLh_a0ijldVpQZErHpwYtdInjAEd2yqA8y6-5YDZrOeQkI1-VNoOrwgQMA1ATY4tRdyi2l0P9zMpbsC42GOOXfaZnIfM4HXPUm_6F25I3h9OIJIwye93cvEC_1VEmpGW6Ni5JV-SmVpLig4x7OkSUK_JlsJUuDmOAmbc9kO_o2MXoQ8clco2wBIRBDVMmDfycs4L-I7iNGz2B5GHJVhQn8pS-voC7T3CQ3CDx0l5JHfhClcwHxXM3iV4KiSja0YeoqwtiM8Co6PlxQeZk4oOG-ATrWAfGwzcpp85rSxnA9NAX_2wsuVC9xsUf4Bas6YqyEohnUrok-ttjEhxrIfFN86Le4rS6GApEiRB9hUykoXYhxGaX2FsGBgB2S1kCYkI4cGzMw1f06gX4CxtSZt4YU3som_5mhi-tkIlcmhEMjtXWANG9R5cd0ylHfbEuIH7z41BleUym6HR34mTEfn01jfMRce-zf46J4oE778h0M7EvDct_XYwNeRHCs8hIJasOy5HTcS1V2zOiRz0g-QYekB-YzMr17sVLInPaoB3Cky-PXsdbt5ko3preBTB5MJGGnjn2i_Bhr0XjopYX_lCPqN7u9U94REGHU3MPQL8jZ_SJzN6QMEs6rPD757Q_7bk4wfFSKDOsCO26LTp_oe-i1pEvwZF9aq3WJyjVj0KITfvgDO-GdQBkvoFDEu3p43i8Koe-6u8jKE-_HysUUwt48FaxMxi2YPLTQHCR5Fx9keUQROub30kxLBbbud6F3ljgA_wYjZnoBBVCfjUc4HIqVrV5rUMVi0AIM32QqGsRhEGWSHGGhn5u5FUuvTkU3xt0jlHa_eq_y2YttTZ5doMYsByAOyIj2fQIRLJgNE-7USlqbMtoTsIkQkgQzA4xsDJWtv0GmSTBo5ScXKQ7iK_UKR8b1ekBcFNH9qyISMxPOqRwmoEVg4tsKPvIbZK85msAVs8hHgP8gomyqQ8uV4KJ6wtlfG44bbORu01_bUxEs-A9KnW46NPz1ZzlA47wYOjV0lTCsOQKYmFPCT7RhZdhNNDBXIOt2_j5lIxy8Bk1t_SMSyFEqmt_j8SFbXfAETklOUEzCEo7rXiWDdexL4Sn8TC73SiOOk08xpAzoVymtZ7kr4c0AQ3H1KLkKRUKJNgm7q8KD-jWCCWItWABNxnyZhJad8qN-vPrdablIflx7xcda82O_PUUQVv3uO5pNrekJS6TvWSMqWC-Yjt_QU7JEyt3n_vQdX6WTRwyItHT-U9wqFtkunfGrmF6JVECDoUma5XnjJOJuuqtezuBEud43Ily4mgIfExt9jpyZcD69uRUuFkn4yIxPUlwpXVcMhuoIkIGWs7f8Dz-ML1tAbCv4Iwg23guATraJUG0DCJITbHxZ2HUEaxuroTvH6p-4uzlsRPINewk8yOzsYbu_VBwyJw7J1l6NV7vAkX5kp5IlBdnmALc9pAGynR6r0WzrcoEAgypQgpCTb_rKfIFa4dtGi7B9YwmM0-CrArTS1iM49vZj2ueZHaOslNh6JxmkjafZf4jzlxtlRVH6hNPPg4RyBRxCz3CiUkkM5C8zJd9bapB4mnajm-HR0XHQWIAiG5RliteR4jkDinFDNExGd1rDaGxsE5Fsk3TdDK1TK1Cvfn9a5iMHN0Dck6NhC8qOv5mBhftGejvsmV91gXB8E8A1rIoiHZwJPKWhSACOQU5vlhieluscCWHE6DDhw3ObsnMzVgAxtEZMfT1KlCsRQSqU18SGHy0uPh7UtEH3N3BbtcAuojojo35pES0lNooo4UDpyaBaxxzD4qacX6X2Fv3rXzqorI9FmNtvk4PvzMJ6r7tWZjTiKQCeBWP0te5qmIp5Eef_fWCmlzpy9Psx3dTHM2jBaK1bn7jg2gu5_Y8_HJKkfVmcWkvGJ6q7a_1CN13r2nCDYu0MtHkHQNnr8Z939kwAqdc0Ww3sIGBkRBJYEBnZ90l9JlkR5FH31Ig3tkItkRmk8JQDa1FS8lU10w7CCfxzS7XFZr1KJVuZh1dYlUf-2U-8ruXRYDkgFuh2d8jk-v2ymWmr4oeTTB_drK3uxkrfk9NzzlSefS_X94cvtSPRBiRTExVtEWDNuR0fVnjami-aP2dop09I0Cv82A0HUDMOaHWOZU5SCOlM4vq3Z7v8Ip-ZRcHmAZiB9a_JBaykjFP_THCn4Oss4uVNOKSYYh4KQ4_YRVSfwR2MkqGZ0mUQrvN2QE0FI2aVuXqJahqnF_sd2O3aFolTDs4EhgK30cAqI3xTxdX_onCtnIo3LTaUiNd9LWCTvPwA65dtuj3-X1KYKRxD_dSCe0xwllbcKuq-or8NvqUmcwktgJBlooTWedrUSh3VF0NrMBi19XQd6blLyGNx21jCmdMNJbruSOcOwm1qdhaFFn78X86W5dMxrC1M2PpJY1RgaXl0y9X2Nq9nIMCQN_x7meRqxbolZ2bphTZzCDhl-NV7MewWu_5AOh0_GauMm9jcxruY_a9tohmnoJL4oodzXSVcqkEiZTg9W5oxpz7jK-K_vKR4HR78OpNY_reLAKVmRw-JjV-Z5YfD955-rgWKXeAuHtO5Fv5MflqdShC-0SomCAHwsvClyx4xJs1iaWvL_0htLspI4MD7YT6e6gVolJlWLZH98RWWS4KXid38NkaO0pQSCYqo94GFPkq8FfljRyDwenM-oZk6CTsIRkvkTLNuBjPMefMtqGD30Hm8Mttlhhcf4oFy59M4wx12__uKZ8IxVZpxIAR844U1k8KwmBLgWbnDGoKOmoX34ddRwJL_QQTC4Tspi2UZZoClNdds0qdGpIjjPZjj-P_nnUSc5HJXubM7oVVy4e22rRbNrjSPEMYtpymV-gBdmD9OaZtxvrlfWODkhElB4Va7QnIuQLU3NciGmCPjNnQLRxGi1j0tEEz3qhS67ib6rKjGyLxsQRq8MhB-EVwh3f_-sBAv2ZUHZVX1jt3y_uHQOBltqfRq_iEw6JV3oEr682I5UpugSM2OOk-I6iNVyNx-Y3kLBjWmTCmnCwiKyjr_Lon8HbhveaJWrb5G7zYW9tUWaxtm3UjE6KLy9l4E_Q0bkqQbeTmauF1tFaToM1Ff2_E9j73zrud_vLgTfKGYbs_24VJaqjmVL5MqsMhxTH-dRkGWu-cIFckXCGvsTeo_hym4GPgD8umw0HK1bWX57wKdQ-l56nZZxEiLKTfuRLSjthcsaunXfZ1uelVH_GoB3e8shQO7b3iEQFY8oTVFPmdcRc9yH3tflKXzhB3RwK_eDuvXFV88_vioKiwGT3WW1Fuv6PWaNF-MR1QKsT1ovsIbJLVF0PAvaWIVTsG3EFAsJTOQNJ4Tge5rvnN02PinWTuBs-aThEIkHGZ2yeRGEBQGQi260s-mx3_aLqOrFp5BGkq6N-lbU0E2CS1F_ipWvJwgeEQvtzZVT8jw2sf076wjFEZgnk3eBF7eUxcTebvzSvLGVMKLtlAnSo7m-GQP_Q_6OvPrKw3GvpVx2MMP6CHOJzK5JDzLN7gKkd1jduA7x8ECDfO9NmgPhZAac4OkYrAcNxg-WW2gzG3PjC0XllhdvVgE9U7OXoVYkahvMWiLcePt2Tv3zsV5dOeAgofnXuu4K';
 
 const TBL = {
-  
   
 'f0c84741842fec749395f74d62bfe2ada0a1dca710aa9c8c10471134ae9d273f': 'v1.7bOstgRywJF-2nrf.OV_4luGHov_bCUKctoZaeazjg2ZRYGIspS50cyNKmR47cmfFYwn_ct0cXiy5gsGx0aYbsuPDaw736R9tOyocZkK-ALK3EfzMhNSUZW4AAVp9tZ2yK1XtCKa_yWA_TSOxJvEGMHbwCf4mJNaMnVHbujSYx4j4T5g-lZ0beB3kXBnMbmuKeYP2Mt6KsU2VS2F-QDxyy1RQiXIc4GXixRevWDnS_QVjFR8ACbMl2GT-2cKnGqkBLxd4bpDkllAwN7ymvlPwLRklZ19DAvcR2x-0b-F6ZdS7Urp58DkphCmsoUOhltmrs-UMueqoEvHQTrdxmSgIruTwYtAA6jMQF7uAZ9uhOuf40Ixj5zOP5TFKxuPRJ8puBkRhOvUwNnmWZd35z8o8e_TFjlTNCPy6mYF0fyccMLGMJl1NY2mMbF0mrlt4X-T7Bq0VpKaT4Il2p_Wd3TqGAJAanzkCfW68-v8NRgM9wNYKMEzVUSCT6dTLEdmAV5UhHb4FCBZx3BoIAgvFBBV8iP5ffOSvqacTNJslg3sum2FP2RFZQYUVr8WFIcs8s9V1IBXf5ZYiTE4q57gvUmhyW9owhT-fWRL7vgAKyFopxGECGm6nS20YVtGHH56sqs2TMPYogme2CoCaKIF2gZuF_GK3P27Mml2kCNbL6QlB6vgoOO6YcCTr6OXC3irhBcyvTsMsk9E16aRwH4Fi0LfSxweOhqZnEPVMoLtYISdP_z0nZG9DMQsj_ZaAIbr127PY_shBARE1yLYFmpwJ2hslHgeSvlxS-F3z2l0Vh--Se32tD5wEOG_lVMBjEQyRMGeIgeZSn2dI9aqFMnit56-yXarh-BX_SMITgX00GndqOGzUnFB368Ofrz48rj4BOlMoOk8S4OpTEmSJfce2TRCLEtPIZbHN68zLA7CRJuf0M-OsYTz9HClghDWcBG_NYnUMil2r-JcbN-_PQaD4S5hV0itdZBApgYxmhsKzBFoIyPGYVS-ZJOceM_HgZYDbw_9o04VFp_jjPLDdpXuzOywMqqP3Hwf0rHms9WN-dh0y7XaqaTAZyLDOvsvaGWQXgiUYHSo48Fidc9yBldctQjL6WgeWoLuc5mG1gqIym_NldEq3wXlHq6OFSXcE3TVUzOnqWcF5-L2tQvwKh9kr1DNU7au5YM-M9kqJWoMa_S1SaqNeZPKY2vV5zsB55mEEMfTrxKEHdBwKA7TrFQT3WKHF0Q8eZgHyPTQZNlxFIbOu9qaHWwZEgHr-T1xNZgEtwJ0wykaVz0lIh3gbqnz-WTPEPCQZf0P7e9SOcq7sKZoOvpCiTCM5_0sun_YpWqoqTggrGdPQQ0-sbPlNTf-pxn3iK_e-14ZFwNAREvQaf2KCv2D2uZRErpHiVlcY85OHAYosqkF4S8ibaXYkeOwcFvU-K53L3BYLnjuIcKxcPE9ynPenSiAxMhg4zom8TL2hXw7ka_krQtRBQD8dYS625ClukDX1ADMRxmrQFyvF7D8cbpSHfkaIIH2zQ5Vo5-13lWcbt5mwLDt-4JcXwTA3VBgpvSJgS9L4lQ-bLo-bM7ebiUi2AIiBlF6LJ_tLWrybUjXePFEF-czIOP2IfcHbN_qAHhf0rUkeTWoPFCXhMaQiAaB-2c85r7oADyDZonJbWTU7JzqEd8W5xzxrOUJkFBxA9WQhVppQZoyOl-BpHCmxxQj9CZmOZ45CbEtsoGdRbuWUd0tNKP4XHRS5eAfYTOtI0aa5ZedL_UWUuhY3M4tgRli0Zjqgs4EglcCmZzHm4iwxxTGZsvl26Gjt7dkFXfWk1FeFcv8e5eMrSLb9VD01TRHf26TJIgx0cjGg9G4SaJSVlxb5nTg_xVStUd7ox7FR2huV-nyGbiyb9eJF1Ul94knb4oHVtykAnFwBucx9iB4Dx5BYazXZz0umlXXxmoCSnE0Ha4M69wwvtablTNIcp8a_kwUfloOkO2_za2KM0BgZ9yww5wTITXFre3ao0bSWnZBNuI3fREC9iN3MVDtzKXrMNFRQUef4kv3sq5KfaTm0PrGpVl7KOGvm3OmJFHJpZzCJUyityb0Ah5YmhSj6cFIxQmk8SrEegnt83sJACiyNx1lXUgP6C9Wqo-IYTBlDku1T4f5lkSiH_vDnthJdR0RcqY98MfpSTCiTdXrHMLvxmQFfkOHE5wPNjMtK6jISC9d6nFYFnL30HuLrnrGI-dXE25nIgEltJPGXV2PpqThDaKwn8XEfAsL1A0ZlhXOCr_5DPmz6axNJOYxKtXuV02qoJSeVE_rQpV9USESmL3COHJaaB1WNjV53jW8tybyTW1pPNVT0SXTys3DvLoB7hGYbqiN147ian08IYtlGthqB3F36BdUjF_IUeNjvMl43VEC5dIMyj39N6jvFnn85K3XV-qytaJKMXLoG5H_FKtQWpzfnocngl_0i2JOrF0SX80hQPwZaVI6eOTE5G9RAq6_sQr_8nzFRrK_qADQA_7q9cZFNYUFK8YlW2F8idAQ9Ba0GPm0Ccyx_VYZSHR8CmoVfEh8M-v98RSNbphepq5nXaVxsjMYL5LQkRnnALnJlS19VixocCUVWQYkk-WllUfIxlSXJEdHuoW_2SLBRWc5xvDRF6WBqjCDt4537IfYks3fF6woL0g2Dnx3OjMeLlJYBywu8CxNiNHCvPmDM6fin-LncMaG1XDUW4FNCigDwPUjzlVkhdru8O11xhYwgE-_2qHYdvBMDponsywCPnL6Rq2J2T4p1z_C8Tduf50BzCU8bxUbi49iheaKiH1vnutozQR5kxJop2zztPK6XnQbb4bOAWLdGubDuMjnUj21PVHnugzAjI4-7u9Umtrzzs25hYBDt3iA1CRegVr5kHuqusXn_Mp8vfiHgMBO_5BLbalZMMIT6HeY2eI73iFAUG5pi_anQGMfXC8e1VLAb1FrvH8NFN_frDRN3aq3jTgkhBiiN_4Qte1TYNb9JKV_nYCXwZlByHGFnfZfINKbODh3wGwQOfwV4kPUZxIPqnQPsb8xMpGDmxn5aEOqXaBX2cg',
   // k1: the content key, wrapped with this id's own digest.
@@ -238,20 +185,14 @@ function blobScript(rawKey) {
   return blobFor.get(id);
 }
 
-// An id's entry: `k1.<iv>.<ct>` is the content key wrapped with sha256(<id>) — 60 bytes of
-
 async function blobSource(entry, preimage) {
   const digest = await sha256Bytes(preimage);
   if (String(entry).startsWith('k1.')) return blobScript(await plainBytes(digest, 'v1' + String(entry).slice(2)));
   return plainText(digest, entry);
 }
 
-// stale b2p-stream.js used to carry. The precache copy first (no network), the network after.
 async function liveVer() {
   
-  
-  // trip costs nothing on the page's path — and a stale version is exactly the thing that makes a
-  // report of "which worker served this" wrong. The cache is the offline fallback, not the answer.
   try {
     const res = await fetch(urlOf('sw-ver.txt') + '?fresh=' + Date.now(), { cache: 'no-store' });
     if (res.ok) return (await res.text()).trim() || 'unknown';
@@ -263,13 +204,6 @@ async function liveVer() {
   } catch (e) { /* fall through */ }
   return 'unknown';
 }
-
-// EVERY segment of the path is a candidate, the last one included: an address into an archive
-// (`/file/<id>/folder/inner.zip/README.txt`) is the SAME archive as `/file/<id>`, so it has to match
-// the id that sits in the middle of it — matching only the last segment logged the root and nothing
-
-// `,` (the address prefixes), and without a trailing extension, so a share link that kept `.mp4`
-// still matches its own id.
 
 async function pickScript(pathname) {
   const segs = String(pathname || '').split('/').filter(Boolean);
@@ -303,13 +237,6 @@ function scriptBody(src) {
   return bodies.join('\n');
 }
 
-// The dictionary is answered from what this file CARRIES, so an ordinary visit costs nothing: no
-// request, no cache, no wait. Two things can still go to the network, and only two:
-
-//     should only be updated if a file name is 404"; an id never gets here, it goes straight to pbs
-//     and a 404 there must not spend a dictionary request;
-//   * a detected deploy change — resync() already fetched the new .txt at dictKey, and it is served
-//     from there until the next build.
 async function serveDictionary(url) {
   const cache = await caches.open(PAGE_CACHE);
   if (url.searchParams.has('fresh')) {
@@ -345,12 +272,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
-  // `/file/<archive>/<path>`: a FILE is answered with the file itself (its own type,
-  // `Content-Disposition: inline`, ranges); a folder — or anything this worker cannot read — falls
-  // through to the renderer, which shows the `Index of` page or renders the member by itself.
-  // A MEMBER IS ANSWERED FOR ANY GET, not just a navigation. Ctrl+S in Brave RE-REQUESTS the file
-  // (a plain fetch, not a navigation) and the worker used to pass that through to the server, which
-  // answered 404 — "File wasn't available on site" while the tab itself showed the file perfectly
   
   if (event.request.method === 'GET' && url.origin === self.location.origin) {
     const inside = archiveAddress(url.pathname);
@@ -364,8 +285,6 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
       (FILE_PAGE.test(url.pathname) ||
        (ROOT_ADDRESS.test(url.pathname) && !isRealPath(url.pathname)))) {
-    
-    // renderer as it is. A failure to openBlob must never take the page down with it — the player is
     
     event.respondWith(
       pickScript(url.pathname).catch(() => null).then((js) => serveFilePage(js)));
@@ -430,10 +349,6 @@ function planFromUrl(url) {
   };
 }
 
-// The name a save takes. "Save video as" reads the FILE NAME from here, not from the document that
-
-// own url ended in `.mp4`. `inline` keeps the bytes playing instead of turning the request into a
-// download; `filename*` carries the real name (a `?somevideo.mp4` address keeps its own name).
 function filenameHeader(name) {
   const raw = String(name || 'file').replace(/[\r\n]/g, ' ').replace(/[\\/"]/g, '_').trim() || 'file';
   const ascii = raw.replace(/[^\x20-\x7e]/g, '_');
@@ -544,10 +459,7 @@ async function serve(request, url) {
 // needs a byte from it. Nothing is buffered beyond the part in hand.
 function streamRange(plan, start, end, total) {
   let at = start;
-  // ONE PART AHEAD when the range is wider than a part — a whole-file download used to wait for
-  // part i before it even asked for part i+1, so a 3-part file cost 3 round trips end to end (his
-  // report 2026-10-25). Wide ranges now keep the next part in flight; a narrow one (playback) does
-  // not, because there the next part is bandwidth nobody asked for.
+  
   const wide = end - start >= plan.cap - 1;
   return new ReadableStream({
     async pull(ctrl) {
@@ -557,13 +469,9 @@ function streamRange(plan, start, end, total) {
         if (i >= plan.parts.length) { ctrl.close(); return; }
         const off = at - i * plan.cap;
         const want = Math.min(end - at + 1, plan.cap - off);
-        // Only when the range really goes on into the NEXT chunk. `wide` alone said "this is a long
-        // range" and the prefetch then fetched one part past its end — measured 2026-10-25 on his
-        // 32 MB member read: chunk 7 for a range that ended in chunk 6, a whole 5 MB nobody asked for.
+        
         const reachesNext = at + want - 1 < end;
-        // HOW MUCH of the next chunk the range will actually need — `plan.cap` was wrong for the last
-        // one: his 32 MB member read ended 1,792,355 B into chunk 6 and the prefetch pulled all
-        // 5,000,000 (measured 2026-10-25: 33.4 MiB of wire for 30.3 MiB of bytes).
+        
         const nextWant = Math.min(end - (at + want) + 1, plan.cap);
         if (wide && reachesNext && nextWant > 0 && i + 1 < plan.parts.length) {
           // A tt2png chunk is addressed by exact bytes, so the prefetch asks for the WINDOW the loop
@@ -580,9 +488,7 @@ function streamRange(plan, start, end, total) {
         // fetched. This is the whole point of the prefix fetcher below: playing the first second
         // of a 2.4 MB part costs a few hundred KB, not 2.4 MB.
         if (plan.tt) {
-          // A tt2png part is a 70-byte PNG with the file APPENDED after its IEND, so a window of the
-          // payload is a window of the PNG. Ask for exactly those bytes: reading the tail of a 2.4 MB
-          // chunk used to decode the WHOLE chunk (his 8 MB for a 28 kB png, 2026-10-25).
+          
           const known = payloadOf.get(plan.parts[i]);
           // A window the prefetch already pulled: answer from it instead of asking again.
           const held = known ? null : ttWinGet(plan.parts[i], off, want);
@@ -619,15 +525,6 @@ async function totalBytes(plan) {
   return plan.total;
 }
 
-// ─── `/file/<archive>/<member>`: the member AS a response, not as a page ───────────────────────
-
-// path has, and the RESPONSE should be the file — `Content-Type` from its name,
-// `Content-Disposition: inline; filename="…"`, `Accept-Ranges`, real byte ranges — so the tab is
-// the browser's own viewer and "Save as" knows the name. A page can imitate the pixels; it cannot
-// imitate the headers, because a document's headers are its own.
-//
-// A folder (`…/dir/`, or a directory entry) is a LISTING, so this answers null and the renderer
-// shows its `Index of` table at the same address.
 const sitePath = new URL('./', self.location.href).pathname;      // '/' or '/<repo>/'
 
 function archiveAddress(pathname) {
@@ -642,10 +539,6 @@ function archiveAddress(pathname) {
   } catch (e) { return null; }
 }
 
-// Which bytes make up the archive. The renderer writes this when it lists an archive (`archive-`
-
-// Without that plan a bare pbs id resolves on its own: its first part is read as a PREFIX, and what
-// that part holds (a master, a tt2png index, or the archive itself) is followed.
 async function archivePlan(address) {
   const key = planKey('archive-' + await digestHex(address));
   const hit = await (await caches.open(PLAN_CACHE)).match(key).catch(() => null);
@@ -817,7 +710,6 @@ async function serveMember(address, request) {
     const entry = await zipEntry(plan, address.member);
     if (!entry) return null;
     
-    // 2026-10-25): the renderer opens it as its own `Index of` page.
     if (/\.(zip|apk|jar|7z)$/i.test(entry.name)) return null;
     return await memberResponse(plan, entry, request);
   } catch (e) {
@@ -825,22 +717,6 @@ async function serveMember(address, request) {
   }
 }
 
-// ─── a zip, built while the browser downloads it ───────────────────────────────────────────────
-
-// through HTTP streaming? … It might be the Chunked Transfer Encoding"*. It is, and the encoding is
-// not the part that decides it — the BODY does. A Blob is handed over only once its last byte
-// exists, so the page sat on "zipping…" with nothing in the browser's download list. This worker
-// answers the download with a ReadableStream instead: the browser saves each member as it is read,
-// its own download bar moves, and `Content-Length` (the layout is known before a byte is fetched)
-// turns that bar into a real percentage. Measured on 2026-10-25: Chromium CANCELS a download
-// started with `<a download>` when a worker answers it, and saves the same response when the request
-// is a NAVIGATION — which is why the page starts it from a hidden iframe.
-//
-// A job is written by the page (POST-free, the Cache API — a plan in memory dies with the worker):
-//   { kind: 'folder'|'file', id, name, client, prefix?, plan }
-// `plan` is the ordinary range plan for the archive's own file, so every member is a byte range and
-// nothing here downloads the archive. The MEMBER LIST is not in the job on purpose: it comes from
-// the archive's own central directory, so it cannot disagree with the file.
 const DOS_TIME_NOON = 12 << 11;              // 12:00:00 when the directory carries no time
 const DOS_DATE_1980 = (1 << 5) | 1;          // 1980-01-01, the zip epoch
 function attachmentHeader(name) {
@@ -849,14 +725,14 @@ function attachmentHeader(name) {
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(raw)}`;
 }
 
-// One message per member (or per megabyte of a whole-file save) to the page that asked, so the link
-// can read "zipping… (5/10)" while the browser's own bar moves. Never awaited: a stream must not
-// wait on a message.
-function zipProgress(clientId, job, done, total, unit) {
+// Progress to the page that asked, so the link can read "zipping… 12.3 MB / 45.6 MB · 3.4 MB/s · ETA
+
+function zipProgress(clientId, job, done, total, unit, bytes, bytesTotal) {
   if (!clientId) return;
   try {
     self.clients.get(clientId)
-      .then((c) => c && c.postMessage({ type: 'b2p-zip', job, done, total, unit }))
+      .then((c) => c && c.postMessage({ type: 'b2p-zip', job, done, total, unit,
+                                        bytes: Number(bytes) || 0, bytesTotal: Number(bytesTotal) || 0 }))
       .catch(() => {});
   } catch (e) { /* no clients API, or the page is gone */ }
 }
@@ -892,13 +768,6 @@ function countingStream(stream, onBytes) {
   })());
 }
 
-// The archive, member by member, as STORED entries. Sizes and CRCs come from the member's central
-// directory record, so each local header is complete before its data is read — no data descriptor,
-// which is what every unzip reads without complaint.
-// A member's local header is 30 bytes, but a folder of small files is CONTIGUOUS: the next member's
-// header starts a few bytes after the previous member's data. One 64 KB read therefore answers many
-// headers, and a 500-file folder costs a handful of requests instead of 500 (his 2026-10-25
-// complaint was exactly this shape: "it fetches each file one by one").
 const ZIPHEAD = 65536;
 async function* zipStream(plan, members, prefix, onMember) {
   const enc = new TextEncoder();
@@ -1020,24 +889,20 @@ async function serveZipJob(url, clientId) {
         'Access-Control-Allow-Origin': '*',
       };
       headers['Content-Length'] = String(plan.total);
-      let told = 0;
+      // A few messages a second, not one per megabyte: the page's rate is a slope over TIME, so more
+      // numbers only cost messages (a 1 GB save at 100 MB/s was ~1000 of them).
+      let told = 0, toldAt = 0;
       const body = countingStream(streamRange(plan, 0, plan.total - 1, plan.total), (n) => {
-        if (n - told >= 1048576 || n === plan.total) {
-          told = n;
-          zipProgress(sends, job.id, n, plan.total, 'bytes');
+        const now = Date.now();
+        if (n === plan.total || n - told >= 262144 || now - toldAt >= 250) {
+          told = n; toldAt = now;
+          zipProgress(sends, job.id, n, plan.total, 'bytes', n, plan.total);
         }
       });
       return new Response(body, { status: 200, headers });
     }
     const prefix = String(job.prefix || '');
-    // A folder inside the archive ITSELF comes from the archive's own directory — the list cannot
-    // disagree with the file, and it is not capped by anything the page remembers. A folder inside a
-    // STORED archive nested in it is a byte range like everything else, but only the PAGE knows the
-    // offsets (it read that archive's directory to list it), so it sends them: `base` is where the
-    // inner archive starts in this file, and each member's `localOff` is relative to it. Without this
-    // the page had to decode the whole inner archive in memory before the browser's download could
-    // exist at all — his report 2026-10-25: "the downloading to show in the browser is still not
-    // happening, it only does it when all the files are all decoded".
+    
     const base = Number(job.base) || 0;
     const members = Array.isArray(job.members) && job.members.length
       ? job.members.map((e) => ({ name: String(e.name), size: Number(e.size) || 0,
@@ -1051,15 +916,24 @@ async function serveZipJob(url, clientId) {
     if (!members.length) throw new Error(`there are no files under "${prefix}" in ${plan.name || 'the archive'}`);
     const odd = members.find((e) => e.method !== 0 && e.method !== 8);
     if (odd) throw new Error(`${odd.name} uses compression method ${odd.method}, which this page cannot unpack`);
-    let done = 0;
-    const body = fromIterator(zipStream(plan, members, prefix, () => {
-      done += 1;
-      zipProgress(sends, job.id, done, members.length, 'files');
-    }));
+    // `done` counts members, `bytesOut` counts the zip as it is written: one member can be hundreds of
+    // MB, and two numbers that only move once per member would leave the page's speed at zero for
+    // the whole of it.
+    let done = 0, bytesOut = 0, toldBytes = 0, toldAt = 0;
+    const outTotal = zipTotal(members, prefix);
+    const say = (force) => {
+      const now = Date.now();
+      if (!force && bytesOut - toldBytes < 262144 && now - toldAt < 250) return;
+      toldBytes = bytesOut; toldAt = now;
+      zipProgress(sends, job.id, done, members.length, 'files', bytesOut, outTotal);
+    };
+    const body = countingStream(
+      fromIterator(zipStream(plan, members, prefix, () => { done += 1; say(true); })),
+      (n) => { bytesOut = n; say(false); });
     return new Response(body, { status: 200, headers: {
       'Content-Type': 'application/zip',
       'Content-Disposition': attachmentHeader(job.name),
-      'Content-Length': String(zipTotal(members, prefix)),
+      'Content-Length': String(outTotal),
       'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': '*',
     } });
@@ -1212,11 +1086,7 @@ function ttWinPut(key, off, bytes) {
   TTWIN.set(key, list.slice(0, TTWIN_PER_URL));
   while (TTWIN.size > TTWIN_MAX) TTWIN.delete(TTWIN.keys().next().value);
 }
-// ONE request per (chunk, window), shared by every caller waiting on it. The "one part ahead"
-// prefetch and the read that follows it ask for the SAME window; without this they both miss the
-// cache (neither has finished) and the chunk is fetched twice — measured 2026-10-25 on his 267 MB
-// index: 10 chunk reads for 7 chunks, 52.5 MiB instead of 32.3 MiB. Same for the 512-byte probe,
-// which two racing callers both ran.
+
 const TTLOCK = new Map();       // "<url>#head" -> promise (the 512-byte probe)
 const TTFLIGHT = new Map();     // url -> promise of { off, bytes }: one fetch of a chunk at a time
 function ttWindow(plan, i, off, want) {
