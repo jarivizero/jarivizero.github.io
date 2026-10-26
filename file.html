@@ -172,7 +172,7 @@ const IDS_VERSION = 'v1';
 // empty pair means "not baked" — the workspace copy, a local server — and the .txt is fetched the
 // way it always was. Baked, a name is resolved with NO request at all, and the list only goes over
 
-const BUILT_VER = "317140d7d51ef6fc";
+const BUILT_VER = "e48df226e956a33c";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -1824,7 +1824,7 @@ function fillFolder(view, prefix, files) {
 // Download Zip — never the outer payload, and never fetched until somebody clicks it. `addr` is the
 // address the page was OPENED with — the id he typed,
 
-async function renderZipFolder(label, prefix, files, read, zipBytes, addr, parentHref) {
+async function renderZipFolder(label, prefix, files, read, zipBytes, addr, parentHref, spanBase) {
   prefix = String(prefix || '').replace(/^\/+/, '');
   if (prefix && !/\/$/.test(prefix)) prefix += '/';
   addr = String(addr || label);
@@ -1844,7 +1844,10 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
       saveBytes(bytes, innerName, mimeFromName(innerName) || 'application/octet-stream');
       return { name: innerName, size: bytes.length };
     } : (onProgress) => saveWholeArchive(onProgress)),
-    downloadDir: prefix ? (onProgress) => downloadFolder(label, prefix, files, read, read === rootRead, onProgress) : null,
+    // `spanBase` is where this listing's archive starts in the ADDRESS'S OWN file: 0 for that archive,
+    // a byte offset for a STORED archive inside it, and null when its members are not a range of
+    // anything (deflated inside, a 7z, a packed payload) — then only the page can read them.
+    downloadDir: prefix ? (onProgress) => downloadFolder(label, prefix, files, read, spanBase, onProgress) : null,
   });
   fillFolder(view, prefix, files);
   return view;
@@ -1866,6 +1869,10 @@ async function resolveArchivePath(rawPath) {
   let read = rootRead;
   let deepest = null;      // a GETTER: a nested archive's bytes are fetched only when really needed
   let lastWasArchive = false;
+  // Where the listing the loop ends on STARTS in the address's own file: 0 for that archive, a byte
+  // offset for a STORED archive inside it (so its members are ranges of the same file and the worker
+  // can stream them), null when nothing outside the page can read them.
+  let spanBase = 0;
   while (parts.length) {
     const name = parts[0];
     const entry = findEntry(files, name);
@@ -1880,6 +1887,7 @@ async function resolveArchivePath(rawPath) {
       // Only the address's OWN archive has offsets `sourceRange` can use; deeper levels are already
       // in memory, so they keep the whole-bytes path.
       const stored = reader === rootRead ? await storedSpan(await withOffsets(entry)) : null;
+      spanBase = stored ? stored.base : null;
       // `at` is the address's own path (`burrow-client-main.zip` when a folder was left out of it);
       // `entry.path` is where the archive really sits (`Burrow/burrow-client-main.zip`), which is
       // what the index calls it.
@@ -1911,14 +1919,14 @@ async function resolveArchivePath(rawPath) {
   // the folders stepped into since — those are already the prefix of `entry.path`).
   const base = walked.slice(0, walked.length - dirSince.length).join('/');
   return { consumed, walked, within, base, files, rest: within + parts.join('/'), read,
-           lastWasArchive, bytes: lastWasArchive ? deepest : null };
+           lastWasArchive, bytes: lastWasArchive ? deepest : null, spanBase };
 }
 
 // `/file/<archive>/<path>` — the page route. A file renders as itself (a `file:///` tab would), a
 // folder becomes an `Index of` page, and an archive inside is listed rather than downloaded.
 async function renderZipPath(baseLabel, rawPath, baseAddr) {
   const addrBase = baseAddr || baseLabel;
-  const { consumed, walked, within, base, files, rest, read, lastWasArchive, bytes: deepest } =
+  const { consumed, walked, within, base, files, rest, read, lastWasArchive, bytes: deepest, spanBase } =
     await resolveArchivePath(rawPath);
   // Two different things, and they must not be mixed:
   //   the LABEL says the archives opened (`Index of x.zip/inner.7z`) — a folder is not a file;
@@ -1947,7 +1955,7 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
     const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
     return renderZipFolder(label, rest, files, read, deepest,
                            lastWasArchive ? addrWalk : addrArch,
-                           lastWasArchive ? containing : null);
+                           lastWasArchive ? containing : null, spanBase);
   }
   const entry = findEntry(files, rest);
   if (!entry) {
@@ -1960,11 +1968,11 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
     const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
     await renderZipFolder(label, dir, files, read, null,
                           lastWasArchive ? addrWalk : addrArch,
-                          lastWasArchive ? containing : null);
+                          lastWasArchive ? containing : null, spanBase);
     status(`"${rest}" is not in ${label}`, true);
     return;
   }
-  if (entry.dir) return renderZipFolder(label, entry.path, files, read, deepest, addrArch);
+  if (entry.dir) return renderZipFolder(label, entry.path, files, read, deepest, addrArch, null, spanBase);
   if (/\.(zip|apk|jar|7z|tar)$/i.test(entry.path)) {
     // The archive's path from the ROOT, for what gets remembered about it: `entry.path` is relative
     // to the listing we are on, `base` is that listing's own path.
@@ -1980,7 +1988,7 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
     const up = walked.length > 1 ? walked.slice(0, -1).join('/') : '';
     const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
     return renderZipFolder(`${label}/${entry.path}`, '', inner.files, (p) => inner.read(p), getBytes,
-                           `${addrWalk}/${tail}`, containing);
+                           `${addrWalk}/${tail}`, containing, stored ? stored.base : null);
   }
   await renderBytes(await read(entry.path), entry.path.replace(/^.*\//, ''), label);
 }
@@ -2052,18 +2060,33 @@ window.addEventListener('popstate', () => {
 //      member list comes from the file, not from this page, so it cannot disagree with it.
 //   2. In the page, when the worker cannot help (a packed payload, an archive inside another, a 7z,
 //      no service worker at all): the members are read a few at a time and counted out.
-async function downloadFolder(label, prefix, files, read, canStream, onProgress) {
+async function downloadFolder(label, prefix, files, read, spanBase, onProgress) {
   const members = files.filter((f) => !f.dir && f.path.startsWith(prefix) && f.path.length > prefix.length);
   if (!members.length) throw new Error('this folder is empty');
   const base = prefix.replace(/\/$/, '').split('/').pop() || label.replace(/\.zip$/i, '');
   const name = `${base}.zip`;
   const count = members.length;
-  if (canStream && canStreamArchive()) {
+  if (spanBase !== null && canStreamArchive()) {
     // The size is the WORKER's problem: it can read the archive's last part and answer with the total
     // still in Content-Length, so the page fetches nothing just to learn how big the file is (a
     // tt2png index already states it — `planForWorker` passes that through).
     const plan = planForWorker(label, 'application/zip');
-    const job = await startStreamedSave({ kind: 'folder', name, prefix, plan }, onProgress);
+    // A folder inside a STORED archive of this file: its members are byte ranges too, just further in,
+    // so the worker is told where (`base`) and which ones. Without this the page had to decode the
+    
+    // "the downloading to show in the browser is still not happening, it only does it when all the
+    // files are all decoded".
+    let list = null;
+    if (spanBase > 0) {
+      list = members.map((f) => ({ name: f.path, localOff: Number(f.localOff), size: Number(f.size) || 0,
+                                  csize: Number.isFinite(f.csize) ? Number(f.csize) : (Number(f.size) || 0),
+                                  method: Number(f.method) || 0, crc: Number(f.crc) >>> 0,
+                                  time: f.dosTime || 0, date: f.dosDate || 0 }))
+        .filter((f) => Number.isFinite(f.localOff));
+      if (!list.length) list = null;
+    }
+    const job = await startStreamedSave({ kind: 'folder', name, prefix, plan,
+                                          base: spanBase > 0 ? spanBase : 0, members: list }, onProgress);
     if (job) return { name, count, stream: true };
   }
   const out = new Array(members.length);
@@ -2368,7 +2391,7 @@ async function storedSpan(f) {
     const head = await sourceRange(f.localOff, f.localOff + 29);
     if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) return null;
     const start = f.localOff + 30 + u16(head, 26) + u16(head, 28);
-    return { size: Number(f.size), range: (a, b) => sourceRange(start + a, start + b) };
+    return { size: Number(f.size), base: start, range: (a, b) => sourceRange(start + a, start + b) };
   } catch (e) { return null; }
 }
 
@@ -2384,13 +2407,16 @@ function indexedEntry(f) {
 // report 2026-10-25, `…/back_zipper.zip/img20180525120905.png` on the second visit said "the member
 // local header is not where the directory says it is" because `localOff` had not been stored.
 function keepEntry(f) {
+  // `crc` rides along too: a remembered listing is what the worker is handed to STREAM a folder out
+  // of this archive, and a zip header that states the wrong CRC is a file that unpacks to an error.
   return { path: f.path, size: f.size, dir: f.dir,
            modified: f.modified ? f.modified.toISOString() : null,
-           localOff: f.localOff, csize: f.csize, method: f.method };
+           localOff: f.localOff, csize: f.csize, method: f.method, crc: f.crc };
 }
 function reviveEntry(o) {
   const f = listedMember(o);
   if (Number.isFinite(o.localOff)) { f.localOff = o.localOff; f.csize = o.csize; f.method = o.method; }
+  if (Number.isFinite(o.crc)) f.crc = o.crc >>> 0;
   return f;
 }
 
