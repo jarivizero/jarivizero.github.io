@@ -872,19 +872,27 @@ function zipErrorPage(jobId, message) {
 }
 
 function unpacked(plan) {
-  const body = stripHeader(streamRange(plan, 0, plan.total - 1, plan.total), 9);
-  return readerChunks(body.pipeThrough(new DecompressionStream('deflate-raw')));
+  // `PACK_HEADER` is 9 bytes (`B2PZ`, a version, the real length) and then ONE **zlib** stream —
+  // `'deflate'`, not `'deflate-raw'` (measured against the encoder's own `unpackPayload`, which
+  // inflates the same way: the raw variant errored on the zlib header and the download sat at 0 B).
+  const body = stripHeader(streamRange(plan, 0, plan.total - 1, plan.total), 9, 'B2PZ');
+  return readerChunks(body.pipeThrough(new DecompressionStream('deflate')));
 }
-// Drop the first `n` bytes of a stream, then pass the rest through untouched.
-function stripHeader(stream, n) {
+// Drop the first `n` bytes of a stream — and prove they say what they should, so a payload that is
+// NOT packed fails loudly here instead of streaming nonsense into a zip.
+function stripHeader(stream, n, expect) {
   let left = n;
+  let seen = '';
   return fromIterator((async function* () {
     for await (const c of readerChunks(stream)) {
       if (left > 0) {
-        if (c.length <= left) { left -= c.length; continue; }
-        const skip = left;
-        left = 0;
-        yield c.subarray(skip);
+        const take = c.subarray(0, Math.min(left, c.length));
+        seen += String.fromCharCode(...take);
+        left -= take.length;
+        if (left > 0) continue;
+        if (expect && !seen.startsWith(expect)) throw new Error('this payload is not packed');
+        const rest = c.subarray(take.length);
+        if (rest.length) yield rest;
         continue;
       }
       yield c;
