@@ -172,7 +172,7 @@ const IDS_VERSION = 'v1';
 // empty pair means "not baked" — the workspace copy, a local server — and the .txt is fetched the
 // way it always was. Baked, a name is resolved with NO request at all, and the list only goes over
 
-const BUILT_VER = "b35c3b1ed0d77344";
+const BUILT_VER = "317140d7d51ef6fc";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -535,6 +535,7 @@ async function partPayloadLoose(i) {
 }
 
 async function sourceSize() {
+  if (Number(src.totalHint)) return src.totalHint;      // remembered with the directory listing
   if (src.direct) {
     const res = await fetch(src.urls[0], { method: 'HEAD' });
     if (!res.ok) {
@@ -1699,10 +1700,31 @@ async function rootRows() {
 // member's byte offsets, and the whole file only when the payload is packed (its offsets are not
 // byte offsets, so nothing below can be a range).
 let central = null;
+
+// be put in local storage for the service worker to get, so if you ever visited the path before, it
+// shall load the directory entirely grabbing locally and quick"). Reading an archive's directory is
+// a walk to its tail — for a part-based upload that is a whole 2.4 MB part — and it does not change
+// between visits, so the entries (name, size, date, and the offsets that make a member a range) go
+// into the same Cache-API memo the inner archives already use. A repeat visit lists with NO request.
 function centralListing() {
   if (!central) central = (async () => {
+    // The memo namespace is already this payload (`memoRoot` = sha256 of the tt index's own sha256,
+    // or of the part urls), so one constant is enough here.
+    const key = 'central|listing';
+    const memo = await memoGet(key);
+    const held = memo && memo.json;
+    if (held && Array.isArray(held.files) && held.files.length) {
+      // The SIZE rides with the listing, so a repeat visit does not read the last part to learn it
+      // either (`shareArchivePlan` asks for it on every archive page).
+      src.totalHint = Number(held.total) || 0;
+      return { files: held.files.map(reviveEntry), read: (f) => memberBytes(f), remembered: true };
+    }
     try {
       const listing = await readZipCentral();
+      // `sourceSize()` here is free — the directory read just fetched that part — and it is what the
+      // next visit needs to avoid fetching it again.
+      const total = await sourceSize().catch(() => 0);
+      await memoPut(key, { v: 1, total, files: listing.files.map(keepEntry) });
       return { files: listing.files, read: (f) => memberBytes(f) };
     } catch (e) {
       console.warn('the archive directory is not readable by range:', e.message);
@@ -1814,11 +1836,14 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
     // its own, so it is handed the address of the listing it came from — otherwise its page had no
     
     parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
-    downloadZip: zipBytes && !prefix ? async () => {
+    // At an archive's ROOT: its own bytes when this is an archive inside another (zipBytes), else
+    // the whole upload — which is the same thing the root page run() draws, so walking back to the
+    
+    downloadZip: prefix ? null : (zipBytes ? async () => {
       const bytes = await zipBytes();
       saveBytes(bytes, innerName, mimeFromName(innerName) || 'application/octet-stream');
       return { name: innerName, size: bytes.length };
-    } : null,
+    } : (onProgress) => saveWholeArchive(onProgress)),
     downloadDir: prefix ? (onProgress) => downloadFolder(label, prefix, files, read, read === rootRead, onProgress) : null,
   });
   fillFolder(view, prefix, files);
@@ -1959,6 +1984,66 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   }
   await renderBytes(await read(entry.path), entry.path.replace(/^.*\//, ''), label);
 }
+
+// ─── folders are INSTANT: the listing is already in this page ────────────────────────────────
+// A folder inside this archive is a PREFIX of the listing the page already holds, so opening one
+
+// shall be smooth and seamless and instant … it shall work on slow internet"). The address still
+// changes and Back still works, because it is a history entry, not a new document.
+function archiveBasePath(addr) {
+  return siteUrl('file/' + String(addr || '').split('/').map(encodeURIComponent).join('/'));
+}
+// Which listing an href names, if it names one THIS page can draw: `{ member }` where '' is the
+// archive's own root. `null` for anything else — a file, another archive, another document — and
+// those must be left to the browser rather than guessed at.
+function zipTarget(href) {
+  const state = window.__b2pZip;
+  if (!state) return null;
+  const url = new URL(href, location.href);
+  const base = new URL(archiveBasePath(state.addr)).pathname;
+  if (url.pathname === base) return { url, member: '' };
+  if (!url.pathname.startsWith(base + '/')) return null;
+  let member = url.pathname.slice(base.length + 1);
+  try { member = decodeURIComponent(member); } catch (e) { /* keep it as it arrived */ }
+  return { url, member };
+}
+async function walkTo(href, push) {
+  const state = window.__b2pZip;
+  const target = zipTarget(href);
+  if (!state || !target) return;
+  document.title = `Index of ${state.label}`;
+  try {
+    resetPage('');
+    await renderZipPath(state.label, target.member, state.addr);
+  } catch (e) {
+    if (window.__b2pDebug) console.log('walk failed', String((e && e.stack) || e).split('\n').slice(0, 5).join(' | '));
+    location.assign(target.url.href);
+    return;
+  }
+  // The address changes only AFTER the listing is on screen, so a failure never leaves the browser
+  // on a url this page cannot draw.
+  if (push !== false) {
+    try { history.pushState({ b2pZip: target.member }, '', target.url.href); } catch (e) { /* file:// */ }
+  }
+}
+document.addEventListener('click', (event) => {
+  const a = event.target && event.target.closest ? event.target.closest('a') : null;
+  if (!a) return;
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey ||
+      event.shiftKey || event.altKey) return;
+  if (a.target && a.target !== '_self') return;    // a FILE opens its own tab, never this one
+  const target = zipTarget(a.href);
+  if (!target) return;
+  const base = new URL(archiveBasePath(window.__b2pZip.addr)).pathname;
+  const folder = target.url.pathname.startsWith(base + '/') &&
+    (target.url.pathname.endsWith('/') || /\.(zip|7z|tar|apk|jar)$/i.test(target.url.pathname));
+  if (target.member !== '' && !folder) return;     // a FILE is the browser's business
+  event.preventDefault();
+  walkTo(a.href);
+});
+window.addEventListener('popstate', () => {
+  if (zipTarget(location.href)) walkTo(location.href, false);
+});
 
 //
 // Two paths, in this order:
@@ -2996,6 +3081,9 @@ function addressFromLocation() {
 }
 
 async function run() {
+  // Any state from a previous address in THIS document is stale the moment run() starts: `walkTo`
+  // must never believe it describes the url the browser is on now.
+  window.__b2pZip = null;
   const where = addressFromLocation();
   let raw = where.raw;
   // Prefix grammar, left to right: `.` = an archive (its index page is up before the bytes arrive),
@@ -3181,6 +3269,10 @@ async function run() {
       // An id (or a `.bin`) has no archive suffix; the archive still saves as one.
       const label = sevenRoot || tarRoot ? src.name
         : (/[.](zip|apk|jar|tar)$/i.test(src.name) ? src.name : `${src.name}.zip`);
+      // From here on a FOLDER is walked in this document: the listing this page already holds is the
+      // whole archive, so a folder costs nothing at all (walkTo below). The address it was opened
+      // by and the heading label are all that state needs.
+      window.__b2pZip = { label, addr: typedToken };
       // A path INSIDE the archive: `/file/<archive>/docs/readme.txt` or `/file/<archive>/docs/`.
       if (member) {
         // No resetPage() here: the folder page replaces the shell by building its own, and clearing
@@ -3199,10 +3291,11 @@ async function run() {
       // without re-reading the archive's own directory first. NOT for a 7z: the worker has no 7z
       // decoder, so a shared plan would promise members it cannot unpack. Not for a `.tar` either:
       // the worker parses a ZIP directory, so its shared-plan member route cannot answer one.
-      if (!sevenRoot && !tarRoot) shareArchivePlan(typedToken || label);
-      // The rows: a tt2png index carries the archive's listing, so that copy costs no archive byte
-      // at all; anything else reads the central directory (one tail range).
+      // The rows FIRST: they are what sets the remembered size (a repeat visit's listing carries it),
+      // and `shareArchivePlan` asks for that size — before this swap it read the last part on a
+      // visit whose directory had been remembered all along (measured 2026-10-25).
       fillFolder(index, '', await rootRows());
+      if (!sevenRoot && !tarRoot) shareArchivePlan(typedToken || label);
       return;
     }
     if (mime.startsWith('image/')) {
