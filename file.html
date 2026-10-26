@@ -6,11 +6,6 @@
 <title>file</title>
 <script>
 
-// 2026-10-19: a media address is the player from the very first frame, and a `.txt` address is a TEXT
-// page from the very first frame, which for an ordinary tab means the canvas colour the UA picks from
-// `<meta name="color-scheme" content="light dark">` — the one node a `file:///` .txt tab has in its
-// head. A media name got that treatment and a text name did not, so a text page flashed black first.
-// `,<id>` says video outright, an extension says which kind, `?name.ext` can ride along with an id.
 try {
   const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
     || (/^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname) ? location.pathname.slice(1) : '')
@@ -70,19 +65,9 @@ try {
 <body>
 <script>
 'use strict';
-// ─── is this page the one that is deployed? ────────────────────────────────────────────────────
-// The service worker only answers `/__b2p/…`; this page itself comes from GitHub Pages' HTTP cache,
-// so a deploy could sit behind a 10-minute `max-age`. Ask for the file with the cache bypassed and
 
-// Where this page's own files live. It can BE the document of `/file/<name>` (the worker serves it
-// there so the typed address survives with no wrapper document), and then a relative URL resolves
-// under `/file/`, where IDSDICTIONARY.txt and b2p-stream.js do not exist. Everything internal is
-// built from the directory that HOLDS `/file`.
 const SITE_BASE = (() => {
-  // The `/file` SEGMENT, not `lastIndexOf('/file')`. That one also matches the first two letters of
-  // any later segment, so `/file/<id>/x/files/` put the base one folder too deep: file.html was then
-  // fetched from `…/x/file.html` (a 404, so the page stayed blank) and every href doubled — his
-  // report 2026-10-25, `…/game/files/` whose parent link pointed at `…/game/file/<id>/…/game/`.
+  
   const at = location.pathname.match(/\/file(\/|$)/);
   const dir = at ? location.pathname.slice(0, at.index + 1)
                  : new URL('.', location.href).pathname;
@@ -91,11 +76,7 @@ const SITE_BASE = (() => {
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
 const BUILD = '2026-10-25T09:38';
-// ─── is the WORKER's copy the deployed one? ────────────────────────────────────────────────────
-// `sw-ver.txt` is a hash of every file the worker answers from (404.html, 404.png, the renderer and
 
-// loaded, never on the way. So this runs on `load`, tells the worker to re-cache, and does nothing
-// else: the page on screen is already the bytes it asked for.
 async function checkSiteVersion() {
   if (!/^https?:$/.test(location.protocol)) return;
   try {
@@ -122,13 +103,7 @@ window.addEventListener('load', () => { checkSiteVersion(); });
     seen = sessionStorage.getItem(key) || '';
   } catch (e) {}
   try {
-    // The REAL file, never the `/file` route: that one can be answered by the worker from its own
-    // precache, which is exactly the copy this check has to see past.
-    //
     
-    // comparing the BUILD constant costs the first 8 KB, and only a REAL change then pays for the
-    // whole file — which is still fetched with `reload` below, because that copy is what gets put
-    // back into the worker's cache.
     const head = await fetch(siteUrl('file.html'),
                              { cache: 'no-store', headers: { Range: 'bytes=0-8191' } });
     if (!head.ok) return;
@@ -169,10 +144,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-// empty pair means "not baked" — the workspace copy, a local server — and the .txt is fetched the
-// way it always was. Baked, a name is resolved with NO request at all, and the list only goes over
-
-const BUILT_VER = "e48df226e956a33c";
+const BUILT_VER = "cf4018c281d35725";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -190,23 +162,28 @@ function fmt(n) {
 }
 function hex(n, w = 2) { return n.toString(16).padStart(w, '0'); }
 
-// ─── the page is the file, and nothing else ──────────────────────────────────────────────────
-// The document used to carry `<header id="where">`, `<div id="kind">`, `<div id="meta">` and
+function mbPerSec(bytesPerSec) {
+  const mb = bytesPerSec / 1048576;
+  if (!Number.isFinite(mb) || mb <= 0) return '';
+  return (mb >= 100 ? mb.toFixed(0) : mb >= 10 ? mb.toFixed(1) : mb.toFixed(2)) + ' MB/s';
+}
+function etaText(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 1) return '';
+  const s = Math.round(seconds);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const two = (n) => String(n).padStart(2, '0');
+  if (h) return `${h}h ${two(m)}m ${two(sec)}s`;
+  if (m) return `${m}m ${two(sec)}s`;
+  return `${sec}s`;
+}
 
-// meta name viewport, and video html, does it need those? I'm pretty sure not". They are gone: each
-// view builds exactly the node it is — a <pre>, an <img>, a <video>, or Apache's table — directly in
-// the body, and a payload view strips the stylesheet and the script that built it.
 function resetPage(cls) {
   for (const n of [...body.childNodes]) n.remove();
   body.className = cls || '';
   body.removeAttribute('style');
   document.documentElement.removeAttribute('style');
 }
-// What a `file:///` tab has in its head for this kind of payload: one meta, no stylesheet, no script.
 
-// Brave: a .txt tab is `<head><meta name="color-scheme" content="light dark"></head>` with one <pre>
-// in the body; a .webm tab is `<head><meta name="viewport" content="width=device-width"></head>`
-// with one <video>.
 function bareHead(kind) {
   for (const n of [...document.head.childNodes]) n.remove();
   const meta = document.createElement('meta');
@@ -293,8 +270,6 @@ function parseDictionary(text) {
   }
   return map;
 }
-// The BAKED list is the first answer, and it is free. `force` asks the worker for the copy it has NOT
-// given us yet (`?fresh=`), which is the ONLY time this page goes to the network for the list — a
 
 async function dictionary(force) {
   if (!force) {
@@ -357,13 +332,9 @@ async function resolveToken(token) {
     const hash = await sha256(new TextEncoder().encode(name));
     let record = (await dictionary()).get(hash);
     
-    // separately if it truly did not find the id it was talking about"). A deploy that added this
-    // name after the page was built is found here — never on the happy path.
     if (!record) record = (await dictionary(true).catch(() => null) || new Map()).get(hash);
     if (record) return { name, urls: pbsUrls(await idsDecrypt(name, record)) };
     
-    // extension on it. Strip the extension; if what is left is a pbs id, that IS the media id, so the
-    // player stays up and pbs answers. Only a 404 from pbs may end on the art.
     const stem = name.replace(/\.[A-Za-z0-9]+$/, '');
     if (stem && stem !== name && PBS_ID.test(stem)) {
       return { name, urls: pbsUrls(stem), guess: true };
@@ -619,8 +590,7 @@ async function wholeFile(onProgress) {
   // Every chunk, in order. Only a download (Download Zip) or a packed archive gets here — the
   // directory and a member are ranges.
   if (src.tt) {
-    // A few chunks at a time, counted out: one after another was the sequential fetch he called out
-    // on 2026-10-25, and `ttChunk` caches per index, so order does not matter.
+    
     const n = src.tt.chunks.length;
     const pieces = new Array(n);
     let done = 0;
@@ -646,9 +616,7 @@ async function wholeFile(onProgress) {
 // ─── mime, by name first ─────────────────────────────────────────────────────────────────────
 const MIME_BY_EXT = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
-  // `.ico` was in the ICON lists but not here, so `mimeFromName('favicon.ico')` was empty, the sniff
-  // did not know the signature either, and a favicon ended on the "cannot render it" screen (his
-  // report 2026-10-25). Chromium draws a blob labelled `image/x-icon`, so one line is the whole fix.
+  
   bmp: 'image/bmp', ico: 'image/x-icon', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
   mp3: 'audio/mpeg', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac',
   wav: 'audio/wav', m4a: 'audio/mp4',
@@ -663,9 +631,7 @@ function mimeFromName(name) {
   const ext = (String(name || '').match(/\.([A-Za-z0-9]+)$/) || [])[1];
   return (ext && MIME_BY_EXT[ext.toLowerCase()]) || '';
 }
-// ─── a zip of the folder in front of you ──────────────────────────────────────────────────────
 
-// already being fetched, and a second deflate pass in the page would cost more time than it saves.
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -712,15 +678,6 @@ function zipOf(entries) {                 // [{ path, bytes }] → the archive, 
   return concat([...locals, cd, eocd]);
 }
 
-// `saveBytes` hands over a Blob, so the download exists only once its LAST byte does: the page sat
-// on "zipping…" and the browser's download list stayed empty until the whole archive was rebuilt in
-// memory. The worker can answer with a ReadableStream instead — the browser saves each member as it
-// is read, and its own download bar moves. Two things had to be measured rather than assumed
-// (2026-10-25, real Chromium):
-//   * a `<a download>` request answered by a worker is CANCELED — the same response saved fine when
-//     the request was a navigation, so the save is started from a hidden IFRAME;
-//   * `event.clientId` on that request is the FRAME's, so the page asks the worker for its own id
-//     (one `whoami` message) and puts it in the job — that is how "(5/10)" reaches the link.
 const ZIP_JOBS = new Map();          // job id → the function that renders its progress
 let pageClientId = '';
 let clientWaiter = null;              // one in-flight `whoami` ask
@@ -772,13 +729,7 @@ async function startStreamedSave(job, onProgress) {
     }));
   } catch (e) { return null; }
   if (onProgress) ZIP_JOBS.set(id, onProgress);
-  // A LINK CLICK — a plain top-level navigation, not `<a download>` and not a hidden iframe. All
-  // three were measured in Chromium on 2026-10-25: a `download`-attribute request answered by a
-  // worker is CANCELED; a hidden iframe is a background download the browser may never surface (his
-  // report: "there is no progressive downloading … I should see it in Ctrl+J"); a NAVIGATION whose
-  // answer carries `Content-Disposition: attachment` is the browser's own download — it appears in
-  // the download list at once, fills in as the worker streams, and the listing page stays up because
-  // a download is not a navigation the page can lose.
+  
   const a = document.createElement('a');
   a.href = new URL('__b2p/zip/?id=' + encodeURIComponent(id), streamScriptUrl()).href;
   a.rel = 'noopener';
@@ -803,9 +754,18 @@ function planForWorker(name, mime) {
 function canStreamArchive() {
   return !src.packed && !src.direct && Array.isArray(src.urls) && src.urls.length > 0;
 }
-// The link's own text IS the progress line: "zipping… (5/10)", "fetching… 3.2 MB / 16 MB". Both the
-// worker's messages and the in-page loop feed this one function, so the two paths read the same.
+// The link's own text IS the progress line: "zipping… (5/10)", "fetching… 3.2 MB / 16 MB · 1.8 MB/s
+// · ETA 9s". Both the worker's messages and the in-page loop feed this one function, so the two paths
+// read the same.
+//
+// The rate is the SLOPE over the last few seconds of samples, never since the click: a slow first
+// request or a stall would otherwise colour the number for the rest of the download. Nothing is shown
+// until the window holds real movement and real time, so the line cannot claim a million MB/s off a
+// 2 ms gap between two messages.
+const RATE_WINDOW_MS = 4000;
 function progressOn(link, label, restore) {
+  const clock = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+  const samples = [];                        // { t, b }: byte counts of the last few seconds
   return (p) => {
     if (!p) return;
     if (p.error) {
@@ -814,8 +774,31 @@ function progressOn(link, label, restore) {
       status(`${label.replace('…', '')} failed — ${p.error}`, true);
       return;
     }
+    // A folder's message counts FILES and carries the zip's bytes beside the count; a whole-file
+    // job's count IS bytes (`unit: 'bytes'`). Both become one line.
+    const bytes = Number(p.bytes != null ? p.bytes : (p.unit === 'bytes' ? p.done : 0)) || 0;
+    const bytesTotal = Number(p.bytesTotal != null ? p.bytesTotal : (p.unit === 'bytes' ? p.total : 0)) || 0;
+    const t = clock();
+    if (bytes > 0) {
+      samples.push({ t, b: bytes });
+      while (samples.length > 2 && t - samples[0].t > RATE_WINDOW_MS) samples.shift();
+    }
+    let rate = 0;
+    if (samples.length >= 2) {
+      const a = samples[0], z = samples[samples.length - 1];
+      const dt = (z.t - a.t) / 1000;
+      if (dt >= 0.4 && z.b > a.b) rate = (z.b - a.b) / dt;
+    }
+    const left = rate > 0 && bytesTotal > bytes ? (bytesTotal - bytes) / rate : 0;
+    const bits = [];
+    if (bytesTotal) bits.push(`${fmt(bytes)} / ${fmt(bytesTotal)}`);
+    if (p.unit === 'files' && Number.isFinite(Number(p.total))) bits.push(`(${p.done}/${p.total})`);
+    const speed = mbPerSec(rate);
+    if (speed) bits.push(speed);
+    const eta = etaText(left);
+    if (eta) bits.push(`ETA ${eta}`);
     link.dataset.busy = '1';
-    link.textContent = p.unit === 'bytes' ? `${label} ${fmt(p.done)} / ${fmt(p.total)}` : `${label} (${p.done}/${p.total})`;
+    link.textContent = bits.length ? `${label} ${bits.join(' · ')}` : `${label} (${p.done}/${p.total})`;
     if (p.total && p.done >= p.total) {
       // The browser is still writing the last bytes; put the link back once it has them.
       setTimeout(() => { link.dataset.busy = ''; link.textContent = restore; }, 2500);
@@ -923,13 +906,7 @@ function isManifestHead(bytes) {
   const t = new TextDecoder('latin1').decode(bytes.subarray(0, 20));
   return t.startsWith('#bin2png-manifest');
 }
-// ONE read of the payload's head, answering both questions a player start has to ask: is the payload
 
-// blindspots.webm` is a .webm by name and a manifest by content)? The raw head is what tells the first
-// one; the second needs the INFLATED prefix, because a packed head reads `B2PZ…` and says nothing.
-// Measured 2026-10-19: `x-draft.py` packs the master, so `/file/<id>.webm` peeked at `B2PZ`, never saw
-// the manifest, and handed the player the 1 KB manifest TEXT as a video — readyState 0 forever —
-// while the same id with a `,` in front worked, because run()'s SNIFF unpacks before deciding.
 async function peekForRender() {
   const raw = await peekHead(4096).catch(() => null);
   if (!raw) return { raw: null, plain: null, packed: false };
@@ -952,12 +929,7 @@ async function renderMedia(mime) {
       return renderMedia(mimeFromName(master.name) || '');
     }
   }
-  // The OTHER payload that wears a media name: a tt2png index. The FILE lives on TikTok's CDN and the
-  // payload is the JSON that names its chunks, so a player handed those 1 KB cannot decode anything.
   
-  
-  // form because run()'s SNIFF saw JSON and took the index path, while a `.webm` name went straight
-  // to a player. A media container never begins with `{`, so this cannot catch a real video.
   if (head.plain) {
     const text = new TextDecoder('utf-8', { fatal: false }).decode(head.plain.subarray(0, 64)).trimStart();
     if (text.startsWith('{') || text.startsWith('[')) {
@@ -985,9 +957,7 @@ async function renderMedia(mime) {
     if (url) setMediaSource(el, url, mime);
     else setMediaSource(el, URL.createObjectURL(new Blob([await wholeFile()], { type: mime })), mime);
   }
-  // The one address that can still turn out not to exist: a pbs id guessed from `id.mp4`. The player
   
-  // the art). `run()` asks pbs first; this is the fallback when that request could not answer.
   if (src.guess) {
     el.addEventListener('error', () => { if (!el.readyState) show404(); }, { once: true });
   }
@@ -1214,10 +1184,6 @@ async function sniffSource() {
     return { mime: sniffMime(unpacked || head), packed, head };
   } catch (e) {
     
-    // a tiny part 1, so the capacity check threw "part 1 holds 0 B" and the whole address fell
-    // through to "application/zip — this page cannot render it": no listing, no `Index of /`.
-    // A part that is short is a DESCRIPTION, not corruption — read it without the assertion and let
-    // `followIndex` decide what it describes.
     const head = await partPayloadLoose(0).catch(() => null);
     if (!head) throw e;
     return { head, mime: '', packed: isPacked(head), short: e.message };
@@ -1257,16 +1223,6 @@ function parseCentral(block, at, entries, cdSize, cdOff, total) {
   return { files, total };
 }
 
-// ─── an archive INSIDE an archive is unpacked ONCE, per browser ───────────────────────────────
-
-// cached or not. It is not a cache bug in the worker: the inner `.7z` is a COMPRESSED member of the
-// outer zip, so unpacking it means inflating all of it, and nothing remembered the result — each
-// reload paid the whole archive again, then ran 7-Zip over it again.
-//
-// What is remembered, in the page's own Cache API, keyed by the ROOT archive's content (its sha256
-// when the index carries one) plus the member's path: the inflated member bytes, a `.7z`'s listing,
-// and the files extracted out of a `.7z`. So the second visit to that same address costs 0 bytes and
-// no 7-Zip run — the 7 MB is the archive being big, paid once.
 const MEMO_CACHE = 'b2p-memo-v1';
 const MEMO_MAX_BYTES = 64 * 1024 * 1024;   // a member bigger than this is read, never stored
 let memoBase = null;
@@ -1369,12 +1325,7 @@ function apacheDate(d) {
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
          `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
-// ─── the listing: Chrome's `file:///` directory page, node for node ───────────────────────────
-// His saved tab (2026-10-25) IS the spec: `<h1>` with the bottom rule, `[parent directory]`, a
-// Name / Size / Date Modified table with Chrome's own icons, "135 kB" sizes, "10/18/26, 5:13:38 PM"
-// dates and sortable headers. The icons and the CSS below are that page's own. What this page adds
-// is CONTENT: a folder opens the same page one level down, a file is an address inside the archive,
-// and the download link sits under the parent link.
+
 const ICON_FILE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAABnRSTlMAAAAAAABupgeRAAABEElEQVR42nRRx3HDMBC846AHZ7sP54BmWAyrsP588qnwlhqw/k4v5ZwWxM1hzmGRgV1cYqrRarXoH2w2m6qqiqKIR6cPtzc3xMSML2Te7XZZlnW7Pe/91/dX47WRBHuA9oyGmRknzGDjab1ePzw8bLfb6WRalmW4ip9FDVpYSWZgOp12Oh3nXJ7nxoJSGEciteP9y+fH52q1euv38WosqA6T2gGOT44vry7BEQtJkMAMMpa6JagAMcUfWYa4hkkzAc7fFlSjwqCoOUYAF5RjHZPVCFBOtSBGfgUDji3c3jpibeEMQhIMh8NwshqyRsBJgvF4jMs/YlVR5KhgNpuBLzk0OcUiR3CMhcPaOzsZiAAA/AjmaB3WZIkAAAAASUVORK5CYII=';
 const ICON_DIR = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABt0lEQVR42oxStZoWQRCs2cXdHTLcHZ6EjAwnQWIkJyQlRt4Cd3d3d1n5d7q7ju1zv/q+mh6taQsk8fn29kPDRo87SDMQcNAUJgIQkBjdAoRKdXjm2mOH0AqS+PlkP8sfp0h93iu/PDji9s2FzSSJVg5ykZqWgfGRr9rAAAQiDFoB1OfyESZEB7iAI0lHwLREQBcQQKqo8p+gNUCguwCNAAUQAcFOb0NNGjT+BbUC2YsHZpWLhC6/m0chqIoM1LKbQIIBwlTQE1xAo9QDGDPYf6rkTpPc92gCUYVJAZjhyZltJ95f3zuvLYRGWWCUNkDL2333McBh4kaLlxg+aTmyL7c2xTjkN4Bt7oE3DBP/3SRz65R/bkmBRPGzcRNHYuzMjaj+fdnaFoJUEdTSXfaHbe7XNnMPyqryPcmfY+zURaAB7SHk9cXSH4fQ5rojgCAVIuqCNWgRhLYLhJB4k3iZfIPtnQiCpjAzeBIRXMA6emAqoEbQSoDdGxFUrxS1AYcpaNbBgyQBGJEOnYOeENKR/iAd1npusI4C75/c3539+nbUjOgZV5CkAU27df40lH+agUdIuA/EAgDmZnwZlhDc0wAAAABJRU5ErkJggg==';
 const ICON_UP = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAACM0lEQVR42myTA+w1RxRHz+zftmrbdlTbtq04qRGrCmvbDWp9tq3a7tPcub8mj9XZ3eHOGQdJAHw77/LbZuvnWy+c/CIAd+91CMf3bo+bgcBiBAGIZKXb19/zodsAkFT+3px+ssYfyHTQW5tr05dCOf3xN49KaVX9+2zy1dX4XMk+5JflN5MBPL30oVsvnvEyp+18Nt3ZAErQMSFOfelCFvw0HcUloDayljZkX+MmamTAMTe+d+ltZ+1wEaRAX/MAnkJdcujzZyErIiVSzCEvIiq4O83AG7LAkwsfIgAnbncag82jfPPdd9RQyhPkpNJvKJWQBKlYFmQA315n4YPNjwMAZYy0TgAweedLmLzTJSTLIxkWDaVCVfAbbiKjytgmm+EGpMBYW0WwwbZ7lL8anox/UxekaOW544HO0ANAshxuORT/RG5YSrjlwZ3lM955tlQqbtVMlWIhjwzkAVFB8Q9EAAA3AFJ+DR3DO/Pnd3NPi7H117rAzWjpEs8vfIqsGZpaweOfEAAFJKuM0v6kf2iC5pZ9+fmLSZfWBVaKfLLNOXj6lYY0V2lfyVCIsVzmcRV9Y0fx02eTaEwhl2PDrXcjFdYRAohQmS8QEFLCLKGYA0AeEakhCCFDXqxsE0AQACgAQp5w96o0lAXuNASeDKWIvADiHwigfBINpWKtAXJvCEKWgSJNbRvxf4SmrnKDpvZavePu1K/zu/due1X/6Nj90MBd/J2Cic7WjBp/jUdIuA8AUtd65M+PzXIAAAAASUVORK5CYII=';
@@ -1392,8 +1343,6 @@ const INDEX_CSS = `
   #parentDirLinkBox, #downloadBox { margin-bottom: 10px; padding-bottom: 10px; }
 `;
 
-// site already ships in `icons/` — a folder, an image, a video, a sound, an archive, text/code, and
-// the grey ones for everything else. The slot, the padding and the position stay Chrome's.
 const ICON_BY_KIND = {
   image2: 'png jpg jpeg gif webp bmp ico svg avif tif tiff heic'.split(' '),
   movie: 'mp4 m4v mov webm mkv avi wmv flv'.split(' '),
@@ -1425,12 +1374,7 @@ function fmtDate(d) {
   return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}, ` +
          `${(h % 12) || 12}:${p(d.getMinutes())}:${p(d.getSeconds())} ${h >= 12 ? 'PM' : 'AM'}`;
 }
-// The page is built BEFORE the directory is read, so a `.`-address shows "Index of …" at once and
 
-//
-
-// (a row's address is `/file/<archive>/<path>`, never doubled), `parentHref` adds the
-// `[parent directory]` box, and `downloadDir` puts "Download current dir as zip" under it.
 function indexView(label, total, opts) {
   opts = opts || {};
   const baseLabel = opts.base || label;
@@ -1465,8 +1409,6 @@ function indexView(label, total, opts) {
     a.id = 'parentDirLink';
     a.className = 'icon up';
     a.href = opts.parentHref;
-    // A folder is walked in the SAME tab: the url becomes the folder's address and the page becomes
-    // its `Index of` — exactly what a file manager does. Only a FILE (an image, a text, a video) is a
     
     const span = document.createElement('span');
     span.id = 'parentDirText';
@@ -1594,9 +1536,7 @@ function indexView(label, total, opts) {
     const sizeTd = document.createElement('td');
     sizeTd.className = 'detailsColumn';
     sizeTd.dataset.value = String(Number.isFinite(size) ? size : 0);
-    // A folder has no byte count of its own, and an archive records none — a blank cell reads as a
     
-    // folders don't have ids or size, it's just weird").
     sizeTd.textContent = cls === 'dir' ? '-' : fmtSize(size);
     const dateTd = document.createElement('td');
     dateTd.className = 'detailsColumn';
@@ -1622,9 +1562,7 @@ function indexView(label, total, opts) {
       // listing has — so a click is a new tab at that path, never a save. Only a direct `https://`
       // archive has no path to spell, and there the row stays a download.
       const href = src.direct ? null : memberHref(baseLabel, f.path);
-      // An archive row is a LISTING too: `.zip`/`.apk`/`.jar`/`.7z` inside an archive opens its own
       
-      // opening a new tab even though nothing about it is a file you view).
       const listsHere = f.dir || /\.(zip|apk|jar|7z|tar)$/i.test(f.path);
       const a = addRow(listsHere ? 'dir' : 'file', text, f.dir || href ? null : async (el) => {
         el.textContent = text + ' …';
@@ -1650,11 +1588,6 @@ function indexOf(files, total, label) {
   return view;
 }
 
-// ─── a path INSIDE an archive: a member, a folder, or an archive in an archive ─────────────────
-// The address is the same shape a `file:///` path has — `/file/<archive>/<path>` — so a member is
-// its own tab (the worker answers it with the file ITSELF: right type, `Content-Disposition:
-// inline`, ranges), a folder is an `Index of` page of its direct children, and a `.zip` inside a
-
 function findEntry(files, want) {
   const w = String(want || '').replace(/\/+$/, '');
   if (!w) return null;
@@ -1668,12 +1601,6 @@ function findEntry(files, want) {
   return inside ? { path: w + '/', size: 0, dir: true, modified: null } : null;
 }
 
-// The INDEX's listing of an archive inside the uploaded file. `archives` is keyed by the member's
-// path from the archive ROOT (`Burrow/burrow-client-main.zip`), and an address may name that archive
-// by its last segment only (`…/burrow-client-main.zip/…`) — `findEntry` resolves that (it matches
-// `endsWith('/' + name)`), the key lookup did not, so the listing fell through to reading the whole
-
-// pulled 52.5 MB, with it 0.1 MB. Exact key first, then a suffix, then the bare name.
 function ttArchiveIndex(...keys) {
   const map = (src.tt && src.tt.archives) || null;
   if (!map) return null;
@@ -1701,11 +1628,6 @@ async function rootRows() {
 // byte offsets, so nothing below can be a range).
 let central = null;
 
-// be put in local storage for the service worker to get, so if you ever visited the path before, it
-// shall load the directory entirely grabbing locally and quick"). Reading an archive's directory is
-// a walk to its tail — for a part-based upload that is a whole 2.4 MB part — and it does not change
-// between visits, so the entries (name, size, date, and the offsets that make a member a range) go
-// into the same Cache-API memo the inner archives already use. A repeat visit lists with NO request.
 function centralListing() {
   if (!central) central = (async () => {
     // The memo namespace is already this payload (`memoRoot` = sha256 of the tt index's own sha256,
@@ -1740,10 +1662,7 @@ function centralListing() {
       try {
         listing = await zipFromMemory(bytes);
       } catch (notZip) {
-        // Not a zip at all: a `.7z` uploaded on its own, which the uploader now lists in the index
         
-        // parser — and the listing comes from the index when there is one, so 7-Zip only runs when
-        // a member is actually opened.
         if (!isSevenBytes(bytes) && !/\.7z$/i.test(src.name || '')) throw notZip;
         const seven = await openSevenZip(async () => bytes, src.name || 'archive.7z', 'root',
                                          src.tt && !src.tt.inner ? src.tt : null);
@@ -1778,8 +1697,6 @@ function listedMember(f) {
 // The address of one path inside an archive: `/file/<archive>/<path>`.
 function memberHref(label, path) {
   const rel = String(path).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
-  // The label may itself be a PATH (`<id>/folder/inner.zip`), so it is encoded SEGMENT BY SEGMENT.
-  // Encoded whole, its slashes became `%2F` and the address was one 90-character name that resolved
   
   const base = String(label || 'archive.zip').split('/').map(encodeURIComponent).join('/');
   return siteUrl('file/' + base + '/' + rel);
@@ -1819,11 +1736,6 @@ function fillFolder(view, prefix, files) {
   return list;
 }
 
-// A FOLDER inside an archive: its own `Index of` page, `[parent directory]`, and its own zip.
-// `zipBytes` is set when the archive being listed is one INSIDE another: a GETTER for its bytes, its
-// Download Zip — never the outer payload, and never fetched until somebody clicks it. `addr` is the
-// address the page was OPENED with — the id he typed,
-
 async function renderZipFolder(label, prefix, files, read, zipBytes, addr, parentHref, spanBase) {
   prefix = String(prefix || '').replace(/^\/+/, '');
   if (prefix && !/\/$/.test(prefix)) prefix += '/';
@@ -1832,12 +1744,8 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
   const innerName = label.replace(/^.*\//, '') || 'archive.zip';
   const view = indexView(shown, 0, {
     base: addr,
-    // A folder's parent is the folder above it. An ARCHIVE opened from inside another has no prefix of
-    // its own, so it is handed the address of the listing it came from — otherwise its page had no
     
     parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
-    // At an archive's ROOT: its own bytes when this is an archive inside another (zipBytes), else
-    // the whole upload — which is the same thing the root page run() draws, so walking back to the
     
     downloadZip: prefix ? null : (zipBytes ? async () => {
       const bytes = await zipBytes();
@@ -1853,13 +1761,6 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
   return view;
 }
 
-// Walk INTO an address: `/file/<outer>/<inner.zip>/<dir>/<file>`. Every archive on the way is
-// opened, so a zip in a zip is listed and entered exactly like the outer one.
-//
-// A FOLDER is walked too, and this is the bug he hit on 2026-10-25: `/file/<id>/CM3D2 mod repo/
-// BD style dildo.7z/README.txt` stopped at the first segment because it was not an archive, so the
-// rest of the path was looked up in the OUTER zip and reported as missing. Folders are plain
-// prefixes of the same listing — stepping into one changes nothing but the path.
 async function resolveArchivePath(rawPath) {
   const parts = String(rawPath || '').split('/').filter(Boolean);
   const consumed = [];     // archive names opened on the way (a 7z costs a run of JS7z)
@@ -1879,7 +1780,7 @@ async function resolveArchivePath(rawPath) {
     const archive = entry && !entry.dir && /\.(zip|apk|jar|7z|tar)$/i.test(name);
     if (archive) {
       parts.shift();
-      // Where this archive sits from the ROOT (`CM3D2 mod repo/Cat suit.7z`) — the name everything
+      // Where this archive sits from the ROOT (`some folder/some archive.7z`) — the name everything
       // read out of it is remembered under, so visit two is free.
       const at = walked.concat([name]).join('/');
       const reader = read;
@@ -1928,17 +1829,9 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   const addrBase = baseAddr || baseLabel;
   const { consumed, walked, within, base, files, rest, read, lastWasArchive, bytes: deepest, spanBase } =
     await resolveArchivePath(rawPath);
-  // Two different things, and they must not be mixed:
-  //   the LABEL says the archives opened (`Index of x.zip/inner.7z`) — a folder is not a file;
-  //   the ADDRESS carries EVERY segment (`/file/<id>/folder/inner.zip/docs/`), because that is what
   
   const label = consumed.length ? `${baseLabel}/${consumed.join('/')}` : baseLabel;
-  // Two layers, kept apart on purpose: the heading says the NAME (`Index of Pictures.zip`), the
   
-  //
-  // And two ADDRESSES, because a row's href is `<address>/<member path>` where the member path already
-  // carries its folders: a folder page hands its rows the ARCHIVE's address (`…/<id>/x.zip`), while a
-  // nested archive's page hands them the address of that archive, folders and all.
   const addrArch = consumed.length ? `${addrBase}/${consumed.join('/')}` : addrBase;
   const addrWalk = walked.length ? `${addrBase}/${walked.join('/')}` : addrBase;
   // The page we are about to draw is the LISTING of the thing the loop ended on. When that thing is an
@@ -1946,9 +1839,7 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   // what makes the url resolve. A folder page hands its rows the archive's address instead, because
   // those rows spell their own prefixes.
   if (rest === '' || /\/$/.test(rest)) {
-    // An ARCHIVE opened from inside another gets the address of the listing it came from, or its page
     
-    // folder of a zip). A folder's own parent is computed from its prefix, as before.
     const up = lastWasArchive && walked.length > 1 ? walked.slice(0, -1).join('/') : '';
     // An ABSOLUTE url, both ways: a bare label resolved against the current path and produced
     // `/file/<id>/<id>` (measured live 2026-10-25).
@@ -1960,9 +1851,6 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   const entry = findEntry(files, rest);
   if (!entry) {
     
-    // `…/back_zipper.zip/jj` said the file was missing and then left no `[parent directory]`, so
-    // there was no route out of it). Throw nothing: draw the folder it was meant to be in, with the
-    // reason as the status line — the rows, the parent link and the address all still work.
     const dir = rest.replace(/[^/]+$/, '');
     const up = lastWasArchive && walked.length > 1 ? walked.slice(0, -1).join('/') : '';
     const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
@@ -1993,11 +1881,6 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   await renderBytes(await read(entry.path), entry.path.replace(/^.*\//, ''), label);
 }
 
-// ─── folders are INSTANT: the listing is already in this page ────────────────────────────────
-// A folder inside this archive is a PREFIX of the listing the page already holds, so opening one
-
-// shall be smooth and seamless and instant … it shall work on slow internet"). The address still
-// changes and Back still works, because it is a history entry, not a new document.
 function archiveBasePath(addr) {
   return siteUrl('file/' + String(addr || '').split('/').map(encodeURIComponent).join('/'));
 }
@@ -2053,13 +1936,6 @@ window.addEventListener('popstate', () => {
   if (zipTarget(location.href)) walkTo(location.href, false);
 });
 
-//
-// Two paths, in this order:
-//   1. STREAMED by the worker — it reads the archive's own directory and writes each member into a
-//      zip as the browser saves it, so the download shows up immediately and its bar moves. The
-//      member list comes from the file, not from this page, so it cannot disagree with it.
-//   2. In the page, when the worker cannot help (a packed payload, an archive inside another, a 7z,
-//      no service worker at all): the members are read a few at a time and counted out.
 async function downloadFolder(label, prefix, files, read, spanBase, onProgress) {
   const members = files.filter((f) => !f.dir && f.path.startsWith(prefix) && f.path.length > prefix.length);
   if (!members.length) throw new Error('this folder is empty');
@@ -2071,11 +1947,7 @@ async function downloadFolder(label, prefix, files, read, spanBase, onProgress) 
     // still in Content-Length, so the page fetches nothing just to learn how big the file is (a
     // tt2png index already states it — `planForWorker` passes that through).
     const plan = planForWorker(label, 'application/zip');
-    // A folder inside a STORED archive of this file: its members are byte ranges too, just further in,
-    // so the worker is told where (`base`) and which ones. Without this the page had to decode the
     
-    // "the downloading to show in the browser is still not happening, it only does it when all the
-    // files are all decoded".
     let list = null;
     if (spanBase > 0) {
       list = members.map((f) => ({ name: f.path, localOff: Number(f.localOff), size: Number(f.size) || 0,
@@ -2101,11 +1973,7 @@ async function downloadFolder(label, prefix, files, read, spanBase, onProgress) 
   saveBytes(bytes, name, 'application/zip');
   return { name, size: bytes.length };
 }
-// ─── a 7z INSIDE the archive: listed and read with JS7z (vendored, lazy) ──────────────────────
 
-// threaded one needs SharedArrayBuffer, and a browser only exposes that on a cross-origin-isolated
-// page — GitHub Pages sends no COOP/COEP headers. It is fetched ONLY when a `.7z` is opened, and
-// every operation gets a FRESH runtime: an Emscripten `main()` may run once per runtime.
 let js7zLoading = null;
 function loadJs7z() {
   if (!js7zLoading) js7zLoading = (async () => {
@@ -2221,12 +2089,7 @@ async function openSevenZip(getBytes, entryPath, stamp, indexed) {
     },
   };
 }
-// ─── a .tar is browsable too, and for free ────────────────────────────────────────────────────
 
-// and a Download button. That was not stale code — `.tar` was simply never in the page's archive
-// list, so a format whose header block is 512 plain bytes was treated as an opaque blob. It is the
-// EASIEST archive there is: every member is STORED, so a member is a byte range like a stored zip
-// member, and the whole directory is a walk of 512-byte blocks — no library, no JS7z, no inflate.
 function tarText(b, at, len) {
   let s = '';
   const end = Math.min(at + len, b.length);
@@ -2332,16 +2195,6 @@ async function wholeSpan() {
   } catch (e) { return null; }
 }
 
-// ─── a STORED member is a byte range, so its own directory is too ────────────────────────────
-// `…/CM3D2 mod repo/Robomaid.zip/README.txt` moved 7,273 KB for a 45 KB answer (his measurement
-// 2026-10-25). The entry in the outer archive is method 0 — stored, size == csize == 7,386,123 B —
-// so its bytes are a plain range of the outer file and NOTHING is decompressed. The cost was
-// `openInnerArchive` only knowing `getBytes()`: read the whole member, then parse it in memory.
-//
-// These two read the inner archive the way the outer one is read: the end-of-directory record is
-// the last ≤64 KB of the member, the central directory is one read after it, and a member's bytes
-// are its own range. `parseCentral` already takes "block byte 0 is absolute offset `at`", so it
-// parses a block that starts AT the directory.
 async function zipDirRanged(range, size) {
   const tailLen = Math.min(size, 65557);
   const tail = await range(size - tailLen, size - 1);
@@ -2402,10 +2255,6 @@ function indexedEntry(f) {
            localOff: f.off, csize: f.csize, method: f.method };
 }
 
-// What a memoized listing has to carry to be USABLE: a zip member is read by its `localOff`,
-// `csize` and `method`, and an entry rebuilt from the five display fields has none of them — his
-// report 2026-10-25, `…/back_zipper.zip/img20180525120905.png` on the second visit said "the member
-// local header is not where the directory says it is" because `localOff` had not been stored.
 function keepEntry(f) {
   // `crc` rides along too: a remembered listing is what the worker is handed to STREAM a folder out
   // of this archive, and a zip header that states the wrong CRC is a file that unpacks to an error.
@@ -2468,12 +2317,6 @@ async function openInnerArchive(getBytes, path, stamp, stored, indexed) {
   };
 }
 
-// The whole payload, saved under the name the address gave it.
-//
-// STREAMED when the worker can read the file as ranges: the browser saves it as it arrives instead
-// of waiting for the last byte of a blob — and, because nothing is assembled in the page, there is
-
-// fetches each file one by one in the requests if you do Download zip").
 async function saveWholeArchive(onProgress) {
   const name = src.name || 'archive.zip';
   if (canStreamArchive()) {
@@ -2500,12 +2343,6 @@ async function extractFrom(block, f) {
   throw new Error(`member uses compression method ${f.method}, which this page cannot unpack`);
 }
 
-// ─── a tt2png index ───────────────────────────────────────────────────────────────────────
-// `tiktokupload.py` stores a file as chunks on TikTok's CDN and posts a small JSON index naming them:
-//   {"tool":"tt2png","name":"1hour.webm","bytes":12302071,"sha256":"…","chunks":[{url,size,sha256}]}
-// Each chunk is a 1×1 PNG with the payload APPENDED after its IEND, so the index has to be followed to
-
-// video was one level down.
 function parseTt2png(bytes) {
   let text = '';
   try { text = new TextDecoder('utf-8', { fatal: false }).decode(bytes); } catch (e) { return null; }
@@ -2531,16 +2368,7 @@ function chunkPayload(bytes) {
   }
   return null;
 }
-// ─── a tt2png ARCHIVE: the listing is in the index, the bytes are ranges of the chunks ─────────
-// `tiktokupload.py` reads an archive's own directory BEFORE uploading it and puts that listing in
-// the index (`archive: true`, `files`, `files_total`), so a zip's Index page costs exactly one
 
-// (a 5.8 KB packed index for an 8.4 MB `Pictures.zip`) downloaded both chunks before it would list
-// 27 names that were already in the index.
-//
-// A member is still a byte range: the chunks are cut at `chunk_size`, so byte N of the file is a
-// chunk plus an offset, and the worker's `ttPartPayload` reads only the part of that chunk's PNG it
-// needs (the payload starts at the PNG's own IEND). Cached here for the no-worker path.
 const ttWhole = new Map();
 async function ttChunk(i) {
   if (ttWhole.has(i)) return ttWhole.get(i);
@@ -2582,11 +2410,7 @@ async function ttPlanUrl() {
   ttPlan = new URL('__b2p/stream/?id=' + id, streamScriptUrl()).href;
   return ttPlan;
 }
-// Tell the worker which bytes make up THIS archive, so `/file/<archive>/<member>` is answered with
-// the member itself — its type, `Content-Disposition: inline; filename="…"`, ranges — instead of a
 
-// is exactly the path segment the member address carries. Fire and forget: without the plan the
-// page route renders a member anyway (one directory read, then its bytes).
 async function shareArchivePlan(label) {
   if (src.direct || src.packed) return;
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
@@ -2607,25 +2431,7 @@ async function shareArchivePlan(label) {
     }));
   } catch (e) { /* the renderer's own member route still works */ }
 }
-// ─── a tt2png video STARTS ON A BYTE RANGE, not on a whole part ───────────────────────────────
-// Until 2026-10-23 this page fetched every chunk, joined them, checked the sha256 and only then had
-// bytes a player could take: a 46 MB file had no <video> element until 23.5 s and its first frame
-// arrived at 24.0 s, after the last chunk landed at 22.5 s (measured).
-//
-// MediaSource is NOT the fix: the file is split at arbitrary byte offsets, and MSE only takes media
-// in its own segmenting (moof / cluster boundaries). Appending a plain MP4 fragment into a
-// SourceBuffer left the element at currentTime 0 with duration NaN (measured 2026-10-23).
-//
-// What the container itself allows: a faststart MP4 keeps its moov at the FRONT, so a Blob holding
-// only the head of the file already decodes. His 2026-10-23 follow-up — "it waits for the full 5mb
-// part, that's not needed" — was right, and the CDN answers ranges (`206 bytes 0-262143/5000070`,
-// measured), so the head is a RANGE REQUEST, not a chunk:
-//   moov ends 65,446 B into that 46 MB file, so 64 KB and 128 KB prefixes fail (MEDIA_ERR_DECODE)
-//   and 256 KB plays — measured, that is where TT_HEAD comes from.
-// Playback starts on those 256 KB; the rest of chunk 1 is fetched as `Range: bytes=262144-` (so no
-// byte is fetched twice), then chunks 2..n three ahead. The blob is rebuilt only when the player is
-// about to run dry, and every completed chunk is checked against its own sha256 as it lands — the
-// same guarantee as before, since a file whose every chunk matches is the file that was uploaded.
+
 const TT_HEAD = 262144;      // 256 KB: the measured floor for a faststart MP4 (128 KB fails)
 const TT_GRACE = 5;          // extend the blob when this few seconds of media remain
 const TT_AHEAD = 3;          // chunks fetched ahead of the one needed
@@ -2666,7 +2472,7 @@ async function renderTt2pngProgressive(index, mime) {
     if (have <= 1) return p0;
     return concat([p0, ...parts.slice(1, have)]);
   };
-  const play = () => el.play().catch(() => { el.muted = true; el.play().catch(() => { /* he can press it */ }); });
+  const play = () => el.play().catch(() => { el.muted = true; el.play().catch(() => {  }); });
   // Swap in whatever is in hand. The position is carried across, or the picture would restart at 0
   // every time the prefix grows.
   const show = () => {
@@ -2761,19 +2567,6 @@ async function renderTt2pngProgressive(index, mime) {
   return el;
 }
 
-// ─── the streaming path: ONE source, no reloads ────────────────────────────────────────────────
-// The blob approach above re-sets <source src> and calls load() each time the prefix grows — the
-// media element starts over, seeks back, and Chrome also raises MEDIA_ERR_DECODE at the end of every
-// truncated blob (recorded live 2026-10-23: 4 rewrites and 2 decode errors in 20 s). His word for it
-// was "it keeps refreshing the DOM on each part".
-//
-// So hand the bytes to the SERVICE WORKER instead: b2p-stream.js already streams a plan of parts
-// with real Range support (it is what makes `/file/<name>` and `/<id>` playable at all). A tt2png
-// index is such a plan — chunk urls, a capacity, a total — so the page writes it into the worker's
-// plan cache, points the element at `/__b2p/stream/?id=<id>` and never touches the DOM again. The
-// worker fetches each part's prefix on demand (`ttPartPayload`), windows open-ended ranges at 512 KB,
-// and the browser's own media stack does the buffering. Seeking works: a Range from the middle maps
-// to the part that holds it.
 async function renderTt2pngStream(index, mime) {
   if (!('serviceWorker' in navigator) || !navigator.serviceWorker) return null;
   const swUrl = new URL('../b2p-stream.js', location.href).href;
@@ -2910,8 +2703,7 @@ function followManifest(bytes) {
     if (!line || line.startsWith('#')) continue;
     const f = line.split('\t');
     if (f[0] === 'file' && f.length >= 4) files.push({ name: f[1], parts: [] });
-    // Column 3 is the pbs url (or its hash); column 4 is the NUMERIC media id upload returned, which
-    // is NOT a pbs id — using it made `?format=png` 404 (his 2026-10-19: "not a valid image id").
+    
     else if (f[0] === 'part' && f.length >= 3 && files.length) {
       files[files.length - 1].parts.push(f[2] || f[3]);
     }
@@ -2924,13 +2716,6 @@ function followManifest(bytes) {
   };
 }
 
-// ─── an address that points at a LIST, not at the file ────────────────────────────────────────
-// Two payloads name other payloads: a bin2png MASTER (`#bin2png-manifest v1`, one small part) and a
-// tt2png INDEX (JSON naming chunks on a CDN, which also carries the archive's own listing).
-// Following it is what makes the listing cost one small payload instead of every part — his
-
-// chunks before it would show a single name. `head` is the payload's first bytes, which every
-// caller has already read.
 let indexHops = 0;
 async function followIndex(head) {
   if (!head || src.tt || indexHops >= 2) return false;
@@ -2966,12 +2751,6 @@ let manifestDepth = 0;    // one hop only: a master that names a master is a bug
 let pendingVideo = null;  // the optimistic player: the SAME element gets the real stream
 let dictFreshOnce = false;  // one forced dictionary re-read per page, never a loop
 
-// The address earned nothing: white, centred, the art, one way home — the page 404.html shows. The
-// body is rebuilt first so a player or an index cannot sit underneath it.
-// The rules live HERE, not in the stylesheet: a media address strips <head> whole (`bareHead`),
-// and then a missing file used to paint in Times New Roman, hard against the left edge, with a
-
-// has not styled"). It is the SAME page 404.html shows: the art, then one way home.
 const NOTFOUND_CSS = `
   html, body { margin:0; min-height:100%; background:#fff; color:#1b1b1f;
     font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; }
@@ -3093,7 +2872,6 @@ function binaryView(bytes) {
 function addressFromLocation() {
   const hash = location.hash.replace(/^#/, '');
   if (hash) return { raw: decodeURIComponent(hash).trim(), hint: '' };
-  // `/file/<id>` and a bare `/<id>` at the site root are the same address; the second is the short
   
   const idAtRoot = /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
   const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
@@ -3112,9 +2890,7 @@ async function run() {
   window.__b2pZip = null;
   const where = addressFromLocation();
   let raw = where.raw;
-  // Prefix grammar, left to right: `.` = an archive (its index page is up before the bytes arrive),
   
-  // `/file/,<id>` prepares like the worker checks for webm/mp4, `/file/.<id>` is an archive.
   let ranged = false, forceMedia = false;
   for (;;) {
     if (raw.length > 1 && raw.startsWith('.')) { ranged = true; raw = raw.slice(1); continue; }
@@ -3133,15 +2909,10 @@ async function run() {
   // The first frame is decided by the ADDRESS alone: `,` says video, an extension in the path or in
   // `?name` says which element, `.` says the index page. Nothing is fetched to find out.
   const firstMime = where.hint ? mimeFromName(where.hint) : (ranged ? '' : mimeFromName(raw));
-  // The address AS TYPED, which is what every url this page writes keeps — an id stays an id, and
   
   const typedToken = raw.split('/')[0];
   let index = null;
-  // A PATH inside an archive puts the empty `Index of /` up IMMEDIATELY, the way a `.` address does
   
-  // already says so: there is a segment after the archive name, and a folder link always ends in `/`
-  // (our own rows write it that way). A last segment with an extension is a FILE — those keep their
-  // own blank tab and get no listing shell.
   if (!ranged && !forceMedia) {
     const inside = raw.includes('/');
     const lastSeg = raw.split('/').filter(Boolean).pop() || '';
@@ -3150,8 +2921,6 @@ async function run() {
     }
   }
   if (ranged) {
-    // `.` says archive, the way `,` says video: an EMPTY `Index of /` is on screen before a byte is
-    // read — the heading a file manager opens with — and the rows arrive when the directory does.
     
     index = indexView('/', 0, { base: typedToken });
   }
@@ -3170,9 +2939,7 @@ async function run() {
   } catch (e) {
     const cut = raw.indexOf('/');
     if (cut <= 0) {
-      // NOT FOUND — and a dictionary one deploy behind is the one fixable reason: re-read it ONCE
       
-      // loaded and it says 404, recache to check if video does actually exist").
       if (isNameToken(raw) && !dictFreshOnce) {
         dictFreshOnce = true;
         try {
@@ -3204,11 +2971,6 @@ async function run() {
   // zip's first member). A new address starts with an empty cache.
   partCache.clear();
   
-  // "let the two ends decide" for a FILE whose name may lie — but here the resolved name already says
-  // `.zip`, and probing it as an image decoded part 1 to 0 B (it is not an image at all), which threw
-  // and replaced the `Index of /` shell with a bare download page.
-  // A `.7z` is an archive too, and its name is enough to say so: the uploader lists it in the index
-  
   const namedArchive = /\.(zip|apk|jar|tar)$/i.test(src.name);
   const namedSeven = /\.7z$/i.test(src.name);
   let mime = src.ranged && !namedArchive && !namedSeven ? '' : mimeFromName(src.name);
@@ -3217,8 +2979,6 @@ async function run() {
   // Assigning one here would insert a <title> INTO the bare head — measured: `META:viewport,TITLE:`.
   if (!player && !index) document.title = src.name;
 
-  // An id carries no extension. Read the two ENDS before deciding — the last part says "zip" when
-  // its EOCD ends exactly at the last byte, the first part says video/text/image. Never the whole
   
   if (!mime && !zipByName) {
     try {
@@ -3258,9 +3018,7 @@ async function run() {
     if (!player && !index) document.title = src.name;
   }
 
-  // `id.mp4` where the id is not in the dictionary: pbs is the last word. One two-byte range says
   
-  // 2026-10-19: "if pbs also is 404, then you can go to the 404 page").
   if (src.guess) {
     try {
       const res = await fetch(src.urls[0], {
@@ -3279,8 +3037,6 @@ async function run() {
     // JS7z, never from a zip directory (there is none).
     const sevenRoot = !zipByName && (mime === 'application/x-7z-compressed' || namedSeven
                                      || /\.7z$/i.test(src.name));
-    // A `.tar` root gets the same `Index of` page, and unlike a 7z it costs nothing extra: the
-    // index lists it and a member is a byte range. It used to fall through to the download screen
     
     const tarRoot = !zipByName && !sevenRoot && (mime === 'application/x-tar'
                                                  || /\.tar$/i.test(src.name));
@@ -3306,8 +3062,6 @@ async function run() {
         await renderZipPath(label, member, typedToken);
         return;
       }
-      // The page is already up for a `.` address; only the rows were missing. Both branches carry
-      // the ADDRESS it was opened by as the href base — without `base`, a listing opened by id wrote
       
       if (index) index.setLabel(label);
       else index = indexView(label, 0, { base: typedToken });
@@ -3363,9 +3117,6 @@ async function run() {
     binaryView(bytes);
   } catch (e) {
     
-    // `/file/nothinghere` is a 11-character token, so it passes the pbs-id test, pbs answers 404,
-    // and the page printed "part 1: HTTP 404" instead of the art. The status line is left for
-    // failures that are NOT "it is not there" (a decode error, a CORS block, an offline fetch).
     if (src.guess || e.httpStatus === 404 || e.httpStatus === 410) show404();
     else status(e.message, true);
   }
