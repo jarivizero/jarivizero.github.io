@@ -36,7 +36,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "311f3a53db2ce6d3";
+const BUILT_VER = "a6490c38db15b85c";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 // A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
 // update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
@@ -445,6 +445,16 @@ async function serve(request, url) {
   // worker exists to avoid; Content-Range still states the real total, so the browser asks for the
   // next window the moment it wants more. Measured in the verifier: playback starts after ~22% of
   // part 1 instead of 100% of it.
+  //
+  //
+  // WHAT A WINDOW COSTS, measured 2026-10-26 on the real `cancan.mp4` (/specialized harness, one
+  // clock): six windows — 0-, 524288-, 1048576-, 1572864-, 2097152-, 2621440- — each a fresh read of
+  // the payload, and no metadata until the last one landed (loadedmetadata at 15.7 s; that file's
+  // moov is at its end, so the player wants the tail before it can build a timeline). Answering the
+  // SECOND ask whole instead (one long range) reached metadata at 7.8 s — but it read the middle of
+  // the file to do it, which the fixture refuses: "metadata arrived without the slow middle part"
+  // went RED, so that shape is not the fix. Open: overlap the windows (one window ahead) for plans
+  // whose parts ARE byte-addressable, or find what a player means by an open-ended `bytes=N-`.
   const end = r.open ? Math.min(r.end, r.start + WINDOW - 1) : r.end;
   return new Response(streamRange(plan, r.start, end, total), {
     status: 206,
@@ -869,137 +879,6 @@ function zipErrorPage(jobId, message) {
     `<p><a href="javascript:history.length>1?history.back():location.assign('./')">back</a></p>` +
     `<script>try{parent.postMessage({type:'b2p-zip-error',job:${id},message:${safe}},'*')}catch(e){}</script>`;
   return new Response(body, { status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
-}
-
-function unpacked(plan) {
-  // `PACK_HEADER` is 9 bytes (`B2PZ`, a version, the real length) and then a **zlib** stream:
-  // `'deflate'`, not `'deflate-raw'` (the raw variant errored on the zlib header).
-  const body = stripHeader(streamRange(plan, 0, plan.total - 1, plan.total), 9, 'B2PZ');
-  return readerChunks(body.pipeThrough(new DecompressionStream('deflate')));
-}
-// Drop the first `n` bytes of a stream — and prove they say what they should, so a payload that is
-// NOT packed fails loudly instead of streaming nonsense into a zip.
-function stripHeader(stream, n, expect) {
-  let left = n;
-  let seen = '';
-  return fromIterator((async function* () {
-    for await (const c of readerChunks(stream)) {
-      if (left > 0) {
-        const take = c.subarray(0, Math.min(left, c.length));
-        seen += String.fromCharCode(...take);
-        left -= take.length;
-        if (left > 0) continue;
-        if (expect && !seen.startsWith(expect)) throw new Error('this payload is not packed');
-        const rest = c.subarray(take.length);
-        if (rest.length) yield rest;
-        continue;
-      }
-      yield c;
-    }
-  })());
-}
-
-// The members of a packed archive, in order, as a zip — reading the inflated file exactly once.
-// Offsets are offsets in the FILE (what the page's own directory read reports); the walk only ever
-// moves forward, which is all a single deflate stream allows.
-async function* zipStreamPacked(plan, members, prefix, onMember) {
-  const enc = new TextEncoder();
-  const centrals = [];
-  let at = 0;                       // bytes written to the zip
-  let pos = 0;                      // bytes consumed from the file
-  let buf = new Uint8Array(0);      // inflated bytes pulled but not consumed
-  const src = unpacked(plan);
-  const more = async () => {
-    const step = await src.next();
-    if (step.done) throw new Error('the packed payload ended before the member did');
-    const c = step.value;
-    buf = buf.length ? concatBytes([buf, c]) : c;
-  };
-  const skipTo = async (target) => {
-    while (pos < target) {
-      if (!buf.length) await more();
-      const n = Math.min(buf.length, target - pos);
-      buf = buf.subarray(n);
-      pos += n;
-    }
-  };
-  async function* take(n) {
-    let left = n;
-    while (left > 0) {
-      if (!buf.length) await more();
-      const k = Math.min(buf.length, left);
-      yield buf.subarray(0, k);
-      buf = buf.subarray(k);
-      pos += k;
-      left -= k;
-    }
-  }
-  for (const e of members) {
-    const name = enc.encode(e.name.slice(prefix.length));
-    await skipTo(e.localOff);
-    while (buf.length < 30) await more();
-    const nlen = U16(buf, 26), elen = U16(buf, 28);
-    if (!(buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 3 && buf[3] === 4)) {
-      throw new Error(`${e.name}: its local header is not where the directory says it is`);
-    }
-    await skipTo(e.localOff + 30 + nlen + elen);
-    const size = Number(e.size) || 0;
-    const csize = Number.isFinite(Number(e.csize)) ? Number(e.csize) : size;
-    const method = Number(e.method) || 0;
-    const crc = e.crc >>> 0;
-    const time = e.time || DOS_TIME_NOON, date = e.date || DOS_DATE_1980;
-    const lh = new Uint8Array(30 + name.length);
-    const lv = new DataView(lh.buffer);
-    lv.setUint32(0, 0x04034b50, true);
-    lv.setUint16(4, 20, true);
-    lv.setUint16(6, 0x0800, true);
-    lv.setUint16(8, 0, true);                // STORED in the zip we write
-    lv.setUint16(10, time, true);
-    lv.setUint16(12, date, true);
-    lv.setUint32(14, crc, true);
-    lv.setUint32(18, size, true);
-    lv.setUint32(22, size, true);
-    lv.setUint16(26, name.length, true);
-    lh.set(name, 30);
-    yield lh;
-    if (size) {
-      // The member's bytes SIT COMPRESSED in the file when its method is 8 (measured here: the
-      // members of `inner.zip` are deflated, and copying `size` bytes out of a deflated member
-      // wrote 200,000 bytes of compressed noise). Same deal zipStream already does.
-      let got = 0;
-      const raw = fromIterator(take(csize));
-      const body = method === 8 ? readerChunks(raw.pipeThrough(new DecompressionStream('deflate-raw'))) : readerChunks(raw);
-      for await (const c of body) { got += c.length; yield c; }
-      if (method !== 0 && method !== 8) throw new Error(`${e.name} uses compression method ${method}`);
-      if (got !== size) throw new Error(`${e.name}: ${got} B out, the directory says ${size}`);
-    }
-    centrals.push({ name, crc, size, time, date, offset: at });
-    at += lh.length + size;
-    onMember();
-  }
-  let cdSize = 0;
-  for (const c of centrals) {
-    const ch = new Uint8Array(46 + c.name.length);
-    const cv = new DataView(ch.buffer);
-    cv.setUint32(0, 0x02014b50, true);
-    cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true);
-    cv.setUint16(12, c.time, true); cv.setUint16(14, c.date, true);
-    cv.setUint32(16, c.crc, true); cv.setUint32(20, c.size, true); cv.setUint32(24, c.size, true);
-    cv.setUint16(28, c.name.length, true);
-    cv.setUint32(42, c.offset, true);
-    ch.set(c.name, 46);
-    cdSize += ch.length;
-    yield ch;
-  }
-  const eocd = new Uint8Array(22);
-  const ev = new DataView(eocd.buffer);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(8, centrals.length, true);
-  ev.setUint16(10, centrals.length, true);
-  ev.setUint32(12, cdSize, true);
-  ev.setUint32(16, at, true);
-  yield eocd;
 }
 
 async function serveZipJob(url, clientId) {
