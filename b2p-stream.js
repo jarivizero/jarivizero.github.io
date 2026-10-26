@@ -36,7 +36,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "84ff5abc9721fca2";
+const BUILT_VER = "13c669ba6a79b7f6";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 // A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
 // update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
@@ -871,6 +871,118 @@ function zipErrorPage(jobId, message) {
   return new Response(body, { status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
 
+function unpacked(plan) {
+  const body = stripHeader(streamRange(plan, 0, plan.total - 1, plan.total), 9);
+  return readerChunks(body.pipeThrough(new DecompressionStream('deflate-raw')));
+}
+// Drop the first `n` bytes of a stream, then pass the rest through untouched.
+function stripHeader(stream, n) {
+  let left = n;
+  return fromIterator((async function* () {
+    for await (const c of readerChunks(stream)) {
+      if (left > 0) {
+        if (c.length <= left) { left -= c.length; continue; }
+        const skip = left;
+        left = 0;
+        yield c.subarray(skip);
+        continue;
+      }
+      yield c;
+    }
+  })());
+}
+
+// The members of a packed archive, in order, as a zip — reading the inflated file exactly once.
+// Offsets are offsets in the FILE (what the page's own directory read reports), so the walk is the
+// same one zipStream does; the difference is that it cannot jump backwards, and it never needs to.
+async function* zipStreamPacked(plan, members, prefix, onMember) {
+  const enc = new TextEncoder();
+  const centrals = [];
+  let at = 0;                       // bytes written to the zip
+  let pos = 0;                      // bytes consumed from the file
+  let buf = new Uint8Array(0);      // inflated bytes pulled but not consumed
+  const src = unpacked(plan);
+  const more = async () => {
+    const step = await src.next();
+    if (step.done) throw new Error('the packed payload ended before the member did');
+    const c = step.value;
+    buf = buf.length ? concatBytes([buf, c]) : c;
+  };
+  const skipTo = async (target) => {
+    while (pos < target) {
+      if (!buf.length) await more();
+      const n = Math.min(buf.length, target - pos);
+      buf = buf.subarray(n);
+      pos += n;
+    }
+  };
+  async function* take(n) {
+    let left = n;
+    while (left > 0) {
+      if (!buf.length) await more();
+      const k = Math.min(buf.length, left);
+      yield buf.subarray(0, k);
+      buf = buf.subarray(k);
+      pos += k;
+      left -= k;
+    }
+  }
+  for (const e of members) {
+    const name = enc.encode(e.name.slice(prefix.length));
+    await skipTo(e.localOff);
+    while (buf.length < 30) await more();
+    const nlen = U16(buf, 26), elen = U16(buf, 28);
+    if (!(buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 3 && buf[3] === 4)) {
+      throw new Error(`${e.name}: its local header is not where the directory says it is`);
+    }
+    await skipTo(e.localOff + 30 + nlen + elen);
+    const size = Number(e.size) || 0;
+    const crc = e.crc >>> 0;
+    const time = e.time || DOS_TIME_NOON, date = e.date || DOS_DATE_1980;
+    const lh = new Uint8Array(30 + name.length);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true);                // STORED
+    lv.setUint16(10, time, true);
+    lv.setUint16(12, date, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, size, true);
+    lv.setUint32(22, size, true);
+    lv.setUint16(26, name.length, true);
+    lh.set(name, 30);
+    yield lh;
+    for await (const c of take(size)) yield c;
+    centrals.push({ name, crc, size, time, date, offset: at });
+    at += lh.length + size;
+    onMember();
+  }
+  let cdSize = 0;
+  for (const c of centrals) {
+    const ch = new Uint8Array(46 + c.name.length);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true);
+    cv.setUint16(12, c.time, true); cv.setUint16(14, c.date, true);
+    cv.setUint32(16, c.crc, true); cv.setUint32(20, c.size, true); cv.setUint32(24, c.size, true);
+    cv.setUint16(28, c.name.length, true);
+    cv.setUint32(42, c.offset, true);
+    ch.set(c.name, 46);
+    cdSize += ch.length;
+    yield ch;
+  }
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, centrals.length, true);
+  ev.setUint16(10, centrals.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, at, true);
+  yield eocd;
+}
+
 async function serveZipJob(url, clientId) {
   const id = url.searchParams.get('id') || '';
   const job = id ? await readPlan('zip-' + id) : null;
@@ -893,7 +1005,12 @@ async function serveZipJob(url, clientId) {
       // A few messages a second, not one per megabyte: the page's rate is a slope over TIME, so more
       // numbers only cost messages (a 1 GB save at 100 MB/s was ~1000 of them).
       let told = 0, toldAt = 0;
-      const body = countingStream(streamRange(plan, 0, plan.total - 1, plan.total), (n) => {
+      // A PACKED payload downloads as a real browser download too: the file's own bytes are what
+      // comes out of the inflate, and they are in order, so the range stream is replaced by the
+      // unpacked one and the length stays the file's length.
+      const source = plan.packed ? fromIterator(unpacked(plan))
+                                 : streamRange(plan, 0, plan.total - 1, plan.total);
+      const body = countingStream(source, (n) => {
         const now = Date.now();
         if (n === plan.total || n - told >= 262144 || now - toldAt >= 250) {
           told = n; toldAt = now;
@@ -928,9 +1045,11 @@ async function serveZipJob(url, clientId) {
       toldBytes = bytesOut; toldAt = now;
       zipProgress(sends, job.id, done, members.length, 'files', bytesOut, outTotal);
     };
-    const body = countingStream(
-      fromIterator(zipStream(plan, members, prefix, () => { done += 1; say(true); })),
-      (n) => { bytesOut = n; say(false); });
+    // A packed payload cannot be ranged, so the walk is sequential and the inflate happens here
+    // rather than in the page: either way the browser gets a stream it can save as it arrives.
+    const walk = plan.packed ? zipStreamPacked(plan, members, prefix, () => { done += 1; say(true); })
+                             : zipStream(plan, members, prefix, () => { done += 1; say(true); });
+    const body = countingStream(fromIterator(walk), (n) => { bytesOut = n; say(false); });
     return new Response(body, { status: 200, headers: {
       'Content-Type': 'application/zip',
       'Content-Disposition': attachmentHeader(job.name),
