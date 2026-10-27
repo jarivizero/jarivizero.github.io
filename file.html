@@ -57,6 +57,8 @@ try {
   
   .status { margin: 6px 0 0; font-size: 12px; }
   .status.error { color: #b42318; }
+  /* the honest "Reading …" line of a slow read: a status, not a failure */
+  .status.slow { color: #555; }
   img { max-width: 100%; }
   /* `body.notfound` is styled by show404 itself, NOT from here: a media address removes this whole
      stylesheet (`bareHead`), and the art page that follows must look the same either way. */
@@ -144,7 +146,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "a6490c38db15b85c";
+const BUILT_VER = "7d094d8d7aa11bc1";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -197,6 +199,10 @@ function bareHead(kind) {
 // A status line is the LAST resort: only an error earns one. Nothing on the way to a file says
 // "Fetching…" — the native tab is blank until the bytes are there.
 function status(text, bad) {
+  // A real message SUPERSEDES the wait line. Without this the 900 ms timer could fire AFTER a view
+  // drew (a binary that arrives at 600 ms, a fetch that fails at 2 s) and leave `Reading x…` sitting
+  // under a message that already answered — measured on the previous copy, never deployed.
+  if (text) slowDone();
   let el = $('b2p-status');
   if (!el) {
     el = document.createElement('p');
@@ -206,6 +212,38 @@ function status(text, bad) {
   el.className = 'status' + (bad ? ' error' : '');
   el.textContent = text || '';
   if (!text) el.remove();
+}
+// ─── THE SILENT WAIT SAYS SO ──────────────────────────────────────────────────────────────────
+// The rule above ("nothing on the way to a file says Fetching…", the native tab is blank) is right
+// for a file that lands in a moment, and wrong for a cold archive read. Measured on the live site
+// 2026-10-26: a cold nested member is a black window for 15-45 s, a cold archive root 1-14 s, and
+// nothing on screen said a word — the page looked broken while it was working. So the tab stays
+// blank for the first 900 ms (an instant file never sees this) and after that it names what it is
+// waiting for. It is not a fake progress bar: ONE line, removed by the first draw.
+const SLOW_AFTER_MS = 900;
+let slowTimer = null;
+function slowWaiting(text) {
+  slowDone();
+  slowTimer = setTimeout(() => {
+    slowTimer = null;
+    let el = $('b2p-slow');
+    if (!el) {
+      el = document.createElement('p');
+      el.id = 'b2p-slow';
+      el.className = 'status slow';
+      body.appendChild(el);
+    }
+    el.textContent = text;
+  }, SLOW_AFTER_MS);
+}
+// Its OWN element — `b2p-slow`, never `b2p-status`. Sharing it was a bug in the first version of this
+// change: `status()` writes a real message ("this page cannot render it", an error) into
+// `#b2p-status`, and the element would have kept MY marker, so a later draw could delete a message
+// the page meant to keep. Separate elements make that impossible rather than unlikely.
+function slowDone() {
+  if (slowTimer) { clearTimeout(slowTimer); slowTimer = null; }
+  const el = $('b2p-slow');
+  if (el) el.remove();
 }
 // ─── the name keyring (same format as bin2png.html / idsdictionary.py) ────────────────────────
 async function sha256(bytes) {
@@ -916,6 +954,7 @@ async function peekForRender() {
 }
 
 async function renderMedia(mime) {
+  slowDone();
   mime = mime || 'application/octet-stream';
   const head = await peekForRender();
   // A master file is followed before anything is offered to a player.
@@ -1826,8 +1865,12 @@ async function resolveArchivePath(rawPath) {
 // folder becomes an `Index of` page, and an archive inside is listed rather than downloaded.
 async function renderZipPath(baseLabel, rawPath, baseAddr) {
   const addrBase = baseAddr || baseLabel;
+  // The WAIT IS IN HERE (`resolveArchivePath` opens the archive, which is the part pull), so the line
+  // armed in run() must stand until it returns — clearing it any earlier is exactly the silent
+  // black window this change exists to remove.
   const { consumed, walked, within, base, files, rest, read, lastWasArchive, bytes: deepest, spanBase } =
     await resolveArchivePath(rawPath);
+  slowDone();
   
   const label = consumed.length ? `${baseLabel}/${consumed.join('/')}` : baseLabel;
   
@@ -2651,6 +2694,7 @@ async function renderTt2pngFull(index) {
 // same way (an HTML member becomes the document, an image is an image, text is text) — and each of
 // them is BARE: no header, no type line, no meta line, exactly like opening the member from disk.
 async function renderBytes(bytes, name, fromLabel) {
+  slowDone();
   const mime = mimeFromName(name) || sniffMime(bytes);
   if (mime === 'text/html') {
     window.__fileHtml = name;
@@ -2768,6 +2812,7 @@ const NOTFOUND_CSS = `
   #home { font-size:15px; }
 `;
 function show404() {
+  slowDone();
   pendingVideo = null;
   resetPage('notfound');
   // A media address left `html.media-address` (black) and a head with nothing in it. Rebuild both,
@@ -2821,6 +2866,7 @@ function bareMedia(tag) {
 // Text is ONE <pre>, with the inline style Brave's own text tab gives it (measured 2026-10-19):
 // `<pre style="word-wrap: break-word; white-space: pre-wrap;">`.
 function bareText(text) {
+  slowDone();
   resetPage();
   bareHead('text');
   const pre = document.createElement('pre');
@@ -2833,6 +2879,7 @@ function bareText(text) {
 // An image tab in Brave is a dark canvas with the picture in the middle and its name and dimensions
 // in the title (measured: `<html style="height:100%">`, body #0e0e0e, `img { display:block; margin:auto }`).
 function bareImage(bytes, mime, name) {
+  slowDone();
   resetPage();
   bareHead('image');
   document.documentElement.style.height = '100%';
@@ -2851,6 +2898,7 @@ function bareImage(bytes, mime, name) {
 }
 
 function barePdf(bytes) {
+  slowDone();
   resetPage();
   document.documentElement.style.height = '100%';
   body.setAttribute('style', 'margin:0;height:100%;background:#000');
@@ -2870,6 +2918,33 @@ function binaryView(bytes) {
   btn.addEventListener('click', () => saveBytes(bytes, src.name, mimeFromName(src.name)));
   body.appendChild(btn);
   status(`${mimeFromName(src.name) || 'binary'} — this page cannot render it.`);
+}
+
+const LIST_TOO_BIG = 8 * 1024 * 1024;
+function sevenTooBigView(size) {
+  resetPage('');
+  document.title = src.name;
+  const mime = 'application/x-7z-compressed';
+  const bar = document.createElement('div');
+  const btn = document.createElement('button');
+  const label = `⬇ Download ${src.name} (${fmt(size)})`;
+  btn.textContent = label;
+  btn.addEventListener('click', async () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const job = await startStreamedSave(
+      { kind: 'file', name: src.name, mime, plan: planForWorker(src.name, mime) },
+      (t) => { if (typeof t === 'string' && t) btn.textContent = t; },
+    ).catch(() => null);
+    if (!job) {
+      btn.disabled = false;
+      btn.textContent = label;
+      status('the worker did not take the download — reload this page once and press it again', true);
+    }
+  });
+  bar.appendChild(btn);
+  body.appendChild(bar);
+  status(`7z · ${fmt(size)} — too big to list here, so nothing is read until you press download.`);
 }
 
 // `/file#name` and `/file/name` are the same address, spelled differently: the second is what the
@@ -3023,6 +3098,8 @@ async function run() {
     }
     if (!player && !index) document.title = src.name;
   }
+  // The name is known and the first read has not started: arm the honest "Reading …" line.
+  if (!player) slowWaiting(`Reading ${src.name}…`);
 
   
   if (src.guess) {
@@ -3043,6 +3120,11 @@ async function run() {
     // JS7z, never from a zip directory (there is none).
     const sevenRoot = !zipByName && (mime === 'application/x-7z-compressed' || namedSeven
                                      || /\.7z$/i.test(src.name));
+    
+    if (sevenRoot) {
+      const known = Number(src.tt && src.tt.bytes) || 0;
+      if (known > LIST_TOO_BIG) { slowDone(); sevenTooBigView(known); return; }
+    }
     
     const tarRoot = !zipByName && !sevenRoot && (mime === 'application/x-tar'
                                                  || /\.tar$/i.test(src.name));
@@ -3080,7 +3162,9 @@ async function run() {
       // The rows FIRST: they are what sets the remembered size (a repeat visit's listing carries it),
       // and `shareArchivePlan` asks for that size — before this swap it read the last part on a
       // visit whose directory had been remembered all along (measured 2026-10-25).
-      fillFolder(index, '', await rootRows());
+      const rows0 = await rootRows();
+      slowDone();
+      fillFolder(index, '', rows0);
       if (!sevenRoot && !tarRoot) shareArchivePlan(typedToken || label);
       return;
     }
