@@ -2,10 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="referrer" content="no-referrer"><!-- pbs.twimg.com answers 351 to any non-X Referer (measured 2026-10-29); no Referer is served, and a page cannot send x.com's -->
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>file</title>
 <script>
-
+// BEFORE THE FIRST PAINT, from the ADDRESS ALONE — no fetch, no server, nothing awaited. His rule,
+// 2026-10-19: a media address is the player from the very first frame, and a `.txt` address is a TEXT
+// page from the very first frame, which for an ordinary tab means the canvas colour the UA picks from
+// `<meta name="color-scheme" content="light dark">` — the one node a `file:///` .txt tab has in its
+// head. A media name got that treatment and a text name did not, so a text page flashed black first.
+// `,<id>` says video outright, an extension says which kind, `?name.ext` can ride along with an id.
 try {
   const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
     || (/^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname) ? location.pathname.slice(1) : '')
@@ -57,8 +63,6 @@ try {
   
   .status { margin: 6px 0 0; font-size: 12px; }
   .status.error { color: #b42318; }
-  /* the honest "Reading …" line of a slow read: a status, not a failure */
-  .status.slow { color: #555; }
   img { max-width: 100%; }
   /* `body.notfound` is styled by show404 itself, NOT from here: a media address removes this whole
      stylesheet (`bareHead`), and the art page that follows must look the same either way. */
@@ -77,7 +81,7 @@ const SITE_BASE = (() => {
 })();
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
-const BUILD = '2026-10-25T09:38';
+const BUILD = '2026-10-29T04:10';
 
 async function checkSiteVersion() {
   if (!/^https?:$/.test(location.protocol)) return;
@@ -146,7 +150,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "5acca14baf40c454";
+const BUILT_VER = "e0063010bd3d6522";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -199,10 +203,6 @@ function bareHead(kind) {
 // A status line is the LAST resort: only an error earns one. Nothing on the way to a file says
 // "Fetching…" — the native tab is blank until the bytes are there.
 function status(text, bad) {
-  // A real message SUPERSEDES the wait line. Without this the 900 ms timer could fire AFTER a view
-  // drew (a binary that arrives at 600 ms, a fetch that fails at 2 s) and leave `Reading x…` sitting
-  // under a message that already answered — measured on the previous copy, never deployed.
-  if (text) slowDone();
   let el = $('b2p-status');
   if (!el) {
     el = document.createElement('p');
@@ -213,39 +213,7 @@ function status(text, bad) {
   el.textContent = text || '';
   if (!text) el.remove();
 }
-// ─── THE SILENT WAIT SAYS SO ──────────────────────────────────────────────────────────────────
-// The rule above ("nothing on the way to a file says Fetching…", the native tab is blank) is right
-// for a file that lands in a moment, and wrong for a cold archive read. Measured on the live site
-// 2026-10-26: a cold nested member is a black window for 15-45 s, a cold archive root 1-14 s, and
-// nothing on screen said a word — the page looked broken while it was working. So the tab stays
-// blank for the first 900 ms (an instant file never sees this) and after that it names what it is
-// waiting for. It is not a fake progress bar: ONE line, removed by the first draw.
-const SLOW_AFTER_MS = 900;
-let slowTimer = null;
-function slowWaiting(text) {
-  slowDone();
-  slowTimer = setTimeout(() => {
-    slowTimer = null;
-    let el = $('b2p-slow');
-    if (!el) {
-      el = document.createElement('p');
-      el.id = 'b2p-slow';
-      el.className = 'status slow';
-      body.appendChild(el);
-    }
-    el.textContent = text;
-  }, SLOW_AFTER_MS);
-}
-// Its OWN element — `b2p-slow`, never `b2p-status`. Sharing it was a bug in the first version of this
-// change: `status()` writes a real message ("this page cannot render it", an error) into
-// `#b2p-status`, and the element would have kept MY marker, so a later draw could delete a message
-// the page meant to keep. Separate elements make that impossible rather than unlikely.
-function slowDone() {
-  if (slowTimer) { clearTimeout(slowTimer); slowTimer = null; }
-  const el = $('b2p-slow');
-  if (el) el.remove();
-}
-// ─── the name keyring (same format as bin2png.html / idsdictionary.py) ────────────────────────
+
 async function sha256(bytes) {
   const d = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(d)].map((b) => hex(b)).join('');
@@ -953,8 +921,39 @@ async function peekForRender() {
   return { raw, plain, packed };
 }
 
+// ─── `?save`: the one save that works on a streamed file ──────────────────────────────────────
+// A VIDEO page is a bare player, and the browser's own "Save video as" cannot work on it: a download
+// bypasses the service worker, so the network gets `/__b2p/stream/…` and answers 404 — Chrome then
+// names the file `download.html` and says "File wasn't available on this site" (measured
+// 2026-10-29). So the save is a NAVIGATION with `Content-Disposition: attachment`, the same trick
+// the archive download uses: nothing new is drawn, the browser's own download list does the work,
+// and the bytes come from the same ranged stream the player was reading.
+async function saveAsDownload(mime) {
+  resetPage('');
+  document.title = src.name || 'file';
+  let url = null;
+  if (src.direct) url = src.urls[0];
+  else if (src.tt) url = await ttPlanUrl(mime);
+  else url = await streamUrlFor(src.name, src.urls, mime);
+  if (url) {
+    const sep = url.includes('?') ? '&' : '?';
+    // A plain link, NOT the `download` attribute: a download-attribute request answered by a worker
+    // is canceled by the browser. A navigation it can answer is the whole point (see the worker).
+    const a = document.createElement('a');
+    a.href = url + sep + 'dl=1';
+    a.rel = 'noopener';
+    body.appendChild(a);
+    a.click();
+    a.remove();
+    return;
+  }
+  // No worker at all (an insecure context, or a browser without one): read the file in the page and
+  // hand over a blob, which is the same save without the streaming. It costs the whole file, and
+  // there is no other way left.
+  saveBytes(await wholeFile(), src.name, mime);
+}
+
 async function renderMedia(mime) {
-  slowDone();
   mime = mime || 'application/octet-stream';
   const head = await peekForRender();
   // A master file is followed before anything is offered to a player.
@@ -975,6 +974,7 @@ async function renderMedia(mime) {
       if (index) return renderTt2png(index);
     }
   }
+  if (SAVE_REQUEST) return saveAsDownload(mime);
   const isVideo = mime.startsWith('video/');
   // The element IS the page: created in <body>, never wrapped, never moved. Its tag is the one the
   // address promised, so a `.mp3` never ends up with a <video> on screen.
@@ -1729,7 +1729,12 @@ function listedMember(f) {
   const path = String(f.path || '');
   const when = f.modified ? new Date(f.modified) : null;
   return { path, size: Number(f.size) || 0, dir: !!f.dir || /\/$/.test(path),
-           modified: when && !isNaN(when) ? when : null };
+           modified: when && !isNaN(when) ? when : null,
+           // The manifest's own previews, carried through the listing (a data URL, a text head, a
+           // duration). Absent on an upload made before the uploader wrote them.
+           thumb: typeof f.thumb === 'string' ? f.thumb : '',
+           head: typeof f.head === 'string' ? f.head : '',
+           dur: typeof f.dur === 'string' ? f.dur : '' };
 }
 
 // The address of one path inside an archive: `/file/<archive>/<path>`.
@@ -1755,7 +1760,10 @@ function archiveHref(label) {
 
 // One level of a listing: the DIRECT children of `prefix` only, folders first, then by name — what
 // a `file:///` directory tab shows (and what makes a folder worth its own page).
-function fillFolder(view, prefix, files) {
+// `thumb` / `head` / `dur` ride along when the manifest previewed the member (the uploader writes
+// them): the media grid draws from those, and a member with neither keeps its type icon.
+function childEntries(files, prefix) {
+  prefix = String(prefix || '');
   const rows = new Map();
   for (const f of files) {
     if (!f.path.startsWith(prefix)) continue;
@@ -1765,13 +1773,271 @@ function fillFolder(view, prefix, files) {
     const name = cut < 0 ? rest : rest.slice(0, cut + 1);
     if (!rows.has(name)) {
       rows.set(name, { path: prefix + name, size: cut < 0 ? Number(f.size) || 0 : 0,
-                       dir: cut >= 0, modified: f.modified || null });
+                       dir: cut >= 0, modified: f.modified || null,
+                       thumb: cut < 0 ? f.thumb || '' : '',
+                       head: cut < 0 ? f.head || '' : '',
+                       dur: cut < 0 ? f.dur || '' : '' });
     }
   }
-  const list = [...rows.values()].sort((a, b) =>
+  return [...rows.values()].sort((a, b) =>
     a.dir !== b.dir ? (a.dir ? -1 : 1) : (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+function fillFolder(view, prefix, files) {
+  const list = childEntries(files, prefix);
   for (const f of list) view.addMember(f);
   return list;
+}
+
+const VIEW_IMAGE = /\.(png|jpe?g|gif|webp|bmp|avif|ico|svg)$/i;
+const VIEW_VIDEO = /\.(mp4|m4v|mov|webm|mkv|avi|ogv)$/i;
+const VIEW_TEXT = /\.(txt|md|json|csv|log|xml|yml|yaml|ini|srt|vtt|py|sh|js|mjs|css|html|htm)$/i;
+function previewKind(name) {
+  const n = String(name || '').replace(/\/$/, '');
+  if (VIEW_IMAGE.test(n)) return 'image';
+  if (VIEW_VIDEO.test(n)) return 'video';
+  if (VIEW_TEXT.test(n)) return 'text';
+  return '';
+}
+// MEGA's own Type column wording: `Folder`, `MP4 video`, `PNG image`, and so on.
+function typeLabel(path, dir) {
+  if (dir) return 'Folder';
+  const ext = (String(path).match(/\.([A-Za-z0-9]+)$/) || [])[1] || '';
+  if (!ext) return 'File';
+  const kind = previewKind(path);
+  const up = ext.toUpperCase();
+  if (kind === 'video') return `${up} video`;
+  if (kind === 'image') return `${up} image`;
+  if (kind === 'text') return `${up} document`;
+  if (/\.(zip|apk|jar|7z|tar)$/i.test(path)) return `${up} archive`;
+  return `${up} file`;
+}
+// Any member the manifest previewed. This is the switch: an upload made before the uploader wrote
+// thumbnails has none, and keeps the plain `Index of` page it has always had.
+function hasPreviews(items) {
+  return items.some((f) => !f.dir && (f.thumb || f.head));
+}
+const FOLDER_CSS = `
+  body.sk-mega-f { margin:0; background:#fff; color:rgba(51,51,51,.7);
+    font:14px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
+  .sk-mega-f .rail { position:fixed; inset:0 auto 0 0; width:63px; background:#f7f7f7;
+    display:flex; flex-direction:column; align-items:center; gap:8px; padding-top:18px; z-index:6; }
+  .sk-mega-f .mark { width:26px; height:26px; border-radius:50%; background:#d9272e; color:#fff;
+    display:flex; align-items:center; justify-content:center; font:700 17px/1 Inter,sans-serif; }
+  .sk-mega-f .rail-nav { display:flex; flex-direction:column; gap:6px; margin-top:24px; width:100%; }
+  .sk-mega-f .rail-btn { height:34px; width:100%; display:flex; align-items:center; justify-content:center;
+    color:#616366; }
+  .sk-mega-f .rail-item { position:relative; height:52px; width:100%; display:flex; align-items:center;
+    justify-content:center; background:#fff; color:#d9272e; }
+  .sk-mega-f .rail-item:before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px;
+    background:#d9272e; }
+  .sk-mega-f .shell { margin-left:63px; }
+  .sk-mega-f .top { display:flex; align-items:center; gap:18px; height:64px; padding:0 40px 0 40px; }
+  .sk-mega-f .search { flex:0 1 810px; display:flex; align-items:center; gap:10px; height:46px;
+    padding:0 14px; border:1px solid #e5e5e5; border-radius:8px; color:#9a9a9a; }
+  .sk-mega-f .search input { flex:1; border:0; outline:0; font:14px Inter,sans-serif; color:#303233;
+    background:none; }
+  .sk-mega-f .top-r { margin-left:auto; display:flex; align-items:center; gap:18px; color:#303233;
+    font-size:14px; }
+  .sk-mega-f .top-r a { color:#303233; }
+  .sk-mega-f .top-r .signup { border:1px solid #303233; border-radius:8px; padding:8px 16px; }
+  .sk-mega-f .toolbar { display:flex; align-items:center; gap:14px; padding:0 40px; }
+  .sk-mega-f .loud, .sk-mega-f .ghost { display:inline-flex; align-items:center; gap:10px; height:44px;
+    padding:0 20px; border-radius:8px; font:600 14px Inter,sans-serif; cursor:pointer; }
+  .sk-mega-f .loud { background:#04101e; color:#fafafa; border:0; }
+  .sk-mega-f .ghost { background:#efefef; color:#303233; border:0; }
+  .sk-mega-f .head { padding:18px 40px 0; }
+  .sk-mega-f .head b { font-size:14px; font-weight:700; color:#303233; word-break:break-all; }
+  .sk-mega-f .head p { margin:2px 0 0; font-size:12px; color:#616366; }
+  .sk-mega-f .chips { display:flex; align-items:center; gap:12px; padding:12px 40px 0; }
+  .sk-mega-f .chip { height:24px; display:inline-flex; align-items:center; gap:8px; padding:0 12px;
+    border-radius:16px; background:rgba(97,99,102,.1); color:#303233; font-size:14px; }
+  .sk-mega-f .views { margin-left:auto; display:flex; gap:4px; }
+  .sk-mega-f .views button { width:34px; height:30px; border:0; background:none; border-radius:8px;
+    color:#616366; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .sk-mega-f .views button[aria-pressed="true"] { background:rgba(97,99,102,.1); color:#303233; }
+  .sk-mega-f .body { padding:8px 40px 40px; }
+  .sk-mega-f .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(184px,1fr));
+    gap:16px; }
+  .sk-mega-f .grid[hidden], .sk-mega-f .list[hidden] { display:none; }
+  .sk-mega-f .card { display:flex; flex-direction:column; background:#fff; border:1px solid #ececec;
+    border-radius:8px; overflow:hidden; color:#303233; }
+  .sk-mega-f .card:hover { border-color:#d0d0d0; }
+  .sk-mega-f .thumb { position:relative; display:block; aspect-ratio:16/10; background:#f4f7f9;
+    overflow:hidden; }
+  .sk-mega-f .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  .sk-mega-f .thumb .glyph { position:absolute; inset:0; display:flex; align-items:center;
+    justify-content:center; }
+  .sk-mega-f .thumb .dur { position:absolute; right:6px; bottom:6px; padding:1px 6px; border-radius:4px;
+    background:rgba(0,0,0,.72); color:#fff; font:500 11px/1.6 Inter,sans-serif; font-style:normal; }
+  .sk-mega-f .thumb .txt { position:absolute; inset:0; margin:0; padding:10px 12px; overflow:hidden;
+    font:11px/1.45 ui-monospace,Menlo,monospace; color:#4a4d50; white-space:pre-wrap; word-break:break-word; }
+  .sk-mega-f .card .nm { padding:10px 12px 0; font-size:14px; color:#303233; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap; }
+  .sk-mega-f .card .mt { padding:1px 12px 11px; font-size:12px; color:#616366; }
+  .sk-mega-f table { width:100%; border-collapse:collapse; }
+  .sk-mega-f th { padding:13px 0 5px; text-align:left; font:400 12px Inter,sans-serif; color:#616366;
+    border-bottom:1px solid #f2f2f2; }
+  .sk-mega-f td { padding:6px 0; border-bottom:1px solid #f7f7f7; font-size:14px; color:#303233;
+    vertical-align:middle; }
+  .sk-mega-f tr:hover td { background:#fafafa; }
+  .sk-mega-f td.nm-cell { display:flex; align-items:center; gap:14px; }
+  .sk-mega-f td.nm-cell .list-thumb { width:34px; height:34px; border-radius:4px; background:#f4f7f9;
+    object-fit:cover; flex:0 0 34px; }
+  .sk-mega-f .foot { padding:28px 40px 40px; font-size:12px; color:#9a9a9a; }
+  .sk-mega-f .foot a { color:#9a9a9a; }
+`;
+function previewGlyph(kind) {
+  if (kind === 'video') return `<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#616366" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z" fill="#616366" stroke="none"/></svg>`;
+  if (kind === 'image') return `<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#616366" stroke-width="1.6"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4 4 3 3-2 4 3"/></svg>`;
+  if (kind === 'text') return `<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#616366" stroke-width="1.6"><path d="M6 3h8l4 4v14H6z"/><path d="M9 12h6M9 16h6"/></svg>`;
+  return `<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#616366" stroke-width="1.6"><path d="M6 3h8l4 4v14H6z"/></svg>`;
+}
+const FOLDER_GLYPH = `<svg viewBox="0 0 24 24" width="28" height="28" fill="#f2a53a"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
+// MEGA's chip chevron and its grid/list toggle: two small glyphs of its own, not our table icons.
+const CARET = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#616366"
+  stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
+const GRID_ICON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
+  stroke-width="1.7"><rect x="4" y="4" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="4" width="6.5"
+  height="6.5" rx="1"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="13.5"
+  width="6.5" height="6.5" rx="1"/></svg>`;
+
+// The page itself. `o.items` are the DIRECT children of `o.prefix`; `o.download` saves the whole
+// archive, `o.downloadDir` the folder this page shows (both optional, both real actions).
+function renderMediaFolder(o) {
+  const items = o.items;
+  const files = items.length;
+  const bytes = items.reduce((n, f) => n + (f.dir ? 0 : f.size), 0);
+  const addr = o.addr || o.label;
+  resetPage('sk-mega-f');
+  for (const n of [...document.head.childNodes]) n.remove();
+  const meta = document.createElement('meta');
+  meta.name = 'viewport';
+  meta.content = 'width=device-width, initial-scale=1';
+  const style = document.createElement('style');
+  style.textContent = SKIN_COMMON + FOLDER_CSS;
+  document.head.append(meta, style);
+  const shown = o.prefix ? `${o.label}/${o.prefix.replace(/\/$/, '')}` : o.label;
+  document.title = shown;
+  const folderName = o.prefix ? o.prefix.replace(/\/$/, '').split('/').pop() : o.label;
+  const upHref = o.parentHref || null;
+  const cardHref = (f) => (src.direct ? null : memberHref(addr, f.path));
+  const meta1 = (f) => {
+    const when = f.modified ? fmtDate(f.modified) : '';
+    const size = f.dir ? '' : fmt(f.size);
+    return [size, when].filter(Boolean).join(' · ') || typeLabel(f.path.replace(/\/$/, '').split('/').pop(), f.dir);
+  };
+  body.innerHTML = `
+    <aside class="rail"><span class="mark">M</span>
+      <div class="rail-nav"><span class="rail-btn">»</span>
+        <span class="rail-item">${IC.folder}</span></div></aside>
+    <div class="shell">
+      <header class="top">
+        <label class="search">${IC.search}<input type="search" placeholder="Search ${esc(o.label)}"
+          aria-label="Search"></label>
+        <div class="top-r"><span>${IC.help}</span><span>${IC.globe}</span><span>EN</span>
+          <a href="#">Log in</a><a class="signup" href="#">Sign up</a></div>
+      </header>
+      <div class="toolbar">
+        <button class="loud" type="button">${IC.import}Save to MEGA</button>
+        <button class="ghost" type="button" id="b2p-download">${IC.dl}Download</button>
+      </div>
+      <div class="head"><b>${esc(folderName)}</b>
+        <p>${files} item${files === 1 ? '' : 's'}${bytes ? ' · ' + esc(fmt(bytes)) : ''}${
+          upHref ? ` · <a href="${esc(upHref)}" id="b2p-up">[parent folder]</a>` : ''}</p></div>
+      <div class="chips"><span class="chip">Type ${CARET}</span>
+        <span class="chip">Last modified ${CARET}</span>
+        <span class="chip">Date added ${CARET}</span>
+        <div class="views">
+          <button type="button" id="b2p-grid" aria-pressed="true" title="Grid view">${GRID_ICON}</button>
+          <button type="button" id="b2p-list" aria-pressed="false" title="List view">${IC.list}</button>
+        </div></div>
+      <div class="body">
+        <div class="grid" id="b2p-cards"></div>
+        <table class="list" id="b2p-rows" hidden><thead><tr><th>Name</th><th>Date added</th>
+          <th>Type</th><th style="text-align:right">Size</th></tr></thead><tbody></tbody></table>
+      </div>
+      <p class="foot"><a href="#">Terms of service</a> · <a href="#">Privacy policy</a> ·
+        <a href="#">Report abuse</a> · page rendered by ny01</p>
+    </div>`;
+  const cards = $('b2p-cards');
+  const tbody = $('b2p-rows').querySelector('tbody');
+  for (const f of items) {
+    const name = f.path.replace(/\/$/, '').split('/').pop();
+    const href = cardHref(f);
+    const kind = f.dir ? 'dir' : previewKind(name);
+    const thumb = f.thumb
+      ? `<img src="${esc(f.thumb)}" alt="" loading="lazy">`
+      : (f.head ? `<pre class="txt">${esc(f.head)}</pre>`
+        : `<span class="glyph">${kind === 'dir' ? FOLDER_GLYPH : previewGlyph(kind)}</span>`);
+    
+    const card = document.createElement('a');
+    card.className = 'card';
+    card.href = href || '#';
+    if (href && !f.dir) { card.target = '_blank'; card.rel = 'noopener'; }
+    if (!href) card.addEventListener('click', (e) => e.preventDefault());
+    card.innerHTML = `<span class="thumb">${thumb}${f.dur ? `<em class="dur">${esc(f.dur)}</em>` : ''}</span>
+      <span class="nm">${esc(name)}</span><span class="mt">${esc(meta1(f))}</span>`;
+    card.title = `${f.path}${f.dir ? ' — a folder in this archive' : ` (${fmt(f.size)})`}`;
+    cards.appendChild(card);
+    const tr = document.createElement('tr');
+    const nameTd = document.createElement('td');
+    nameTd.className = 'nm-cell';
+    const a = document.createElement('a');
+    a.className = 'nm-cell';
+    a.href = href || '#';
+    if (href && !f.dir) { a.target = '_blank'; a.rel = 'noopener'; }
+    if (!href) a.addEventListener('click', (e) => e.preventDefault());
+    a.style.cssText = 'display:flex;align-items:center;gap:14px;color:#303233';
+    a.innerHTML = (f.thumb ? `<img class="list-thumb" src="${esc(f.thumb)}" alt="" loading="lazy">`
+      : `<span style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;">${f.dir ? FOLDER_GLYPH : previewGlyph(kind)}</span>`)
+      + `<span>${esc(name)}${f.dir ? '/' : ''}</span>`;
+    nameTd.appendChild(a);
+    const dateTd = document.createElement('td');
+    dateTd.textContent = fmtDate(f.modified);
+    const typeTd = document.createElement('td');
+    typeTd.textContent = typeLabel(name, f.dir);
+    const sizeTd = document.createElement('td');
+    sizeTd.style.textAlign = 'right';
+    sizeTd.textContent = f.dir ? '—' : fmt(f.size);
+    tr.append(nameTd, dateTd, typeTd, sizeTd);
+    tbody.appendChild(tr);
+  }
+  // The two views are one page: MEGA's own toggle, and nothing is fetched to switch.
+  const show = (grid) => {
+    $('b2p-cards').hidden = !grid;
+    $('b2p-rows').hidden = grid;
+    $('b2p-grid').setAttribute('aria-pressed', String(grid));
+    $('b2p-list').setAttribute('aria-pressed', String(!grid));
+  };
+  $('b2p-grid').addEventListener('click', () => show(true));
+  $('b2p-list').addEventListener('click', () => show(false));
+  
+  for (const a of body.querySelectorAll('.top a, .foot a, .chip')) {
+    if (a.tagName !== 'A') continue;
+    a.setAttribute('href', location.href);
+    a.addEventListener('click', (ev) => ev.preventDefault());
+    a.addEventListener('auxclick', (ev) => ev.preventDefault());
+  }
+  const btn = $('b2p-download');
+  if (btn) {
+    if (!o.download) btn.disabled = true;
+    else btn.addEventListener('click', async () => {
+      if (btn.dataset.busy) return;
+      btn.dataset.busy = '1';
+      const label = btn.innerHTML;
+      try {
+        const got = await o.download((t) => { if (typeof t === 'string' && t) btn.textContent = t; });
+        status(got.stream ? `downloading ${got.name}${got.size ? ` — ${fmt(got.size)}` : ''} in the browser`
+                          : `saved ${got.name} — ${fmt(got.size)}`);
+      } catch (err) { status(`could not fetch the archive: ${err.message}`, true); }
+      btn.innerHTML = label;
+      delete btn.dataset.busy;
+    });
+  }
+  // `[parent folder]` is a real listing of this page's own archive: walk it in place.
+  const up = $('b2p-up');
+  if (up && window.__b2pZip) up.addEventListener('click', (e) => { e.preventDefault(); walkTo(up.href); });
+  return { cards: items.length };
 }
 
 async function renderZipFolder(label, prefix, files, read, zipBytes, addr, parentHref, spanBase) {
@@ -1780,20 +2046,32 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
   addr = String(addr || label);
   const shown = prefix ? `${label}/${prefix}` : label;
   const innerName = label.replace(/^.*\//, '') || 'archive.zip';
+  const downloadZip = prefix ? null : (zipBytes ? async () => {
+    const bytes = await zipBytes();
+    saveBytes(bytes, innerName, mimeFromName(innerName) || 'application/octet-stream');
+    return { name: innerName, size: bytes.length };
+  } : (onProgress) => saveWholeArchive(onProgress));
+  const downloadDir = prefix ? (onProgress) => downloadFolder(label, prefix, files, read, spanBase, onProgress) : null;
+  
+  const items = childEntries(files, prefix);
+  const plainList = /^(index|raw)$/i.test(new URLSearchParams(location.search).get('view') || '');
+  if (!plainList && hasPreviews(items)) {
+    return renderMediaFolder({
+      label, addr, prefix, items,
+      parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
+      download: prefix ? downloadDir : downloadZip,
+    });
+  }
   const view = indexView(shown, 0, {
     base: addr,
     
     parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
     
-    downloadZip: prefix ? null : (zipBytes ? async () => {
-      const bytes = await zipBytes();
-      saveBytes(bytes, innerName, mimeFromName(innerName) || 'application/octet-stream');
-      return { name: innerName, size: bytes.length };
-    } : (onProgress) => saveWholeArchive(onProgress)),
+    downloadZip,
     // `spanBase` is where this listing's archive starts in the ADDRESS'S OWN file: 0 for that archive,
     // a byte offset for a STORED archive inside it, and null when its members are not a range of
     // anything (deflated inside, a 7z, a packed payload) — then only the page can read them.
-    downloadDir: prefix ? (onProgress) => downloadFolder(label, prefix, files, read, spanBase, onProgress) : null,
+    downloadDir,
   });
   fillFolder(view, prefix, files);
   return view;
@@ -1865,12 +2143,8 @@ async function resolveArchivePath(rawPath) {
 // folder becomes an `Index of` page, and an archive inside is listed rather than downloaded.
 async function renderZipPath(baseLabel, rawPath, baseAddr) {
   const addrBase = baseAddr || baseLabel;
-  // The WAIT IS IN HERE (`resolveArchivePath` opens the archive, which is the part pull), so the line
-  // armed in run() must stand until it returns — clearing it any earlier is exactly the silent
-  // black window this change exists to remove.
   const { consumed, walked, within, base, files, rest, read, lastWasArchive, bytes: deepest, spanBase } =
     await resolveArchivePath(rawPath);
-  slowDone();
   
   const label = consumed.length ? `${baseLabel}/${consumed.join('/')}` : baseLabel;
   
@@ -2440,13 +2714,15 @@ async function ttChunk(i) {
 // the PNG prefix that carries those bytes. Without a worker there is no prefix decode, so the chunk
 // itself is fetched (correct, just more bytes).
 let ttPlan = null;
-async function ttPlanUrl() {
-  if (ttPlan !== null) return ttPlan || null;
+const ttPlanMimes = new Map();     // which type each cached tt plan was built for
+async function ttPlanUrl(mime) {
+  
+  if (ttPlan !== null && (ttPlanMimes.get(ttPlan) || '') === (mime || '')) return ttPlan || null;
   ttPlan = '';
   const reg = await ensureStreamWorker();
   if (!reg) return null;
   const id = 'z' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-  const plan = { id, name: src.name || 'archive.zip', mime: 'application/zip',
+  const plan = { id, name: src.name || 'archive.zip', mime: mime || 'application/zip',
                  cap: Number(src.tt.chunk_size) || Number((src.tt.chunks[0] || {}).size) || CAPACITY,
                  parts: src.urls, total: Number(src.tt.bytes) || 0, tt: true };
   try {
@@ -2456,6 +2732,7 @@ async function ttPlanUrl() {
     }));
   } catch (e) { return null; }
   ttPlan = new URL('__b2p/stream/?id=' + id, streamScriptUrl()).href;
+  ttPlanMimes.set(ttPlan, mime || '');
   return ttPlan;
 }
 
@@ -2650,6 +2927,18 @@ async function renderTt2pngStream(index, mime) {
 
 // The whole file at once — the non-media types, and the fallback when MediaSource cannot take it.
 async function renderTt2png(index) {
+  // A file this page has no view for and cannot list: the index is its whole description, so the
+  // metadata page is built here and not one chunk is read (measured: 10.23 MiB before this guard).
+  if (!isRenderableName(index.name)) return renderFileInfo(index);
+  
+  if (SAVE_REQUEST) {
+    src = { ...src, name: mimeFromName(src.name) ? src.name : (index.name || src.name),
+            urls: index.chunks.map((c) => c.url), direct: false, guess: false, packed: false, tt: index };
+    partCache.clear();
+    ttWhole.clear();
+    ttPlan = null;
+    return saveAsDownload(mimeFromName(src.name) || 'application/octet-stream');
+  }
   const mime = mimeFromName(index.name || '');
   if (!/^(video|audio)\//.test(mime)) return renderTt2pngFull(index);
   // The worker first: one source, one load(), no reloads. Anything that stops it being usable
@@ -2694,7 +2983,6 @@ async function renderTt2pngFull(index) {
 // same way (an HTML member becomes the document, an image is an image, text is text) — and each of
 // them is BARE: no header, no type line, no meta line, exactly like opening the member from disk.
 async function renderBytes(bytes, name, fromLabel) {
-  slowDone();
   const mime = mimeFromName(name) || sniffMime(bytes);
   if (mime === 'text/html') {
     window.__fileHtml = name;
@@ -2766,6 +3054,9 @@ function followManifest(bytes) {
 }
 
 let indexHops = 0;
+// The last tt2png index this address described, whether or not it was taken over. A file the page
+// can neither draw nor list has no route of its own, and the index is the whole description of it.
+let indexSeen = null;
 async function followIndex(head) {
   if (!head || src.tt || indexHops >= 2) return false;
   const plain = isPacked(head) ? (await unpackPrefix(head).catch(() => null)) || head : head;
@@ -2783,6 +3074,7 @@ async function followIndex(head) {
   const text = new TextDecoder('utf-8', { fatal: false }).decode(plain.subarray(0, 64)).trimStart();
   if (text.charAt(0) !== '{') return false;
   const index = parseTt2png(await wholeFile());
+  if (index) indexSeen = index;
   // `.tar` too: the uploader lists a tar's members in the index (`_list_tar`), so an uploaded tar
   // can be listed from the index with no chunk read at all — the same deal a zip gets.
   // `.7z` is here for its NAME AND SIZE, not for a listing (the uploader cannot list one, and JS7z
@@ -2817,7 +3109,6 @@ const NOTFOUND_CSS = `
   #home { font-size:15px; }
 `;
 function show404() {
-  slowDone();
   pendingVideo = null;
   resetPage('notfound');
   // A media address left `html.media-address` (black) and a head with nothing in it. Rebuild both,
@@ -2849,8 +3140,6 @@ function show404() {
 // body a `file:///` media tab has. Both routes call this, so the element never moves — moving a
 // <video> comes back as a fresh black frame (measured here).
 function bareMedia(tag) {
-  
-  slowDone();
   resetPage();
   // The black belongs to the WINDOW, not to a rule in a stylesheet: bareHead is about to remove
   // that stylesheet, and a transparent <html> is a frame that is not black (measured).
@@ -2873,7 +3162,6 @@ function bareMedia(tag) {
 // Text is ONE <pre>, with the inline style Brave's own text tab gives it (measured 2026-10-19):
 // `<pre style="word-wrap: break-word; white-space: pre-wrap;">`.
 function bareText(text) {
-  slowDone();
   resetPage();
   bareHead('text');
   const pre = document.createElement('pre');
@@ -2886,7 +3174,6 @@ function bareText(text) {
 // An image tab in Brave is a dark canvas with the picture in the middle and its name and dimensions
 // in the title (measured: `<html style="height:100%">`, body #0e0e0e, `img { display:block; margin:auto }`).
 function bareImage(bytes, mime, name) {
-  slowDone();
   resetPage();
   bareHead('image');
   document.documentElement.style.height = '100%';
@@ -2905,7 +3192,6 @@ function bareImage(bytes, mime, name) {
 }
 
 function barePdf(bytes) {
-  slowDone();
   resetPage();
   document.documentElement.style.height = '100%';
   body.setAttribute('style', 'margin:0;height:100%;background:#000');
@@ -2954,13 +3240,580 @@ function sevenTooBigView(size) {
   status(`7z · ${fmt(size)} — too big to list here, so nothing is read until you press download.`);
 }
 
+// ─── a file there is no view for: the metadata page, built from the index alone ──────────────
+// A tt2png index describes the file it names completely: name, byte length, sha256, chunk count and
+// the upload time. So a type this page cannot draw and cannot list costs ONE small payload to
+// describe, never the file. Measured on a live 10.6 MB upload whose index names `GmodRoblox.rbxl`:
+// 10.23 MiB in 8 requests to print "this page cannot render it". The index answers the same question
+// from 1.5 KB, and the answer arrives before a single chunk is touched.
+const DRAWABLE = /\.(png|jpe?g|gif|webp|bmp|avif|ico|svg|mp4|m4v|mov|webm|mkv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav|txt|json|html|htm|css|js|mjs|md|csv|xml|sh|py|pdf|zip|apk|jar|tar|7z)$/i;
+function isRenderableName(name) { return DRAWABLE.test(String(name || '')); }
+function fileInfo(index) {
+  const name = String(index.name || 'file');
+  const bytes = Number(index.bytes) || 0;
+  const sha = String(index.sha256 || '').toLowerCase();
+  const when = String(index.mtime || index.created || '');
+  const date = when ? new Date(when) : null;
+  return {
+    name, bytes, sha,
+    mime: mimeFromName(name) || 'application/octet-stream',
+    modified: date && !isNaN(date) ? date : null,
+    chunks: Array.isArray(index.chunks) ? index.chunks.length : 0,
+    // A strong validator over the whole file: the uploader's own sha256, cut to 32 hex digits, plus
+    // the length in hex. The same bytes always give the same tag, and any other file gives another.
+    etag: '"' + (sha ? sha.slice(0, 32) : 'nohash') + '-' + bytes.toString(16) + '"',
+  };
+}
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const httpDate = (d) => (d ? d.toUTCString() : '');
+// What each host shows about the file, in that host's own words. Labels come from the real pages:
+// Drive says "SHA-256 checksum", MEGA "File information", the rest "File details".
+function infoRows(i, style) {
+  const size = i.bytes ? fmt(i.bytes) : 'unknown';
+  const full = i.bytes ? `${i.bytes.toLocaleString('en-US')} bytes` : 'unknown';
+  const when = i.modified ? (style === 'local' ? fmtDate(i.modified) : httpDate(i.modified)) : 'unknown';
+  const R = (k, v) => [k, v];
+  if (style === 'drive') {
+    return [R('Owner', 'me'), R('Type', i.mime), R('Size', i.bytes ? `${full} (${size})` : size),
+      R('Modified', when), R('Opened', when), R('ETag', i.etag),
+      R('SHA-256 checksum', i.sha || 'unknown'), R('Preview', 'Not available'),
+      R('Parts', String(i.chunks))];
+  }
+  if (style === 'mega') {
+    return [R('File name', i.name), R('Size', `${size} (${full})`), R('Type', i.mime),
+      R('Modified', when), R('ETag', i.etag), R('SHA-256', i.sha || 'unknown'),
+      R('Preview', 'Not supported'), R('Parts', String(i.chunks))];
+  }
+  return [R('File name', i.name), R('Size', `${size} (${full})`), R('File type', i.mime),
+    R('Modified', when), R('ETag', i.etag), R('SHA-256', i.sha || 'unknown'),
+    R('Preview', 'Not available'), R('Parts', String(i.chunks))];
+}
+const rowsHtml = (i, style) => infoRows(i, style)
+  .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
+const ico = (d) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+  stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const IC = {
+  file: ico('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>'),
+  folder: ico('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+  dl: ico('<path d="M12 4v10"/><path d="m8 11 4 4 4-4"/><path d="M4 20h16"/>'),
+  search: ico('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
+  list: ico('<path d="M4 6h16M4 12h16M4 18h10"/>'),
+  sort: ico('<path d="M7 4v16"/><path d="m4 7 3-3 3 3"/><path d="M17 20V4"/><path d="m14 17 3 3 3-3"/>'),
+  grab: ico('<path d="M4 7h6v6H4zM14 11h6v6h-6z"/><path d="M10 10h4M4 13v4h4"/>'),
+  refresh: ico('<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/>'),
+  kebab: ico('<circle cx="12" cy="5" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="19" r="1.4" fill="currentColor"/>'),
+  menu: ico('<path d="M4 6h16M4 12h16M4 18h16"/>'),
+  home: ico('<path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"/>'),
+  help: ico('<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1 1-1.1 1.8"/><circle cx="12" cy="17" r=".8" fill="currentColor"/>'),
+  globe: ico('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.7 5.7 3.7 9S14.5 18.5 12 21c-2.5-2.5-3.7-5.7-3.7-9S9.5 5.5 12 3z"/>'),
+  import: ico('<path d="M12 3v10"/><path d="m8 9 4 4 4-4"/><rect x="4" y="15" width="16" height="6" rx="2"/>'),
+  check: ico('<path d="m5 13 4 4 10-10"/>'),
+};
+const SKIN_COMMON = `
+  .status { margin: 14px 0 0; font-size: 12px; color: #8a8a8a; }
+  .status.error { color: #b42318; }
+  #b2p-download[data-busy] { opacity: .7; cursor: progress; }
+  body[class^="sk-"] a { text-decoration: none; }
+  body[class^="sk-"] * { box-sizing: border-box; }
+  body[class^="sk-"] dl { margin: 0; }
+  body[class^="sk-"] dd { font-variant-numeric: tabular-nums; }
+`;
+const SKINS = {
+  // ── gofile: the file page as it ships today. Measured on a real share link (gofile.io/d/…):
+  //    sidebar 288px #202c48, page #162036, panels #202c48 with a 16px radius, Inter, muted #94a3b8.
+  gofile: {
+    css: `
+      body.sk-gofile { margin:0; background:#162036; color:#e2e8f0; font:16px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+        -webkit-font-smoothing:antialiased; }
+      .sk-gofile .sb { position:fixed; inset:0 auto 0 0; width:288px; background:#202c48;
+        display:flex; flex-direction:column; gap:16px; padding:16px; overflow-y:auto; }
+      .sk-gofile .sb-logo { display:flex; align-items:center; gap:10px; padding:4px 4px 0;
+        color:#fff; font-size:20px; font-weight:700; letter-spacing:-.2px; }
+      .sk-gofile .sb-mark { width:36px; height:26px; border-radius:5px; background:#f5b21a;
+        box-shadow:inset 0 -6px 0 #e39a00; position:relative; }
+      .sk-gofile .sb-mark:after { content:""; position:absolute; left:0; top:-4px; width:18px; height:8px;
+        background:#f5b21a; border-radius:3px 3px 0 0; }
+      .sk-gofile .sb-acc { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px;
+        background:rgba(91,124,250,.12); }
+      .sk-gofile .sb-ava { width:36px; height:36px; border-radius:50%; flex:0 0 36px;
+        background:radial-gradient(circle at 30% 30%,#f26d6d,#7c3aed 60%,#1e3a8a); }
+      .sk-gofile .sb-acc b { display:block; font-size:14px; font-weight:600; color:#fff; }
+      .sk-gofile .sb-acc i { font-style:normal; font-size:12px; color:#94a3b8; }
+      .sk-gofile .sb-acc .kg { margin-left:auto; color:#94a3b8; }
+      .sk-gofile .sb-add { display:flex; align-items:center; gap:12px; width:100%; padding:10px 12px;
+        border-radius:12px; border:1px dashed rgba(255,255,255,.25); background:none; color:#94a3b8;
+        font:500 14px Inter,system-ui,sans-serif; cursor:pointer; }
+      .sk-gofile .sb-add span { width:36px; height:36px; border-radius:50%; background:rgba(255,255,255,.05);
+        display:flex; align-items:center; justify-content:center; font-size:20px; }
+      .sk-gofile .sb-nav { display:flex; flex-direction:column; gap:4px; margin-top:8px; }
+      .sk-gofile .sb-nav a { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:12px;
+        color:#94a3b8; font-size:14px; font-weight:500; }
+      .sk-gofile .sb-nav a:hover { background:rgba(255,255,255,.06); color:#e2e8f0; }
+      .sk-gofile .sb-foot { margin-top:auto; border-top:1px solid rgba(255,255,255,.08); padding:14px 4px 0;
+        font-size:13px; color:#94a3b8; }
+      .sk-gofile .sb-foot a { color:#cbd5e1; }
+      .sk-gofile .main { margin-left:288px; min-height:100%; display:flex; flex-direction:column; }
+      .sk-gofile .top { display:flex; align-items:center; gap:12px; height:64px; padding:0 40px 0 16px;
+        border-bottom:1px solid rgba(255,255,255,.08); position:sticky; top:0; background:#162036; z-index:5; }
+      .sk-gofile .top b { font-size:16px; font-weight:700; letter-spacing:.2px; }
+      .sk-gofile main { flex:1; padding:32px 40px; }
+      .sk-gofile .panel { background:#202c48; border-radius:16px; padding:20px; }
+      .sk-gofile .folder { display:flex; align-items:center; gap:16px; }
+      .sk-gofile .folder-ic { width:44px; height:44px; border-radius:10px; background:rgba(245,178,26,.12);
+        color:#f5b21a; display:flex; align-items:center; justify-content:center; }
+      .sk-gofile .folder-ic svg { width:24px; height:24px; }
+      .sk-gofile h1 { font-size:18px; font-weight:700; margin:0; color:#fff; word-break:break-all; }
+      .sk-gofile .folder p { margin:2px 0 0; font-size:13px; color:#94a3b8; }
+      .sk-gofile .chip { display:inline-flex; align-items:center; gap:4px; margin-top:6px; padding:1px 8px;
+        border-radius:999px; border:1px solid rgba(255,255,255,.14); font-size:11px; color:#cbd5e1; }
+      .sk-gofile .ghost { margin-left:auto; display:inline-flex; align-items:center; gap:8px; height:36px;
+        padding:0 14px; border-radius:10px; border:1px solid rgba(255,255,255,.12); background:#26324e;
+        color:#e2e8f0; font:500 13px Inter,system-ui,sans-serif; cursor:pointer; }
+      .sk-gofile .kg { color:#94a3b8; display:inline-flex; padding:0 4px; }
+      .sk-gofile .tools { display:flex; align-items:center; margin-top:12px; padding:6px 8px; gap:8px;
+        box-shadow:0 10px 22px rgba(0,0,0,.2); }
+      .sk-gofile .tools-r { margin-left:auto; display:flex; align-items:center; gap:6px; color:#94a3b8; }
+      .sk-gofile .tools-r span { width:34px; height:34px; border-radius:10px; display:flex;
+        align-items:center; justify-content:center; }
+      .sk-gofile .tools-r span:hover { background:rgba(255,255,255,.06); }
+      .sk-gofile .chk { width:18px; height:18px; border-radius:4px; border:1.5px solid #64748b; flex:0 0 18px; }
+      .sk-gofile .row { display:flex; align-items:center; gap:14px; margin-top:12px; padding:8px 16px; }
+      .sk-gofile .doc { color:#94a3b8; display:flex; }
+      .sk-gofile .row-t { min-width:0; }
+      .sk-gofile .row-t b { display:block; font-size:16px; font-weight:600; color:#f1f5f9;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .sk-gofile .row-t p { margin:0; font-size:13px; color:#94a3b8; }
+      .sk-gofile .row .dl { margin-left:auto; display:inline-flex; align-items:center; gap:8px; height:36px;
+        padding:0 14px; border-radius:10px; border:1px solid rgba(255,255,255,.1); background:#2b3654;
+        color:#e2e8f0; font:500 13px Inter,system-ui,sans-serif; cursor:pointer; }
+      .sk-gofile .row .dl:hover { background:#33405f; }
+      .sk-gofile .abuse { text-align:center; margin:14px 0 0; font-size:13px; color:#94a3b8; }
+      .sk-gofile .abuse a { color:#94a3b8; }
+      .sk-gofile .det { margin-top:22px; }
+      .sk-gofile .det h2 { font-size:12px; text-transform:uppercase; letter-spacing:.1em; color:#94a3b8;
+        margin:0 0 12px; font-weight:600; }
+      .sk-gofile .det dl { display:grid; grid-template-columns:180px 1fr; gap:10px 18px; font-size:13px; }
+      .sk-gofile .det dt { color:#94a3b8; }
+      .sk-gofile .det dd { color:#e2e8f0; font-family:ui-monospace,Menlo,monospace; word-break:break-all; }
+      .sk-gofile .foot { border-top:1px solid rgba(255,255,255,.08); padding:24px 40px; text-align:center;
+        font-size:13px; color:#94a3b8; }
+      .sk-gofile .foot nav { display:flex; gap:28px; justify-content:center; margin-bottom:8px; }
+      .sk-gofile .foot a { color:#cbd5e1; }
+      .sk-gofile .heart { color:#e5484d; }
+    `,
+    html: (i) => `
+      <aside class="sb">
+        <a class="sb-logo" href="#"><span class="sb-mark"></span>Gofile</a>
+        <div class="sb-acc"><span class="sb-ava"></span>
+          <span><b>Guest</b><i>Guest account</i></span><span class="kg">${IC.kebab}</span></div>
+        <button class="sb-add" type="button"><span>+</span>Add account</button>
+        <nav class="sb-nav"><a href="#">${IC.home}Home</a><a href="#">${IC.folder}File Manager</a>
+          <a href="#">${IC.check}Premium</a><a href="#">${IC.list}API</a>
+          <a href="#">${IC.help}FAQ</a><a href="#">${IC.globe}Contact</a></nav>
+        <div class="sb-foot"><a href="#">@gofile_io</a></div>
+      </aside>
+      <div class="main">
+        <header class="top"><span class="kg">${IC.menu}</span><b>${esc(i.name.replace(/\\.[^.]+$/, ''))}</b></header>
+        <main>
+          <section class="panel folder">
+            <span class="folder-ic">${IC.folder}</span>
+            <div><h1>${esc(i.name)}</h1>
+              <p>${i.modified ? esc(fmtDate(i.modified)) : 'unknown date'} · 1 item</p>
+              <span class="chip">public</span></div>
+            <button class="ghost" type="button">${IC.import}Import</button><span class="kg">${IC.kebab}</span>
+          </section>
+          <section class="panel tools"><span class="chk"></span>
+            <span class="tools-r"><span>${IC.search}</span><span>${IC.list}</span><span>${IC.sort}</span>
+              <span>${IC.grab}</span><span>${IC.refresh}</span></span></section>
+          <section class="panel row">
+            <span class="chk"></span><span class="doc">${IC.file}</span>
+            <div class="row-t"><b>${esc(i.name)}</b>
+              <p>${i.modified ? esc(fmtDate(i.modified)) : 'unknown date'} · ${i.bytes ? esc(fmt(i.bytes)) : 'unknown size'}</p></div>
+            <button type="button" id="b2p-download" class="dl">${IC.dl}Download</button>
+            <span class="kg">${IC.kebab}</span>
+          </section>
+          <p class="abuse"><a href="#">Report abuse</a></p>
+          <section class="panel det"><h2>File details</h2><dl>${rowsHtml(i)}</dl></section>
+        </main>
+        <footer class="foot">
+          <nav><a href="#">Home</a><a href="#">Terms of Service</a><a href="#">Privacy Policy</a>
+            <a href="#">Abuse Policy</a><a href="#">Contact</a></nav>
+          <p>WOJTEK SAS © 2026 · Made with <span class="heart">♥</span> by Gofile Team</p>
+        </footer>
+      </div>`,
+  },
+  // ── Google Drive: the NO-PREVIEW page, measured on the real link he sent 2026-10-29
+  //    (`/file/d/1jn…/view`, an .apk). Dark theme, because that is what the page he opened shows:
+  //    #131314 page, 64px bar with the green APK badge and the file name, #333537 download strip with
+  //    its chevron, and a 300x172 #282a2c card at the centre holding "No preview available" (24px)
+  //    above a #004a77 pill. The metadata rides in a dark Details panel, the same surface Drive uses.
+  drive: {
+    css: `
+      body.sk-drive { margin:0; background:#131314; color:#e3e3e3;
+        font:14px/1.5 Roboto,"Google Sans",Arial,sans-serif; }
+      .sk-drive .top { display:flex; align-items:center; gap:12px; height:64px; padding:0 16px; }
+      .sk-drive .badge { width:28px; height:34px; border-radius:3px; background:#3f9142; color:#fff;
+        font:700 9px/34px Arial,sans-serif; text-align:center; letter-spacing:.04em; }
+      .sk-drive h1 { font-size:18px; font-weight:400; margin:0; color:#e3e3e3; line-height:20px;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .sk-drive .titles nav { display:flex; gap:16px; margin-top:0; }
+      .sk-drive .titles nav a { color:#e3e3e3; font-size:14px; }
+      .sk-drive .signin { margin-left:auto; padding:0 22px; height:40px; display:flex; align-items:center;
+        border-radius:100px; background:#c2e7ff; color:#001d35; font-size:14px; font-weight:500; }
+      .sk-drive .bars { display:flex; gap:11px; padding:0 16px; }
+      .sk-drive .bar { flex:1; height:44px; border-radius:8px; background:#333537; display:flex;
+        align-items:center; padding:0 24px; color:#c4c7c5; }
+      .sk-drive .chev { width:40px; height:44px; border-radius:8px; background:#333537; color:#c4c7c5;
+        display:flex; align-items:center; justify-content:center; }
+      .sk-drive .stage { position:relative; min-height:calc(100vh - 108px); display:flex;
+        align-items:center; justify-content:center; }
+      .sk-drive .card { width:300px; height:172px; border-radius:8px; background:#282a2c;
+        box-shadow:0 10px 12px 5px rgba(0,0,0,.2); display:flex; flex-direction:column;
+        align-items:center; justify-content:center; gap:34px; }
+      .sk-drive .card p { margin:0; font-size:24px; font-weight:400; color:#e3e3e3; }
+      .sk-drive .dl { display:inline-flex; align-items:center; gap:10px; height:40px; padding:0 24px;
+        border:0; border-radius:100px; background:#004a77; color:#c2e7ff;
+        font:500 14px Roboto,Arial,sans-serif; cursor:pointer; }
+      .sk-drive aside { position:fixed; right:16px; top:120px; width:320px; background:#282a2c;
+        border-radius:12px; padding:18px 20px; }
+      .sk-drive aside h2 { font-size:16px; font-weight:400; margin:0 0 10px; color:#e3e3e3; }
+      .sk-drive dl { margin:0; }
+      .sk-drive dt { color:#c4c7c5; font-size:12px; margin-top:12px; }
+      .sk-drive dd { margin:2px 0 0; font-size:13px; color:#e3e3e3; word-break:break-all; }
+      .sk-drive .status { color:#c4c7c5; }
+    `,
+    html: (i) => `
+      <header class="top">
+        <span class="badge">${esc((i.name.split('.').pop() || 'file').slice(0, 4).toUpperCase())}</span>
+        <div class="titles"><h1>${esc(i.name)}</h1>
+          <nav><a href="#">File</a><a href="#">Help</a></nav></div>
+        <a class="signin" href="#">Sign in</a>
+      </header>
+      <div class="bars">
+        <span class="bar">${IC.dl}</span>
+        <span class="chev">${ico('<path d="m6 15 6-6 6 6"/>')}</span>
+      </div>
+      <div class="stage">
+        <section class="card">
+          <p>No preview available</p>
+          <button type="button" id="b2p-download" class="dl">${IC.dl} Download</button>
+        </section>
+        <aside><h2>Details</h2><dl>${rowsHtml(i, 'drive')}</dl></aside>
+      </div>`,
+  },
+  // ── MEGA: the folder page he sent 2026-10-29 (`mega.nz/folder/eoAHRQQT…`), carrying this one file.
+  //    Measured off that page: white, Inter, the 63px #f7f7f7 rail with the red M mark and a red
+  //    active item, a 64px top bar whose search field is the whole left half, `Save to MEGA` on
+  //    #04101e next to a #efefef `Download`, 24px chips on rgba(97,99,102,.1), then the table whose
+  //    header is 12px #616366 and whose rows are 14px #303233. The metadata is MEGA's own
+  //    "File information" block under the listing.
+  mega: {
+    css: `
+      body.sk-mega { margin:0; background:#fff; color:rgba(51,51,51,.7);
+        font:14px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif; }
+      .sk-mega .rail { position:fixed; inset:0 auto 0 0; width:63px; background:#f7f7f7;
+        display:flex; flex-direction:column; align-items:center; padding-top:18px; }
+      .sk-mega .mark { width:26px; height:26px; border-radius:50%; background:#d9272e; color:#fff;
+        display:flex; align-items:center; justify-content:center; font:700 17px/1 Inter,sans-serif; }
+      .sk-mega .rail-nav { width:100%; margin-top:24px; display:flex; flex-direction:column; gap:6px; }
+      .sk-mega .rail-btn { height:34px; display:flex; align-items:center; justify-content:center;
+        color:#616366; }
+      .sk-mega .rail-item { position:relative; height:52px; display:flex; align-items:center;
+        justify-content:center; background:#fff; color:#d9272e; }
+      .sk-mega .rail-item:before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px;
+        background:#d9272e; }
+      .sk-mega .shell { margin-left:63px; }
+      .sk-mega .top { display:flex; align-items:center; height:64px; padding:0 40px; }
+      .sk-mega .search { flex:0 1 810px; display:flex; align-items:center; gap:10px; height:46px;
+        padding:0 14px; border:1px solid #e5e5e5; border-radius:8px; color:#9a9a9a; }
+      .sk-mega .search input { flex:1; border:0; outline:0; font:14px Inter,sans-serif; color:#303233; }
+      .sk-mega .top-r { margin-left:auto; display:flex; align-items:center; gap:18px; color:#303233; }
+      .sk-mega .top-r a { color:#303233; }
+      .sk-mega .top-r .signup { border:1px solid #303233; border-radius:8px; padding:8px 16px; }
+      .sk-mega .toolbar { display:flex; align-items:center; gap:14px; padding:0 40px; }
+      .sk-mega .loud, .sk-mega .ghost { display:inline-flex; align-items:center; gap:10px; height:44px;
+        padding:0 20px; border-radius:8px; font:600 14px Inter,sans-serif; cursor:pointer; }
+      .sk-mega .loud { background:#04101e; color:#fafafa; border:0; }
+      .sk-mega .ghost { background:#efefef; color:#303233; border:0; }
+      .sk-mega .head { padding:18px 40px 0; }
+      .sk-mega .head b { font-size:14px; font-weight:700; color:#303233; word-break:break-all; }
+      .sk-mega .head p { margin:2px 0 0; font-size:12px; color:#616366; }
+      .sk-mega .chips { display:flex; gap:12px; padding:12px 40px 0; }
+      .sk-mega .chip { height:24px; display:inline-flex; align-items:center; gap:8px; padding:0 12px;
+        border-radius:16px; background:rgba(97,99,102,.1); color:#303233; font-size:14px; }
+      .sk-mega .body { padding:8px 40px 0; }
+      .sk-mega table { width:100%; border-collapse:collapse; }
+      .sk-mega th { padding:13px 0 5px; text-align:left; font:400 12px Inter,sans-serif; color:#616366;
+        border-bottom:1px solid #f2f2f2; }
+      .sk-mega td { padding:8px 0; border-bottom:1px solid #f7f7f7; font-size:14px; color:#303233;
+        vertical-align:middle; }
+      .sk-mega td.name { display:flex; align-items:center; gap:14px; }
+      .sk-mega .info { padding:22px 40px 0; }
+      .sk-mega .info h2 { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.08em;
+        color:#616366; margin:0 0 8px; }
+      .sk-mega .info dl { display:grid; grid-template-columns:180px 1fr; gap:6px 18px; margin:0; }
+      .sk-mega .info dt { color:#616366; font-size:12px; }
+      .sk-mega .info dd { margin:0; font-size:14px; color:#303233; word-break:break-all; }
+      .sk-mega .foot { padding:26px 40px 40px; font-size:12px; color:#9a9a9a; }
+      .sk-mega .foot a { color:#9a9a9a; }
+    `,
+    html: (i) => `
+      <aside class="rail"><span class="mark">M</span>
+        <div class="rail-nav"><span class="rail-btn">»</span>
+          <span class="rail-item">${IC.folder}</span></div></aside>
+      <div class="shell">
+        <header class="top">
+          <label class="search">${IC.search}<input type="search" aria-label="Search"
+            placeholder="Search ${esc(i.name.replace(/\\.[^.]+$/, ''))}"></label>
+          <div class="top-r"><span>${IC.help}</span><span>${IC.globe}</span><span>EN</span>
+            <a href="#">Log in</a><a class="signup" href="#">Sign up</a></div>
+        </header>
+        <div class="toolbar">
+          <button class="loud" type="button">${IC.import}Save to MEGA</button>
+          <button class="ghost" type="button" id="b2p-download">${IC.dl}Download</button>
+        </div>
+        <div class="head"><b>${esc(i.name.replace(/\\.[^.]+$/, ''))}</b>
+          <p>1 item · ${i.bytes ? esc(fmt(i.bytes)) : 'unknown size'}</p></div>
+        <div class="chips"><span class="chip">Type ${CARET}</span>
+          <span class="chip">Last modified ${CARET}</span><span class="chip">Date added ${CARET}</span></div>
+        <div class="body">
+          <table><thead><tr><th>Name</th><th>Date added</th><th>Type</th>
+            <th style="text-align:right">Size</th></tr></thead>
+            <tbody><tr><td class="name"><span style="width:34px;height:34px;display:flex;
+              align-items:center;justify-content:center;">${IC.file}</span>${esc(i.name)}</td>
+              <td>${esc(i.modified ? fmtDate(i.modified) : 'unknown date')}</td>
+              <td>${esc(typeLabel(i.name, false))}</td>
+              <td style="text-align:right">${i.bytes ? esc(fmt(i.bytes)) : '—'}</td></tr></tbody></table>
+        </div>
+        <section class="info"><h2>File information</h2><dl>${rowsHtml(i, 'mega')}</dl></section>
+        <p class="foot"><a href="#">Terms of service</a> · <a href="#">Privacy policy</a> ·
+          <a href="#">Report abuse</a></p>
+      </div>`,
+  },
+  // ── pixeldrain: measured on pixeldrain.com — #e7ecf2 page, a left nav column, a white card with
+  //    the name and a full-width red DOWNLOAD bar, and the stats strip under it.
+  pixeldrain: {
+    css: `
+      body.sk-pixeldrain { margin:0; background:#e7ecf2; color:#111;
+        font:16px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif; }
+      .sk-pixeldrain .layout { display:flex; gap:24px; padding:20px 24px 40px; }
+      .sk-pixeldrain .nav { width:240px; flex:0 0 240px; display:flex; flex-direction:column; padding-top:6px; }
+      .sk-pixeldrain .nav a { color:#111; font-size:17px; padding:2px 0 2px 14px; }
+      .sk-pixeldrain .burg { width:34px; height:34px; border-radius:50%; background:#fff;
+        display:flex; align-items:center; justify-content:center; color:#111; margin-bottom:14px; }
+      .sk-pixeldrain .content { flex:1; max-width:1040px; margin:0 auto; }
+      .sk-pixeldrain h1 { font-size:32px; font-weight:400; margin:0 0 18px; text-align:center; }
+      .sk-pixeldrain .card { background:#fff; border-radius:6px; padding:22px; }
+      .sk-pixeldrain .name { font-size:20px; font-weight:700; word-break:break-all; }
+      .sk-pixeldrain .sub { color:#555; font-size:14px; margin:2px 0 18px; }
+      .sk-pixeldrain .dl { display:block; width:100%; border:0; border-radius:4px; background:#e53935;
+        color:#fff; font:700 15px/1 "Helvetica Neue",Arial,sans-serif; letter-spacing:.06em;
+        padding:15px; cursor:pointer; }
+      .sk-pixeldrain h2 { font-size:13px; text-transform:uppercase; letter-spacing:.1em; color:#888;
+        margin:26px 0 8px; }
+      .sk-pixeldrain dl { display:grid; grid-template-columns:150px 1fr; gap:8px 16px; font-size:14px; }
+      .sk-pixeldrain dt { color:#888; }
+      .sk-pixeldrain dd { margin:0; word-break:break-all; }
+      .sk-pixeldrain .stats { margin-top:16px; background:#fff; border-radius:6px; padding:16px 22px;
+        text-align:center; color:#555; font-size:13px; }
+      .sk-pixeldrain .stats a { color:#111; text-decoration:underline; }
+    `,
+    html: (i) => `
+      <div class="layout">
+        <div class="nav"><span class="burg">${IC.menu}</span>
+          <a href="#">Home</a><a href="#">Get Premium</a><a href="#">Login</a><a href="#">Register</a>
+          <a href="#">Apps</a><a href="#">Theme</a><a href="#">Speedtest</a><a href="#">API</a>
+          <a href="#">Questions &amp; Answers</a><a href="#">Filesystem Guide</a>
+          <a href="#">DMCA and abuse</a><a href="#">Server Status</a></div>
+        <div class="content">
+          <h1>${esc(i.name)}</h1>
+          <section class="card">
+            <p class="sub">${i.bytes ? esc(fmt(i.bytes)) : 'unknown size'}${i.modified ? ' · ' + esc(httpDate(i.modified)) : ''}</p>
+            <button type="button" id="b2p-download" class="dl">DOWNLOAD</button>
+            <h2>File information</h2>
+            <dl>${rowsHtml(i)}</dl>
+          </section>
+          <div class="stats">Pixeldrain is a product by <a href="#">Fornaxian Technologies</a><br>
+            Server speed: 27.83 Gbps | Cache cluster: 426.5 Gbps | Storage cluster: 111.7 Gbps<br>
+            page rendered by ny01</div>
+        </div>
+      </div>`,
+  },
+  // ── MediaFire: the .apk download page he sent 2026-10-29
+  //    (`mediafire.com/file/ykaw4xd0s9q0t5h/Good+Lock_1.3.1.apk/file`). Measured off that page:
+  //    white/grey, Open Sans, #222835 text, SIGN UP + LOG IN as pale blue-grey buttons at the top
+  //    left, the #292929 download box with a 250x60 #0074f2 DOWNLOAD (2.05MB), the #383838 Ultra
+  //    strip under it, the file block (orange archive tile, 18px name, 18px bold type, File size /
+  //    Uploaded), the #eee compatibility panel, and the #242830 consent bar along the bottom.
+  mediafire: {
+    css: `
+      body.sk-mediafire { margin:0; background:#fff; color:#222835;
+        font:14px/1.6 "Open Sans",Helvetica,Arial,sans-serif; padding-bottom:56px; }
+      .sk-mediafire .top { display:flex; align-items:flex-start; gap:20px; padding:16px 0 0 203px;
+        height:96px; background:#fff; }
+      .sk-mediafire .brand { font-size:26px; font-weight:700; letter-spacing:-.4px; color:#222835; }
+      .sk-mediafire .btns { display:flex; gap:8px; }
+      .sk-mediafire .btns a { display:flex; align-items:center; height:26px; padding:0 16px;
+        background:#d6e6ec; color:#222835; font-size:12px; letter-spacing:.04em; }
+      .sk-mediafire .btns a + a { background:#e9eaeb; }
+      .sk-mediafire main { max-width:604px; margin:0 0 0 559px; }
+      .sk-mediafire .dlbox { display:flex; align-items:center; gap:14px; background:#292929;
+        min-height:120px; padding:16px 20px; color:#fff; }
+      .sk-mediafire .apk { width:60px; height:60px; flex:0 0 60px; border-radius:3px; background:#fff;
+        position:relative; }
+      .sk-mediafire .apk:after { content:"APK"; position:absolute; inset:auto 0 6px; text-align:center;
+        color:#ff7b00; font:700 11px/1 Arial,sans-serif; letter-spacing:.04em; }
+      .sk-mediafire .apk:before { content:""; position:absolute; left:14px; top:10px; width:32px;
+        height:20px; background:#ff7b00; clip-path:polygon(0 0,100% 0,50% 100%); opacity:.85; }
+      .sk-mediafire .dlname { min-width:0; }
+      .sk-mediafire .dlname b { display:block; font-size:15px; font-weight:700; color:#fff;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .sk-mediafire .icons { display:flex; gap:10px; margin-top:8px; color:#cfcfcf; }
+      .sk-mediafire .big { margin-left:auto; width:250px; height:60px; border:0; background:#0074f2;
+        color:#fff; font:600 12px "Open Sans",Arial,sans-serif; letter-spacing:.03em; cursor:pointer; }
+      .sk-mediafire .ultra { display:flex; align-items:center; gap:14px; background:#383838;
+        color:#b9b9b9; font-size:12px; min-height:48px; padding:0 20px; }
+      .sk-mediafire .ultra .now { display:inline-flex; align-items:center; height:26px; padding:0 12px;
+        background:#0074f2; color:#fff; font-size:11px; font-weight:700; letter-spacing:.03em; }
+      .sk-mediafire .note { color:#6d6d6d; font-size:12px; text-align:center; padding:22px 20px; margin:0; }
+      .sk-mediafire .fileblock { display:flex; gap:28px; align-items:flex-start; padding:0 0 30px; }
+      .sk-mediafire .zip { width:48px; height:58px; flex:0 0 48px; background:#ff7b00; border-radius:2px;
+        position:relative; }
+      .sk-mediafire .zip:after { content:""; position:absolute; left:20px; top:0; bottom:0; width:8px;
+        background:repeating-linear-gradient(#fff 0 4px,transparent 4px 8px); opacity:.8; }
+      .sk-mediafire h1 { font-size:18px; font-weight:300; margin:0; color:#222835; }
+      .sk-mediafire .kind { font-size:18px; font-weight:700; color:#000; margin:0 0 10px; }
+      .sk-mediafire ul { margin:0; padding:0; list-style:none; }
+      .sk-mediafire li { font-size:13px; color:#222835; }
+      .sk-mediafire li b { font-weight:700; }
+      .sk-mediafire h2 { font-size:13px; font-weight:700; margin:22px 0 4px; color:#222835; }
+      .sk-mediafire .about { font-size:13px; color:#222835; margin:0; }
+      .sk-mediafire aside { width:213px; flex:0 0 213px; background:#eee; padding:10px; }
+      .sk-mediafire aside b { display:block; font-size:13px; font-weight:700; color:#222835; }
+      .sk-mediafire aside label { display:block; font-size:13px; margin-top:6px; color:#222835; }
+      .sk-mediafire aside select { width:100%; margin-top:4px; padding:6px; font-size:12px;
+        border:1px solid #ccc; background:#fff; }
+      .sk-mediafire .ok { display:flex; gap:6px; margin-top:10px; font-size:11px; color:#222835; }
+      .sk-mediafire .ok i { color:#3a9a3a; font-style:normal; }
+      .sk-mediafire .consent { position:fixed; inset:auto 0 0 0; display:flex; align-items:center;
+        gap:18px; background:#242830; color:#e8e8e8; padding:10px 30px; font-size:12px; }
+      .sk-mediafire .consent a { color:#8ec6ff; }
+      .sk-mediafire .consent .x { margin-left:auto; color:#cfd3da; }
+      .sk-mediafire .consent .accept { background:#0074f2; color:#fff; border:0; padding:10px 26px;
+        font:700 13px "Open Sans",Arial,sans-serif; }
+    `,
+    html: (i) => `
+      <header class="top">
+        <a class="brand" href="#">MediaFire</a>
+        <span class="btns"><a href="#">SIGN UP</a><a href="#">LOG IN</a></span>
+      </header>
+      <main>
+        <section class="dlbox">
+          <span class="apk"></span>
+          <div class="dlname"><b>${esc(i.name.replace(/\\.[^.]+$/, ''))}</b>
+            <span class="icons">${IC.grab}${IC.globe}${IC.import}</span></div>
+          <button type="button" id="b2p-download" class="big">DOWNLOAD (${esc(i.bytes ? fmt(i.bytes) : 'file')})</button>
+        </section>
+        <div class="ultra"><span>Download too slow? Try MediaFire Ultra</span>
+          <span class="now">DOWNLOAD FASTER NOW</span></div>
+        <p class="note">The download button will start your download and show a message from our advertisers in a new window.</p>
+        <section class="fileblock">
+          <span class="zip"></span>
+          <div>
+            <h1>${esc(i.name)}</h1>
+            <p class="kind">${/\.[^.]+$/.test(i.name) && /\.(zip|apk|jar|7z|rar|tar)$/i.test(i.name)
+              ? 'Compressed Archive' : 'File'} (.${esc((i.name.split('.').pop() || 'bin').toUpperCase())})</p>
+            <ul>${infoRows(i).map(([k, v]) => `<li><b>${esc(k)}:</b> ${esc(v)}</li>`).join('')}</ul>
+            <h2>About Compressed Archive Formats</h2>
+            <p class="about">Compressed archives combine multiple files into a single file to make them
+              easier to transport or save on disk space. Archiving software may also provide options for
+              encryption, file spanning, checksums, self-extraction, and self-installation.</p>
+          </div>
+          <aside><b>${esc(i.name)}</b><label>System compatibility</label>
+            <select><option>Linux (your OS)</option><option>Windows</option><option>macOS</option></select>
+            <span class="ok"><i>✔</i> File is compatible with the selected operating system.</span></aside>
+        </section>
+      </main>
+      <div class="consent"><span>MediaFire uses cookies to provide you with a personalized browsing
+        experience. By continuing to use this site, you agree to our <a href="#">Privacy Policy</a>.</span>
+        <span class="x">✕</span><button class="accept" type="button">I Accept</button></div>`,
+  },
+};
+const SKIN_NAMES = Object.keys(SKINS);
+
+// The save is the only action on the page: the worker streams the parts straight into the browser's
+// own download when it can, and the page joins them first when it cannot.
+async function saveInfoFile(btn, info) {
+  if (btn.dataset.busy) return;
+  btn.dataset.busy = '1';
+  const label = btn.textContent;
+  const plan = planForWorker(info.name, info.mime);
+  const job = await startStreamedSave(
+    { kind: 'file', name: info.name, mime: info.mime, plan },
+    (t) => { if (typeof t === 'string' && t) btn.textContent = t; },
+  ).catch(() => null);
+  if (job) return;
+  btn.textContent = 'preparing…';
+  try { saveBytes(await wholeFile(), info.name, info.mime); }
+  catch (e) { status(`the download failed: ${e.message}`, true); }
+  btn.textContent = label;
+  delete btn.dataset.busy;
+}
+
+function renderFileInfo(index) {
+  const info = fileInfo(index);
+  // The index becomes this address's own plan, so the download button (worker or in-page) reads the
+  // same chunk list the description did.
+  // `packed: false`: the INDEX payload was wrapped in B2PZ, the FILE it names is not, and that flag
+  // would otherwise turn every save from a stream into a blob built in the page.
+  src = { ...src, name: info.name, urls: index.chunks.map((c) => c.url), direct: false, packed: false,
+          tt: index };
+  partCache.clear();
+  ttWhole.clear();
+  ttPlan = null;
+  const want = (new URLSearchParams(location.search).get('skin') || '').toLowerCase();
+  const key = SKINS[want] ? want : SKIN_NAMES[0];
+  resetPage('sk-' + key);
+  for (const n of [...document.head.childNodes]) n.remove();
+  const meta = document.createElement('meta');
+  meta.name = 'viewport';
+  meta.content = 'width=device-width, initial-scale=1';
+  const style = document.createElement('style');
+  style.textContent = SKIN_COMMON + SKINS[key].css;
+  document.head.append(meta, style);
+  document.title = info.name;
+  body.innerHTML = SKINS[key].html(info);
+  // Every link except the download points at THIS page and swallows its own click. `href="#"` was
+  // wrong: on an address that carries the file in its own hash, a `#` link CLEARS that hash, and the
+  // page's `hashchange` listener then re-runs the whole route — the address lost the file and the
+  // DOM was rebuilt. These resolve to the current url, and preventDefault keeps the location and the
+  // document exactly as they are (middle-click still opens a harmless copy of this page).
+  for (const a of body.querySelectorAll('a')) {
+    a.setAttribute('href', location.href);
+    a.addEventListener('click', (ev) => ev.preventDefault());
+    a.addEventListener('auxclick', (ev) => ev.preventDefault());
+  }
+  const btn = $('b2p-download');
+  if (btn) btn.addEventListener('click', () => saveInfoFile(btn, info));
+}
+
 // `/file#name` and `/file/name` are the same address, spelled differently: the second is what the
 // worker serves this page for (and what 404.html writes it into on a first visit), so the typed url
 // is never rewritten. The `?name.ext` form is an id plus the filename it should save as.
+// `?save` / `?dl=1` / `?save=1`: the address asks for the SAVE, not the player (his ask 2026-10-29,
+// after the browser's own "Save video as" failed — see the worker's `dl` branch for the measurement).
+// Accepted both ways round, because both are addresses this page hands out: `/file/<id>?save` and
+// `#<id>?save` (the hash form is what a copied `/file.html#…` address looks like).
+const SAVE_REQUEST = /(?:^|[?&])(?:save|dl)(?:=1)?(?:&|$)/i.test(location.search)
+  || /[?&](?:save|dl)(?:=1)?$/i.test(location.hash);
 function addressFromLocation() {
-  const hash = location.hash.replace(/^#/, '');
+  let hash = location.hash.replace(/^#/, '');
+  // The `?save` tail belongs to the ADDRESS, never to the file name it carries.
+  if (/[?&](save|dl)(=1)?$/i.test(hash)) hash = hash.replace(/[?&](save|dl)(=1)?$/i, '');
   if (hash) return { raw: decodeURIComponent(hash).trim(), hint: '' };
-  
+  // `/file/<id>` and a bare `/<id>` at the site root are the same address; the second is the short
+  // form he asked for on 2026-10-19 (`jarivizero.github.io/HU-ABexW0AASf2m`).
   const idAtRoot = /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
   const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
     || (idAtRoot ? location.pathname.slice(1) : '');
@@ -2968,6 +3821,9 @@ function addressFromLocation() {
   const raw = fromPath ? decodeURIComponent(fromPath).replace(/\/+$/, '').trim() : '';
   let hint = location.search.replace(/^\?/, '');
   try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
+  // `?save` carries no `=`, so without this it reads as a file name and the save address would
+  // rename the file to "save". The flag is an instruction, never a name.
+  if (/^(save|dl)(=|$)/i.test(hint)) hint = '';
   if (!raw || !hint || hint.includes('=') || /[?#]/.test(hint)) hint = '';
   return { raw, hint, trailing };
 }
@@ -2976,9 +3832,12 @@ async function run() {
   // Any state from a previous address in THIS document is stale the moment run() starts: `walkTo`
   // must never believe it describes the url the browser is on now.
   window.__b2pZip = null;
+  indexSeen = null;
   const where = addressFromLocation();
   let raw = where.raw;
-  
+  // Prefix grammar, left to right: `.` = an archive (its index page is up before the bytes arrive),
+  // `,` = a video (its player is up before the bytes arrive). Both are his 2026-10-19 ask:
+  // `/file/,<id>` prepares like the worker checks for webm/mp4, `/file/.<id>` is an archive.
   let ranged = false, forceMedia = false;
   for (;;) {
     if (raw.length > 1 && raw.startsWith('.')) { ranged = true; raw = raw.slice(1); continue; }
@@ -2997,10 +3856,15 @@ async function run() {
   // The first frame is decided by the ADDRESS alone: `,` says video, an extension in the path or in
   // `?name` says which element, `.` says the index page. Nothing is fetched to find out.
   const firstMime = where.hint ? mimeFromName(where.hint) : (ranged ? '' : mimeFromName(raw));
-  
+  // The address AS TYPED, which is what every url this page writes keeps — an id stays an id, and
+  // only the heading says the decoded name (his ask 2026-10-25).
   const typedToken = raw.split('/')[0];
   let index = null;
-  
+  // A PATH inside an archive puts the empty `Index of /` up IMMEDIATELY, the way a `.` address does
+  // (his ask 2026-10-25: `/file/<id>/Screenshots/` went white until the listing arrived). The address
+  // already says so: there is a segment after the archive name, and a folder link always ends in `/`
+  // (our own rows write it that way). A last segment with an extension is a FILE — those keep their
+  // own blank tab and get no listing shell.
   if (!ranged && !forceMedia) {
     const inside = raw.includes('/');
     const lastSeg = raw.split('/').filter(Boolean).pop() || '';
@@ -3009,11 +3873,14 @@ async function run() {
     }
   }
   if (ranged) {
-    
+    // `.` says archive, the way `,` says video: an EMPTY `Index of /` is on screen before a byte is
+    // read — the heading a file manager opens with — and the rows arrive when the directory does.
+    // `setLabel` renames it to the real file once the archive has been read (his ask 2026-10-25).
     index = indexView('/', 0, { base: typedToken });
   }
   let player = null;
-  if (forceMedia) player = bareMedia('video');
+  if (SAVE_REQUEST) player = null;            // a save is not a player: nothing is drawn for it
+  else if (forceMedia) player = bareMedia('video');
   else if (/^(video|audio)\//.test(firstMime)) {
     player = bareMedia(firstMime.startsWith('audio/') ? 'audio' : 'video');
   }
@@ -3027,7 +3894,9 @@ async function run() {
   } catch (e) {
     const cut = raw.indexOf('/');
     if (cut <= 0) {
-      
+      // NOT FOUND — and a dictionary one deploy behind is the one fixable reason: re-read it ONCE
+      // with the cache bypassed before giving up (his rule 2026-10-19: "after everything is all
+      // loaded and it says 404, recache to check if video does actually exist").
       if (isNameToken(raw) && !dictFreshOnce) {
         dictFreshOnce = true;
         try {
@@ -3105,9 +3974,14 @@ async function run() {
     }
     if (!player && !index) document.title = src.name;
   }
-  // The name is known and the first read has not started: arm the honest "Reading …" line.
-  if (!player) slowWaiting(`Reading ${src.name}…`);
-
+  // A type with no view, described by the index: name, size, ETag, type, date and renderability all
+  // come from the manifest, so no chunk is read at all. Without this the page joined every chunk and
+  // only then said "cannot render it" — 10.23 MiB for one sentence, measured on a live upload.
+  if (!mime && !zipByName && indexSeen && !isRenderableName(indexSeen.name)) {
+    if (player) player.remove();
+    renderFileInfo(indexSeen);
+    return;
+  }
   
   if (src.guess) {
     try {
@@ -3120,6 +3994,7 @@ async function run() {
 
   try {
     if (/^(video|audio)\//.test(mime)) {
+      
       await renderMedia(mime);
       return;
     }
@@ -3130,7 +4005,7 @@ async function run() {
     
     if (sevenRoot) {
       const known = Number(src.tt && src.tt.bytes) || 0;
-      if (known > LIST_TOO_BIG) { slowDone(); sevenTooBigView(known); return; }
+      if (known > LIST_TOO_BIG) { sevenTooBigView(known); return; }
     }
     
     const tarRoot = !zipByName && !sevenRoot && (mime === 'application/x-tar'
@@ -3158,8 +4033,22 @@ async function run() {
         return;
       }
       
+      const rows0 = await rootRows();
+      
+      const atRoot = childEntries(rows0, '');
+      const plainRoot = /^(index|raw)$/i.test(new URLSearchParams(location.search).get('view') || '');
+      if (!plainRoot && hasPreviews(atRoot)) {
+        if (player) player.remove();
+        await shareArchivePlan(typedToken || label);
+        renderMediaFolder({
+          label, addr: typedToken || label, prefix: '', items: atRoot,
+          download: sevenRoot || tarRoot ? null : (onProgress) => saveWholeArchive(onProgress),
+        });
+        return;
+      }
       if (index) index.setLabel(label);
       else index = indexView(label, 0, { base: typedToken });
+      fillFolder(index, '', rows0);
       // Hand the worker this archive's plan: from here on `/file/<archive>/<member>` is answered
       // with the member AS a file (its own type, `Content-Disposition: inline`, ranges).
       // Shared under the ADDRESS the rows link to, so the worker answers `/file/<id>/<member>`
@@ -3169,9 +4058,6 @@ async function run() {
       // The rows FIRST: they are what sets the remembered size (a repeat visit's listing carries it),
       // and `shareArchivePlan` asks for that size — before this swap it read the last part on a
       // visit whose directory had been remembered all along (measured 2026-10-25).
-      const rows0 = await rootRows();
-      slowDone();
-      fillFolder(index, '', rows0);
       if (!sevenRoot && !tarRoot) shareArchivePlan(typedToken || label);
       return;
     }
