@@ -150,7 +150,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "e0063010bd3d6522";
+const BUILT_VER = "656a7f95737af874";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -483,6 +483,7 @@ async function partPayload(i) {
   const p = (async () => {
     const url = src.urls[i];
     const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+    noteLastModified(res);
     if (!res.ok) {
       const err = new Error(`part ${i + 1}: HTTP ${res.status}`);
       err.httpStatus = res.status;
@@ -505,6 +506,7 @@ async function partPayload(i) {
 // that only needs to LOOK at part 1 (a probe) must not fail on the length check.
 async function partPayloadLoose(i) {
   const res = await fetch(src.urls[i], { mode: 'cors', credentials: 'omit' });
+  noteLastModified(res);
   if (!res.ok) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
   const payload = await decodePngExact(new Uint8Array(await res.arrayBuffer()));
   if (!payload) throw new Error(`part ${i + 1} is not a bin2png PNG`);
@@ -531,11 +533,16 @@ async function sourceSize() {
   return (src.urls.length - 1) * CAPACITY + last.length;
 }
 
-// Bytes [start, end] inclusive, from the parts that actually hold them.
+function noteLastModified(res) {
+  const t = Date.parse(res.headers.get('Last-Modified') || '');
+  if (!Number.isNaN(t)) src.modified = new Date(t);
+}
+
 async function sourceRange(start, end) {
   if (end < start) return new Uint8Array(0);
   if (src.direct) {
     const res = await fetch(src.urls[0], { headers: { Range: `bytes=${start}-${end}` } });
+    noteLastModified(res);
     if (res.status === 404 || res.status === 410) {
       const err = new Error(`HTTP ${res.status} for ${src.urls[0]}`);
       err.httpStatus = res.status;
@@ -591,6 +598,7 @@ async function wholeFile(onProgress) {
       err.httpStatus = res.status;
       throw err;
     }
+    noteLastModified(res);
     return unpackPayload(new Uint8Array(await res.arrayBuffer()));
   }
   // Every chunk, in order. Only a download (Download Zip) or a packed archive gets here — the
@@ -3202,15 +3210,18 @@ function barePdf(bytes) {
   body.appendChild(embed);
 }
 
-// A type this page cannot render: say it, and offer the bytes. The only view that needs a button.
-function binaryView(bytes) {
-  resetPage('');
-  document.title = src.name;
-  const btn = document.createElement('button');
-  btn.textContent = `⬇ Download ${src.name} (${fmt(bytes.length)})`;
-  btn.addEventListener('click', () => saveBytes(bytes, src.name, mimeFromName(src.name)));
-  body.appendChild(btn);
-  status(`${mimeFromName(src.name) || 'binary'} — this page cannot render it.`);
+async function binaryView(bytes) {
+  const name = src.name;
+  const mime = mimeFromName(name) || 'application/octet-stream';
+  let sha = '';
+  try { sha = await sha256(bytes); } catch (e) { /* the row says unknown, the page still works */ }
+  const info = {
+    name, bytes: bytes.length, sha, mime,
+    modified: src.modified || null,
+    chunks: Math.max(1, (src.urls || []).length),
+    etag: '"' + (sha ? sha.slice(0, 32) : 'nohash') + '-' + bytes.length.toString(16) + '"',
+  };
+  paintSkin(info, () => saveBytes(bytes, name, mime));
 }
 
 const LIST_TOO_BIG = 8 * 1024 * 1024;
@@ -3761,19 +3772,16 @@ async function saveInfoFile(btn, info) {
   delete btn.dataset.busy;
 }
 
-function renderFileInfo(index) {
-  const info = fileInfo(index);
-  // The index becomes this address's own plan, so the download button (worker or in-page) reads the
-  // same chunk list the description did.
-  // `packed: false`: the INDEX payload was wrapped in B2PZ, the FILE it names is not, and that flag
-  // would otherwise turn every save from a stream into a blob built in the page.
-  src = { ...src, name: info.name, urls: index.chunks.map((c) => c.url), direct: false, packed: false,
-          tt: index };
-  partCache.clear();
-  ttWhole.clear();
-  ttPlan = null;
+// The skin this address asked for, `?skin=` first and the file page's own default last.
+function skinKey() {
   const want = (new URLSearchParams(location.search).get('skin') || '').toLowerCase();
-  const key = SKINS[want] ? want : SKIN_NAMES[0];
+  return SKINS[want] ? want : SKIN_NAMES[0];
+}
+
+// Paint a host's file page from an `info` record, and wire its one button. Two callers: the media
+// archive (whose index describes every member) and a payload this page cannot draw at all.
+function paintSkin(info, onDownload) {
+  const key = skinKey();
   resetPage('sk-' + key);
   for (const n of [...document.head.childNodes]) n.remove();
   const meta = document.createElement('meta');
@@ -3795,7 +3803,21 @@ function renderFileInfo(index) {
     a.addEventListener('auxclick', (ev) => ev.preventDefault());
   }
   const btn = $('b2p-download');
-  if (btn) btn.addEventListener('click', () => saveInfoFile(btn, info));
+  if (btn && onDownload) btn.addEventListener('click', () => onDownload(btn));
+}
+
+function renderFileInfo(index) {
+  const info = fileInfo(index);
+  // The index becomes this address's own plan, so the download button (worker or in-page) reads the
+  // same chunk list the description did.
+  // `packed: false`: the INDEX payload was wrapped in B2PZ, the FILE it names is not, and that flag
+  // would otherwise turn every save from a stream into a blob built in the page.
+  src = { ...src, name: info.name, urls: index.chunks.map((c) => c.url), direct: false, packed: false,
+          tt: index };
+  partCache.clear();
+  ttWhole.clear();
+  ttPlan = null;
+  paintSkin(info, (btn) => saveInfoFile(btn, info));
 }
 
 // `/file#name` and `/file/name` are the same address, spelled differently: the second is what the
@@ -4097,7 +4119,7 @@ async function run() {
       bareText(new TextDecoder().decode(bytes));
       return;
     }
-    binaryView(bytes);
+    await binaryView(bytes);
   } catch (e) {
     
     if (src.guess || e.httpStatus === 404 || e.httpStatus === 410) show404();
