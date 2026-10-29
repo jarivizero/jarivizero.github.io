@@ -36,7 +36,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "5acca14baf40c454";
+const BUILT_VER = "e0063010bd3d6522";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 // A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
 // update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
@@ -418,7 +418,24 @@ async function serve(request, url) {
   } catch (e) {
     return new Response('cannot read the last part: ' + e.message, { status: 502 });
   }
+  // `&dl=1` is the SAVE: the same plan, answered as an attachment. It exists because the browser's
+  // own "Save video as" can never work here — measured 2026-10-29: a download does NOT go through the
+  // service worker at all, so the network got `/__b2p/stream/…`, answered 404, and Chrome reported
+  // "File wasn't available on this site" (and named the file `download.html`). A NAVIGATION whose
+  // answer carries `Content-Disposition: attachment` is the one save that does work (the same shape
+  // the archive download has used since 2026-10-25), so the page turns `#<file>?save` into exactly
+  // that navigation and the whole file streams into the browser's own download list.
   const headers = headersFor(plan);
+  if (url.searchParams.get('dl')) {
+    headers['Content-Disposition'] = attachmentHeader(plan.name);
+    if (request.method === 'HEAD') {
+      return new Response(null, { status: 200, headers: { ...headers, 'Content-Length': String(total) } });
+    }
+    // WHOLE, not windowed: a download that stops at 512 KB is a corrupt file, not a lazy one.
+    return new Response(streamRange(plan, 0, total - 1, total), {
+      status: 200, headers: { ...headers, 'Content-Length': String(total) },
+    });
+  }
   if (request.method === 'HEAD') {
     return new Response(null, { status: 200, headers: { ...headers, 'Content-Length': String(total) } });
   }
@@ -1038,6 +1055,12 @@ async function fetchPrefix(url, from, want) {
     // (logged below, once the length is known)
     mode: 'cors',
     credentials: 'omit',
+    // NO Referer, on purpose: pbs.twimg.com answers 351 Forbidden to every non-X Referer
+    // (measured 2026-10-29: x.com/twitter.com/t.co pass, this origin — and localhost, and
+    // google.com — get a 425-byte 351 with no CORS header, which a browser turns into
+    // "Failed to fetch"). No Referer at all is what it serves, and a page cannot send someone
+    // else's: Chrome clamps `referrer:` back to the page's own origin.
+    referrerPolicy: 'no-referrer',
     // EVERY read is a Range request, the first one included. Sending no Range on the first read is
     // what made a "prefix" fetch the whole part (measured: 2,581,670 B for a window that needed
     // 574,297) — `bytes=0-N` is the only form that actually bounds the response.
@@ -1137,7 +1160,7 @@ async function ttWindowNow(plan, i, off, want) {
   if (hdr === undefined) {
     hdr = await ttHeader(plan, i, key);
   }
-  const res = await fetch(key, { mode: 'cors', credentials: 'omit',
+  const res = await fetch(key, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer',
                                  headers: { Range: `bytes=${hdr + off}-${hdr + off + want - 1}` } });
   if (!res.ok && res.status !== 416) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
   return finishWindow(plan, i, key, off, want, res);
@@ -1149,7 +1172,7 @@ async function ttHeader(plan, i, key) {
   const cur = TTLOCK.get(lock);
   if (cur) return cur;
   const job = (async () => {
-    const res = await fetch(key, { mode: 'cors', credentials: 'omit',
+    const res = await fetch(key, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer',
                                    headers: { Range: 'bytes=0-511' } });
     if (!res.ok) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
     const head = new Uint8Array(await res.arrayBuffer());
