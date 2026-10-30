@@ -150,7 +150,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "b78d31713fcbf283";
+const BUILT_VER = "5743c4969e79415e";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -2093,6 +2093,10 @@ async function resolveArchivePath(rawPath) {
   let dirSince = [];       // folders stepped into SINCE the last archive was opened
   let files = await rootRows();
   let read = rootRead;
+  // How to address the BYTES of the listing the loop ends on, `range(a, b)` inclusive: the address's
+  // own file for the root, a stored member's span for an archive inside it. `null` when the bytes
+  // only exist in memory — then nothing outside this page can stream them.
+  let slice = sourceRange;
   let deepest = null;      // a GETTER: a nested archive's bytes are fetched only when really needed
   let lastWasArchive = false;
   // Where the listing the loop ends on STARTS in the address's own file: 0 for that archive, a byte
@@ -2126,6 +2130,8 @@ async function resolveArchivePath(rawPath) {
       dirSince = [];
       files = inner.files;
       read = (p) => inner.read(p);
+      // A `.7z` keeps no slice: its members come out of JS7z over the whole file, never a range.
+      slice = stored && !/\.7z$/i.test(entry.path) ? stored.range : null;
       continue;
     }
     // A folder: a real entry (a zip records them), or just a prefix of the member paths.
@@ -2144,7 +2150,7 @@ async function resolveArchivePath(rawPath) {
   // `base` is the ROOT-relative path of the listing the loop ended on (the archives opened, without
   // the folders stepped into since — those are already the prefix of `entry.path`).
   const base = walked.slice(0, walked.length - dirSince.length).join('/');
-  return { consumed, walked, within, base, files, rest: within + parts.join('/'), read,
+  return { consumed, walked, within, base, files, rest: within + parts.join('/'), read, slice,
            lastWasArchive, bytes: lastWasArchive ? deepest : null, spanBase };
 }
 
@@ -2152,8 +2158,8 @@ async function resolveArchivePath(rawPath) {
 // folder becomes an `Index of` page, and an archive inside is listed rather than downloaded.
 async function renderZipPath(baseLabel, rawPath, baseAddr) {
   const addrBase = baseAddr || baseLabel;
-  const { consumed, walked, within, base, files, rest, read, lastWasArchive, bytes: deepest, spanBase } =
-    await resolveArchivePath(rawPath);
+  const { consumed, walked, within, base, files, rest, read, slice, lastWasArchive, bytes: deepest,
+          spanBase } = await resolveArchivePath(rawPath);
   
   const label = consumed.length ? `${baseLabel}/${consumed.join('/')}` : baseLabel;
   
@@ -2206,7 +2212,7 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   
   const memberName = entry.path.replace(/^.*\//, '');
   if (!isRenderableName(memberName) && /\.[A-Za-z0-9]{1,6}$/.test(memberName)) {
-    return memberFileHostView(memberName, entry, label, () => read(entry.path));
+    return memberFileHostView(memberName, entry, label, () => read(entry.path), slice);
   }
   await renderBytes(await read(entry.path), memberName, label);
 }
@@ -3464,16 +3470,77 @@ function barePdf(bytes) {
 // A type this page cannot render — an .apk, an .rbxm, anything with no view. It is still just a file
 // on a file host, so it gets the host's page: name, size, type, date, ETag, SHA-256, and the one
 // button that hands the bytes over (his ask 2026-10-29: "non renderable files like apks or python or
-// rbxm ... it will use the gofile skin"). A bare button under a sentence was this page's whole idea
-// of "not renderable", which is the one thing a file host never shows.
-// The digest is computed here, not carried in the payload: a single-part upload has no index, so
-// sha256 is the only way the details panel can be as honest as the media archive's.
-// A member of an archive this page cannot draw: the file host's page, built from the LISTING alone.
-//
-// The rows are name, size, type, date, ETag, `Parts: 1` and `Inside <archive>` — and the SHA-256 row
-// says `unknown`, because nothing has been read. Pressing Download fetches the member's byte range
-// exactly once and saves it; until then opening this page moves no file data at all.
-function memberFileHostView(name, entry, archiveLabel, fetchBytes) {
+
+const SAVE_PAGE = 1 << 20;                 // 1 MB per ranged read, one at a time — real backpressure
+
+async function memberLocalStart(f, slice) {
+  const head = await slice(f.localOff, f.localOff + 29);
+  if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) {
+    throw new Error('the member local header is not where the directory says it is');
+  }
+  return f.localOff + 30 + u16(head, 26) + u16(head, 28);
+}
+
+async function streamMemberSave(f, name, mime, slice, fetchAll) {
+  const method = Number(f.method);
+  const streamable = typeof window.showSaveFilePicker === 'function'
+    && typeof DecompressionStream === 'function' && typeof slice === 'function'
+    && Number.isFinite(f.localOff) && Number(f.csize) >= 0 && (method === 0 || method === 8);
+  if (!streamable) { saveBytes(await fetchAll(), name, mime); return 'buffered'; }
+  // The DIALOG comes first, before even the 30-byte local header: the click has to look like a
+  // download on the spot, and one round trip before the picker would be a visible delay.
+  let handle;
+  try {
+    handle = await window.showSaveFilePicker({ suggestedName: name });
+  } catch (e) {
+    if (e && e.name === 'AbortError') return 'cancelled';   
+    saveBytes(await fetchAll(), name, mime);
+    return 'buffered';
+  }
+  let start;
+  try { start = await memberLocalStart(f, slice); }
+  catch (e) { saveBytes(await fetchAll(), name, mime); return 'buffered'; }
+  const writable = await handle.createWritable();
+  const end = start + Number(f.csize);
+  try {
+    if (method === 8) {
+      // Inflate WHILE it downloads: the decompressor is fed page by page and its output is written
+      // straight to the file, so a deflated member never sits in memory whole either.
+      const ds = new DecompressionStream('deflate-raw');
+      const feeder = (async () => {
+        const w = ds.writable.getWriter();
+        try {
+          for (let a = start; a < end; a += SAVE_PAGE) {
+            await w.write(await slice(a, Math.min(a + SAVE_PAGE, end) - 1));
+          }
+          await w.close();
+        } catch (e) {
+          try { await w.abort(e); } catch (e2) { /* the readable side already ended */ }
+          throw e;
+        }
+      })();
+      const reader = ds.readable.getReader();
+      await Promise.all([feeder, (async () => {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          await writable.write(value);
+        }
+      })()]);
+    } else {
+      for (let a = start; a < end; a += SAVE_PAGE) {
+        await writable.write(await slice(a, Math.min(a + SAVE_PAGE, end) - 1));
+      }
+    }
+    await writable.close();
+    return 'streamed';
+  } catch (e) {
+    try { await writable.abort(); } catch (e2) { /* nothing was committed */ }
+    throw e;
+  }
+}
+
+function memberFileHostView(name, entry, archiveLabel, fetchBytes, slice) {
   const mime = mimeFromName(name) || 'application/octet-stream';
   const size = Number(entry.size) || 0;
   const when = entry.modified ? new Date(entry.modified) : null;
@@ -3487,16 +3554,18 @@ function memberFileHostView(name, entry, archiveLabel, fetchBytes) {
   paintSkin(info, async (btn) => {
     const label = btn.textContent;
     btn.disabled = true;
-    btn.textContent = `reading ${fmt(size)}…`;
+    btn.textContent = `saving ${fmt(size)}…`;
     try {
-      saveBytes(await fetchBytes(), name, mime);
-      // The page's own digest row becomes true once the bytes exist: `unknown` was the honest answer
-      // before they did, and it must not stay wrong after the file has been read.
-      btn.textContent = label;
+      const how = await streamMemberSave(entry, name, mime, slice, fetchBytes);
+      if (how === 'buffered') {
+        status(`this browser cannot stream a save, so ${name} was read whole first`, false);
+      }
     } catch (e) {
-      status(`could not read ${name}: ${(e && e.message) || e}`, true);
-      btn.textContent = label;
+      if (!(e && e.name === 'AbortError')) {
+        status(`could not save ${name}: ${(e && e.message) || e}`, true);
+      }
     } finally {
+      btn.textContent = label;
       btn.disabled = false;
     }
   });
