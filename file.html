@@ -150,7 +150,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "656a7f95737af874";
+const BUILT_VER = "9a5cb1eb5b95d753";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -2063,7 +2063,8 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
   
   const items = childEntries(files, prefix);
   const plainList = /^(index|raw)$/i.test(new URLSearchParams(location.search).get('view') || '');
-  if (!plainList && hasPreviews(items)) {
+  const mediaArchive = hasPreviews(childEntries(files, ''));
+  if (!plainList && mediaArchive && hasPreviews(items)) {
     return renderMediaFolder({
       label, addr, prefix, items,
       parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
@@ -3006,7 +3007,10 @@ async function renderBytes(bytes, name, fromLabel) {
   }
   if (mime.startsWith('image/')) return bareImage(bytes, mime, name);
   if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
-    bareText(new TextDecoder().decode(bytes));
+    const text = new TextDecoder().decode(bytes);
+    
+    if (isMarkdownName(name)) { renderMarkdown(text, name); return; }
+    bareText(text);
     return;
   }
   if (mime === 'application/pdf') {
@@ -3167,8 +3171,258 @@ function bareMedia(tag) {
   return el;
 }
 
-// Text is ONE <pre>, with the inline style Brave's own text tab gives it (measured 2026-10-19):
-// `<pre style="word-wrap: break-word; white-space: pre-wrap;">`.
+const MD_EXT = /\.(md|markdown|mdown|mkd|mdwn)$/i;
+const isMarkdownName = (name) => MD_EXT.test(String(name || ''));
+
+function mdEscape(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// GitHub's anchor: lower case, spaces to dashes, and everything that is not a letter, digit, dash or
+// underscore dropped.
+function mdSlug(s) {
+  return String(s).toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').trim()
+    .replace(/\s+/g, '-');
+}
+
+// A url in a README is relative to the README — which is the address this page was opened by.
+function mdUrl(url) {
+  const u = String(url || '').trim();
+  if (!u || /^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(u)) return u;
+  try { return new URL(u, location.href).href; } catch (e) { return u; }
+}
+
+function mdInline(src) {
+  let s = mdEscape(src);
+  // Code spans first: what is inside one is literal, so its markers are parked out of reach.
+  const codes = [];
+  s = s.replace(/`([^`]+)`/g, (m, body) => {
+    codes.push('<code>' + body.replace(/^ | $/g, '') + '</code>');
+    return '\u0001' + (codes.length - 1) + '\u0001';
+  });
+  // Images before links: `![x](y)` contains `[x](y)`.
+  s = s.replace(/!\[([^\]]*)\]\(\s*([^)\s]+)\s*\)/g,
+    (m, alt, url) => `<img src="${mdUrl(url)}" alt="${alt}">`);
+  s = s.replace(/\[([^\]]*)\]\(\s*([^)\s]+)\s*\)/g,
+    (m, text, url) => `<a href="${mdUrl(url)}" rel="nofollow noopener">${text}</a>`);
+  s = s.replace(/&lt;((?:https?|mailto):[^\s&]+)&gt;/g, (m, url) => `<a href="${url}">${url}</a>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+  s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+  s = s.replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
+  s = s.replace(/(^|[^_\w])_([^_\s][^_]*)_/g, '$1<em>$2</em>');
+  s = s.replace(/ {2,}\n/g, '<br>\n');
+  return s.replace(/\u0001(\d+)\u0001/g, (m, i) => codes[i]);
+}
+
+// Does this line OPEN a block of its own? A paragraph stops in front of one.
+function mdOpens(lines, i) {
+  const l = lines[i] || '';
+  if (/^ {0,3}(`{3,}|~{3,})/.test(l)) return true;
+  if (/^ {0,3}#{1,6}[ \t]+/.test(l)) return true;
+  if (/^ {0,3}>/.test(l)) return true;
+  if (/^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/.test(l)) return true;
+  if (/^ {0,3}([-*+]|\d{1,9}[.)])[ \t]+/.test(l)) return true;
+  if (/^ {4}\S/.test(l)) return true;
+  const next = lines[i + 1] || '';
+  if (/^ {0,3}\|?[ \t]*:?-{1,}:?[^|]*\|/.test(next)) return true;      // a table header row
+  return false;
+}
+
+function mdList(lines, start) {
+  const marker = /^( {0,3})([-*+]|(\d{1,9})[.)])[ \t]+/;
+  const first = lines[start].match(marker);
+  // The list's OWN indent is the level: a marker deeper than this belongs to the item above it, which
+  // is what makes a nested list nested instead of a second list beside the first.
+  const base = first[1].length;
+  const ordered = /\d/.test(first[2]);
+  const startAt = ordered ? Number(first[3]) : 1;
+  const atLevel = (l) => {
+    const m = l.match(marker);
+    return !!m && m[1].length === base;
+  };
+  const items = [];
+  let i = start;
+  while (i < lines.length && atLevel(lines[i])) {
+    const m = lines[i].match(marker);
+    let rest = lines[i].slice(m[0].length);
+    let task = null;
+    const t = rest.match(/^\[([ xX])\][ \t]+/);
+    if (t) { task = t[1].toLowerCase() === 'x'; rest = rest.slice(t[0].length); }
+    const body = [rest];
+    i++;
+    // Its own continuation lines: a deeper marker, an indented paragraph — and it ends at the next
+    // marker of its OWN level, or at a block that could not belong to an item.
+    while (i < lines.length && lines[i].trim()) {
+      const ind = (lines[i].match(/^ */) || [''])[0].length;
+      const mm = lines[i].match(marker);
+      if (mm && mm[1].length === base) break;
+      if (!mm && ind <= base && mdOpens(lines, i)) break;
+      body.push(lines[i].slice(Math.min(ind, base + 4)));
+      i++;
+    }
+    items.push({ body: body.join('\n'), task });
+  }
+  const tag = ordered ? 'ol' : 'ul';
+  const html = items.map((it) => {
+    const nested = it.body.split('\n').slice(1).some((l) => marker.test(l));
+    const loose = /\n[ \t]*\n/.test(it.body) || nested;
+    const cls = it.task === null ? '' : ' class="task-list-item"';
+    const box = it.task === null ? ''
+      : '<input type="checkbox" disabled' + (it.task ? ' checked' : '') + '> ';
+    return `<li${cls}>${box}${loose ? mdBlocks(it.body) : mdInline(it.body)}</li>`;
+  }).join('\n');
+  const attr = ordered && startAt !== 1 ? ` start="${startAt}"` : '';
+  return { html: `<${tag}${attr}>\n${html}\n</${tag}>`, next: i };
+}
+
+function mdBlocks(text) {
+  const lines = String(text).replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n');
+  const out = [];
+  const blank = (l) => !l.trim();
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (blank(line)) { i++; continue; }
+    let m = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*([\w+#.-]*)[ \t]*$/);
+    if (m) {
+      const ticks = m[1].length;
+      const close = new RegExp('^ {0,3}' + m[1][0] + '{' + ticks + ',}[ \\t]*$');
+      const lang = m[2] || '';
+      const buf = [];
+      i++;
+      while (i < lines.length && !close.test(lines[i])) { buf.push(lines[i]); i++; }
+      i++;                                                    // past the closing fence
+      out.push('<pre' + (lang ? ` data-lang="${mdEscape(lang)}"` : '') + '><code>'
+        + mdEscape(buf.join('\n')) + '</code></pre>');
+      continue;
+    }
+    m = line.match(/^ {0,3}(#{1,6})[ \t]+(.*?)[ \t]*#*[ \t]*$/);
+    if (m) {
+      const n = m[1].length;
+      out.push(`<h${n} id="${mdSlug(m[2])}">${mdInline(m[2])}</h${n}>`);
+      i++;
+      continue;
+    }
+    // A heading underlined with === or ---
+    if (i + 1 < lines.length && /^ {0,3}(=+|-+)[ \t]*$/.test(lines[i + 1])) {
+      const n = lines[i + 1].trim()[0] === '=' ? 1 : 2;
+      out.push(`<h${n} id="${mdSlug(line)}">${mdInline(line.trim())}</h${n}>`);
+      i += 2;
+      continue;
+    }
+    if (/^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/.test(line)) { out.push('<hr>'); i++; continue; }
+    if (/^ {0,3}>/.test(line)) {
+      const buf = [];
+      while (i < lines.length && (/^ {0,3}>/.test(lines[i])
+             || (buf.length && lines[i].trim() && !mdOpens(lines, i)))) {
+        buf.push(lines[i].replace(/^ {0,3}> ?/, ''));
+        i++;
+      }
+      out.push('<blockquote>\n' + mdBlocks(buf.join('\n')) + '\n</blockquote>');
+      continue;
+    }
+    // A GFM table: a header row, a delimiter row, then rows.
+    if (line.includes('|') && i + 1 < lines.length
+        && /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)+\|?[ \t]*$/.test(lines[i + 1])) {
+      const cells = (l) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+      const head = cells(line);
+      const align = cells(lines[i + 1]).map((c) =>
+        (/^:-+:$/.test(c) ? 'center' : /-:$/.test(c) ? 'right' : /^:-/.test(c) ? 'left' : ''));
+      const at = (k) => (align[k] ? ` style="text-align:${align[k]}"` : '');
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
+        rows.push('<tr>' + cells(lines[i]).map((c, k) => `<td${at(k)}>${mdInline(c)}</td>`).join('') + '</tr>');
+        i++;
+      }
+      out.push('<table><thead><tr>' + head.map((c, k) => `<th${at(k)}>${mdInline(c)}</th>`).join('')
+        + '</tr></thead><tbody>' + rows.join('') + '</tbody></table>');
+      continue;
+    }
+    if (/^ {0,3}([-*+]|\d{1,9}[.)])[ \t]+/.test(line)) {
+      const list = mdList(lines, i);
+      if (list.next > i) { out.push(list.html); i = list.next; continue; }
+      // The cursor did not move: a marker line that is not a list is a paragraph, and this
+      // page never spins on a line no rule claimed.
+      out.push('<p>' + mdInline(line.trim()) + '</p>');
+      i++;
+      continue;
+    }
+    if (/^ {4}\S/.test(line)) {
+      const buf = [];
+      while (i < lines.length && (/^ {4}/.test(lines[i]) || blank(lines[i]))) {
+        buf.push(lines[i].replace(/^ {4}/, ''));
+        i++;
+      }
+      while (buf.length && blank(buf[buf.length - 1])) buf.pop();
+      out.push('<pre><code>' + mdEscape(buf.join('\n')) + '</code></pre>');
+      continue;
+    }
+    const buf = [];
+    while (i < lines.length && !blank(lines[i]) && !mdOpens(lines, i)) { buf.push(lines[i]); i++; }
+    if (!buf.length) { i++; continue; }                        // never spin on a line no rule claimed
+    out.push('<p>' + mdInline(buf.join('\n').trim()) + '</p>');
+  }
+  return out.join('\n');
+}
+
+const MD_CSS = `
+:root{--md-fg:#1f2328;--md-muted:#59636e;--md-bg:#ffffff;--md-border:#d1d9e0;--md-code:#f6f8fa;--md-link:#0969da}
+@media (prefers-color-scheme:dark){:root{--md-fg:#e6edf3;--md-muted:#9198a1;--md-bg:#0d1117;--md-border:#3d444d;--md-code:#151b23;--md-link:#4493f8}}
+html{color-scheme:light dark}
+body.md-page{margin:0;background:var(--md-bg);color:var(--md-fg);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif,"Apple Color Emoji","Segoe UI Emoji"}
+.markdown-body{box-sizing:border-box;max-width:1012px;margin:0 auto;padding:32px 45px 64px;word-wrap:break-word}
+.markdown-body>:first-child{margin-top:0!important}
+.markdown-body>:last-child{margin-bottom:0!important}
+.markdown-body h1,.markdown-body h2,.markdown-body h3,.markdown-body h4,.markdown-body h5,.markdown-body h6{margin:24px 0 16px;font-weight:600;line-height:1.25}
+.markdown-body h1{font-size:2em;padding-bottom:.3em;border-bottom:1px solid var(--md-border)}
+.markdown-body h2{font-size:1.5em;padding-bottom:.3em;border-bottom:1px solid var(--md-border)}
+.markdown-body h3{font-size:1.25em}.markdown-body h4{font-size:1em}
+.markdown-body h5{font-size:.875em}.markdown-body h6{font-size:.85em;color:var(--md-muted)}
+.markdown-body p,.markdown-body ul,.markdown-body ol,.markdown-body table,.markdown-body blockquote,.markdown-body pre,.markdown-body dl{margin:0 0 16px}
+.markdown-body a{color:var(--md-link);text-decoration:none}
+.markdown-body a:hover{text-decoration:underline}
+.markdown-body ul,.markdown-body ol{padding-left:2em}
+.markdown-body li+li{margin-top:.25em}
+.markdown-body li>p{margin:16px 0}
+.markdown-body li.task-list-item{list-style:none;margin-left:-1.4em}
+.markdown-body code{background:var(--md-code);padding:.2em .4em;border-radius:6px;font:85%/1.5 ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace}
+.markdown-body pre{background:var(--md-code);padding:16px;overflow:auto;border-radius:6px;line-height:1.45}
+.markdown-body pre code{background:none;padding:0;font-size:85%;white-space:pre}
+.markdown-body blockquote{padding:0 1em;color:var(--md-muted);border-left:.25em solid var(--md-border)}
+.markdown-body blockquote>:last-child{margin-bottom:0}
+.markdown-body hr{height:.25em;padding:0;margin:24px 0;background:var(--md-border);border:0}
+.markdown-body table{border-collapse:collapse;display:block;max-width:100%;overflow:auto}
+.markdown-body th,.markdown-body td{border:1px solid var(--md-border);padding:6px 13px}
+.markdown-body tr:nth-child(2n){background:var(--md-code)}
+.markdown-body img{max-width:100%;box-sizing:content-box}
+.markdown-body del{color:var(--md-muted)}
+.markdown-body input[type=checkbox]{margin:0 .2em .25em -1.4em;vertical-align:middle}
+`;
+
+function renderMarkdown(text, name) {
+  resetPage('md-page');
+  // The head first, the TITLE after it: clearing the head removes the <title> that `document.title`
+  // writes, so setting it before the clear left the tab nameless.
+  for (const n of [...document.head.childNodes]) n.remove();
+  document.title = name || 'README.md';
+  const meta = document.createElement('meta');
+  meta.name = 'viewport'; meta.content = 'width=device-width';
+  document.head.appendChild(meta);
+  const style = document.createElement('style');
+  style.textContent = MD_CSS;
+  document.head.appendChild(style);
+  const art = document.createElement('article');
+  art.className = 'markdown-body';
+  // `innerHTML` is fed HTML this file BUILT, and every byte of the file went through mdEscape first:
+  // a README cannot put a tag on this page that mdBlocks did not write.
+  art.innerHTML = mdBlocks(String(text));
+  body.appendChild(art);
+  return art;
+}
+
 function bareText(text) {
   resetPage();
   bareHead('text');
@@ -3210,6 +3464,13 @@ function barePdf(bytes) {
   body.appendChild(embed);
 }
 
+// A type this page cannot render — an .apk, an .rbxm, anything with no view. It is still just a file
+// on a file host, so it gets the host's page: name, size, type, date, ETag, SHA-256, and the one
+// button that hands the bytes over (his ask 2026-10-29: "non renderable files like apks or python or
+// rbxm ... it will use the gofile skin"). A bare button under a sentence was this page's whole idea
+// of "not renderable", which is the one thing a file host never shows.
+// The digest is computed here, not carried in the payload: a single-part upload has no index, so
+// sha256 is the only way the details panel can be as honest as the media archive's.
 async function binaryView(bytes) {
   const name = src.name;
   const mime = mimeFromName(name) || 'application/octet-stream';
@@ -4116,7 +4377,9 @@ async function run() {
     }
     if (mime === 'application/pdf') { barePdf(bytes); return; }
     if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
-      bareText(new TextDecoder().decode(bytes));
+      const text = new TextDecoder().decode(bytes);
+      if (isMarkdownName(src.name)) return renderMarkdown(text, src.name);
+      bareText(text);
       return;
     }
     await binaryView(bytes);
