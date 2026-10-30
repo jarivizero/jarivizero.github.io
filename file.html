@@ -150,7 +150,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "0b103a2b446ba9eb";
+const BUILT_VER = "cecf88618abcef76";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -3025,16 +3025,8 @@ async function renderBytes(bytes, name, fromLabel) {
     body.appendChild(embed);
     return;
   }
-  // Unknown binary: it has to say what it is and offer the bytes.
-  resetPage('');
-  document.title = name;
-  const bar = document.createElement('div');
-  const btn = document.createElement('button');
-  btn.textContent = `⬇ Download ${name} (${fmt(bytes.length)})`;
-  btn.addEventListener('click', () => saveBytes(bytes, name, mime));
-  bar.appendChild(btn);
-  body.appendChild(bar);
-  status(`${mime || 'binary'} — this page cannot render it${fromLabel ? ` (from ${fromLabel})` : ''}.`);
+  
+  return binaryView(bytes, name, fromLabel);
 }
 
 // ─── a MASTER file ────────────────────────────────────────────────────────────────────────────
@@ -3471,17 +3463,19 @@ function barePdf(bytes) {
 // of "not renderable", which is the one thing a file host never shows.
 // The digest is computed here, not carried in the payload: a single-part upload has no index, so
 // sha256 is the only way the details panel can be as honest as the media archive's.
-async function binaryView(bytes) {
-  const name = src.name;
+async function binaryView(bytes, name, fromLabel) {
+  // A payload's name is the address's; a zip member's is its own, which is why it is a parameter.
+  name = name || src.name;
   const mime = mimeFromName(name) || 'application/octet-stream';
   let sha = '';
   try { sha = await sha256(bytes); } catch (e) { /* the row says unknown, the page still works */ }
   const info = {
     name, bytes: bytes.length, sha, mime,
     modified: src.modified || null,
-    chunks: Math.max(1, (src.urls || []).length),
+    chunks: fromLabel ? 1 : Math.max(1, (src.urls || []).length),
     etag: '"' + (sha ? sha.slice(0, 32) : 'nohash') + '-' + bytes.length.toString(16) + '"',
   };
+  if (fromLabel) info.from = fromLabel;
   paintSkin(info, () => saveBytes(bytes, name, mime));
 }
 
@@ -3557,9 +3551,13 @@ function infoRows(i, style) {
       R('Modified', when), R('ETag', i.etag), R('SHA-256', i.sha || 'unknown'),
       R('Preview', 'Not supported'), R('Parts', String(i.chunks))];
   }
-  return [R('File name', i.name), R('Size', `${size} (${full})`), R('File type', i.mime),
+  const rows = [R('File name', i.name), R('Size', `${size} (${full})`), R('File type', i.mime),
     R('Modified', when), R('ETag', i.etag), R('SHA-256', i.sha || 'unknown'),
     R('Preview', 'Not available'), R('Parts', String(i.chunks))];
+  // A member of an archive says WHICH one, so the page never pretends the member is the upload
+  // (his ask 2026-10-30: a `.dll` inside a nested zip should read as a file in its own right).
+  if (i.from) rows.push(R('Inside', i.from));
+  return rows;
 }
 const rowsHtml = (i, style) => infoRows(i, style)
   .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('');
@@ -3639,9 +3637,6 @@ const SKINS = {
       .sk-gofile .folder p { margin:2px 0 0; font-size:13px; color:#94a3b8; }
       .sk-gofile .chip { display:inline-flex; align-items:center; gap:4px; margin-top:6px; padding:1px 8px;
         border-radius:999px; border:1px solid rgba(255,255,255,.14); font-size:11px; color:#cbd5e1; }
-      .sk-gofile .ghost { margin-left:auto; display:inline-flex; align-items:center; gap:8px; height:36px;
-        padding:0 14px; border-radius:10px; border:1px solid rgba(255,255,255,.12); background:#26324e;
-        color:#e2e8f0; font:500 13px Inter,system-ui,sans-serif; cursor:pointer; }
       .sk-gofile .kg { color:#94a3b8; display:inline-flex; padding:0 4px; }
       .sk-gofile .tools { display:flex; align-items:center; margin-top:12px; padding:6px 8px; gap:8px;
         box-shadow:0 10px 22px rgba(0,0,0,.2); }
@@ -3673,6 +3668,9 @@ const SKINS = {
       .sk-gofile .foot nav { display:flex; gap:28px; justify-content:center; margin-bottom:8px; }
       .sk-gofile .foot a { color:#cbd5e1; }
       .sk-gofile .heart { color:#e5484d; }
+      /* The folder panel used to carry gofile's "Import" button, which this page cannot do; the one
+         action a file page has is the row's Download, so the kebab takes the right-hand slot. */
+      .sk-gofile .folder .kg { margin-left:auto; }
     `,
     html: (i) => `
       <aside class="sb">
@@ -3693,7 +3691,7 @@ const SKINS = {
             <div><h1>${esc(i.name)}</h1>
               <p>${i.modified ? esc(fmtDate(i.modified)) : 'unknown date'} · 1 item</p>
               <span class="chip">public</span></div>
-            <button class="ghost" type="button">${IC.import}Import</button><span class="kg">${IC.kebab}</span>
+            <span class="kg">${IC.kebab}</span>
           </section>
           <section class="panel tools"><span class="chk"></span>
             <span class="tools-r"><span>${IC.search}</span><span>${IC.list}</span><span>${IC.sort}</span>
