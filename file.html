@@ -150,7 +150,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "3ebad7022a6f1506";
+const BUILT_VER = "24396d10727c6ec8";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -2723,7 +2723,7 @@ function parseTt2png(bytes) {
 }
 // The payload a chunk carries: everything after the PNG's own IEND. The chunk list is WALKED, not
 // searched — a payload may contain the letters "IEND" (the rule bin2png.html's decoder already has).
-function chunkPayload(bytes) {
+function chunkPayload(bytes, mask = 0) {
   if (!(bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50)) return null;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let off = 8;
@@ -2731,7 +2731,16 @@ function chunkPayload(bytes) {
     const len = dv.getUint32(off);
     const type = String.fromCharCode(bytes[off + 4], bytes[off + 5], bytes[off + 6], bytes[off + 7]);
     const end = off + 8 + len + 4;
-    if (type === 'IEND') return bytes.subarray(Math.min(end, bytes.length));
+    if (type === 'IEND') {
+      const payload = bytes.subarray(Math.min(end, bytes.length));
+      // A chunk TikTok refused as an image is stored XORed by one constant byte, and the index says
+      // which (`"mask": 90`). Only refused chunks carry it; XOR is position-independent, so every
+      // range read still works byte for byte.
+      if (!mask) return payload;
+      const out = new Uint8Array(payload.length);
+      for (let k = 0; k < payload.length; k++) out[k] = payload[k] ^ mask;
+      return out;
+    }
     if (end > bytes.length) break;
     off = end;
   }
@@ -2749,7 +2758,7 @@ async function ttChunk(i) {
     err.httpStatus = res.status;
     throw err;
   }
-  const payload = chunkPayload(new Uint8Array(await res.arrayBuffer()));
+  const payload = chunkPayload(new Uint8Array(await res.arrayBuffer()), Number(c.mask) || 0);
   if (!payload) throw new Error(`chunk ${i + 1} is not a tt2png PNG`);
   if (Number(c.size) && payload.length !== Number(c.size)) {
     throw new Error(`chunk ${i + 1} holds ${payload.length} B, the index says ${c.size} B`);
@@ -2888,7 +2897,7 @@ async function renderTt2pngProgressive(index, mime) {
     // split — the part is not always 5 MB (a fixture part of 3 MB, a 10 or 50 MB part are all real),
     // and a computed split would run past the end of a shorter one.
     const restP = head.length === TT_HEAD ? range(0, head.length) : Promise.resolve(null);
-    p0 = chunkPayload(head);
+    p0 = chunkPayload(head, Number((index.chunks[0] || {}).mask) || 0);
     if (!p0) throw new Error('chunk 1 does not start with a PNG');
     version++;
     show();
@@ -2898,7 +2907,7 @@ async function renderTt2pngProgressive(index, mime) {
     const rest = await restP;
     if (await headAlive) started = true;
     const whole = rest ? concat([head, rest]) : head;
-    const payload0 = chunkPayload(whole);
+    const payload0 = chunkPayload(whole, Number((index.chunks[0] || {}).mask) || 0);
     if (!payload0) throw new Error('chunk 1 is not a tt2png PNG');
     await checkHash(whole, payload0, 0);
     p0 = parts[0] = payload0;
@@ -2915,7 +2924,7 @@ async function renderTt2pngProgressive(index, mime) {
     for (let i = 1; i < n; i++) {
       for (let k = i; k < Math.min(i + TT_AHEAD, n); k++) pull(k);
       const bytes = await fetches[i];
-      const payload = chunkPayload(bytes);
+      const payload = chunkPayload(bytes, Number((index.chunks[i] || {}).mask) || 0);
       if (!payload) throw new Error(`chunk ${i + 1} of ${n} is not a tt2png PNG`);
       await checkHash(bytes, payload, i);
       parts[i] = payload;
@@ -2961,6 +2970,7 @@ async function renderTt2pngStream(index, mime) {
     mime,
     cap: Number(index.chunk_size) || 5000000,
     parts: index.chunks.map((c) => c.url),
+    masks: index.chunks.map((c) => Number(c.mask) || 0),
     total: Number(index.bytes) || 0,
     tt: true,
   };
@@ -3012,7 +3022,7 @@ async function renderTt2pngFull(index) {
     if (!c.url) throw new Error(`chunk ${i + 1} of ${index.chunks.length} has no url`);
     const res = await fetch(c.url, { mode: 'cors', credentials: 'omit' });
     if (!res.ok) throw new Error(`chunk ${i + 1} of ${index.chunks.length}: HTTP ${res.status}`);
-    const payload = chunkPayload(new Uint8Array(await res.arrayBuffer()));
+    const payload = chunkPayload(new Uint8Array(await res.arrayBuffer()), Number(c.mask) || 0);
     if (!payload) throw new Error(`chunk ${i + 1} of ${index.chunks.length} is not a tt2png PNG`);
     pieces.push(payload);
   }
