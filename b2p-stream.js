@@ -36,7 +36,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "3ebad7022a6f1506";
+const BUILT_VER = "24396d10727c6ec8";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
 // A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
 // update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
@@ -594,7 +594,9 @@ async function archivePlan(address) {
     if (!index || index.tool !== 'tt2png' || !Array.isArray(index.chunks) || !index.chunks.length) return null;
     return { id: null, name: index.name || address, mime: 'application/zip',
              cap: Number(index.chunk_size) || 2421906,
-             parts: index.chunks.map((c) => c.url), total: Number(index.bytes) || 0, tt: true };
+             parts: index.chunks.map((c) => c.url),
+             masks: index.chunks.map((c) => Number(c.mask) || 0),
+             total: Number(index.bytes) || 0, tt: true };
   }
   // A packed payload's byte N is not the file's byte N, so no offset can be trusted.
   if (got.packed) return null;
@@ -1290,7 +1292,23 @@ async function finishWindow(plan, i, key, off, want, res) {
   return body;
 }
 
+// A chunk TikTok refused as an image (`api code 50002`) is stored XORed by one constant byte and the
+// index says which one (`"mask": 90`). Only refused chunks carry it; XOR is position-independent, so
+// a masked chunk is still readable by offset — which is what makes a masked STORED member a range.
+function ttMask(plan, i) {
+  const m = plan && plan.masks ? plan.masks[i] : 0;
+  return Number(m) || 0;
+}
+
+function unmaskBytes(bytes, mask) {
+  if (!mask || !bytes) return bytes;
+  const out = new Uint8Array(bytes.length);
+  for (let k = 0; k < bytes.length; k++) out[k] = bytes[k] ^ mask;
+  return out;
+}
+
 async function ttPartPayload(plan, i, need = Infinity) {
+  const mask = ttMask(plan, i);
   const key = plan.parts[i];
   const done = payloadOf.get(key);
   if (done) return Promise.resolve(done);
@@ -1304,7 +1322,7 @@ async function ttPartPayload(plan, i, need = Infinity) {
     let e = prefixOf.get(key);
     if (!e) { e = { bytes: new Uint8Array(0), eof: false }; prefixOf.set(key, e); }
     for (let round = 0; round < 24; round++) {
-      const tail = pngTail(e.bytes);
+      const tail = unmaskBytes(pngTail(e.bytes), mask);
       if (tail && e.eof) return settleTT(plan, i, tail);
       if (tail && tail.length >= need) return tail;
       if (e.eof) return settleTT(plan, i, tail || new Uint8Array(0));
