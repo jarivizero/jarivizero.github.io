@@ -1315,7 +1315,8 @@ async function ttPartPayload(plan, i, need = Infinity) {
   const job = (partLocks.get(key) || Promise.resolve()).then(async () => {
     const cached = await (await caches.open(PART_CACHE)).match(key);
     if (cached) {
-      const whole = new Uint8Array(await cached.arrayBuffer());
+      
+      const whole = unmaskBytes(new Uint8Array(await cached.arrayBuffer()), mask);
       payloadOf.set(key, whole);
       return whole;
     }
