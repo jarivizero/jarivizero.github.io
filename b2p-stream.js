@@ -36,7 +36,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "2c8eaf5018357f50";
+const BUILT_VER = "179068dc7c3936e1";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\n";
 // A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
 // update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
@@ -896,6 +896,27 @@ function zipErrorPage(jobId, message) {
   return new Response(body, { status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' } });
 }
 
+// Bytes [skip, skip+take) of a stream, then done: how a member is copied out of a nested archive
+// that has to be inflated as it is read. There is nothing to seek in a deflate stream, so the whole
+// nested archive goes past once and the member's bytes are picked out of it on the way.
+function windowStream(skip, take) {
+  let seen = 0, left = take;
+  return new TransformStream({
+    transform(chunk, ctrl) {
+      let from = 0;
+      if (seen < skip) {
+        const cut = Math.min(chunk.length, skip - seen);
+        seen += cut; from = cut;
+      }
+      if (from >= chunk.length || left <= 0) return;
+      const piece = chunk.subarray(from, Math.min(chunk.length, from + left));
+      left -= piece.length;
+      if (piece.length) ctrl.enqueue(piece);
+      if (left <= 0) ctrl.terminate();
+    },
+  });
+}
+
 async function serveZipJob(url, clientId) {
   const id = url.searchParams.get('id') || '';
   const job = id ? await readPlan('zip-' + id) : null;
@@ -906,6 +927,39 @@ async function serveZipJob(url, clientId) {
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     if (!Number(plan.total)) throw new Error('the archive reports no size');
     const sends = job.client || clientId;
+    if (job.kind === 'file' && job.member && job.inner && Number.isFinite(Number(job.inner.localOff))) {
+      // A member of an archive that is DEFLATED inside the payload: there is no byte range to seek to,
+      // so the nested archive is inflated ONCE, in order, and the member's bytes are copied out of
+      // that stream as they pass. One pass, no seeking — and the download exists at the click, which
+      // is the rule: *"that url or blob has to be created before the files are fetched"*.
+      const inner = job.inner, m = job.member;
+      const head = await fileBytes(plan, inner.localOff, inner.localOff + 29);
+      if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) {
+        throw new Error('the nested archive header is not where the directory says it is');
+      }
+      const dataStart = inner.localOff + 30 + U16(head, 26) + U16(head, 28);
+      const out = Number(m.size) > 0 ? Number(m.size) : 0;
+      const headers = {
+        'Content-Type': job.mime || 'application/octet-stream',
+        'Content-Disposition': attachmentHeader(job.name),
+        'Cache-Control': 'no-store',
+        'Access-Control-Allow-Origin': '*',
+      };
+      if (out) headers['Content-Length'] = String(out);
+      let body = streamRange(plan, dataStart, dataStart + Number(inner.csize) - 1, Number(inner.csize));
+      if ((Number(inner.method) || 0) === 8) body = body.pipeThrough(new DecompressionStream('deflate-raw'));
+      body = body.pipeThrough(windowStream(Number(m.localOff) || 0, Number(m.csize) || 0));
+      if ((Number(m.method) || 0) === 8) body = body.pipeThrough(new DecompressionStream('deflate-raw'));
+      let told = 0, toldAt = 0;
+      body = countingStream(body, (n) => {
+        const now = Date.now();
+        if ((out && n === out) || n - told >= 262144 || now - toldAt >= 250) {
+          told = n; toldAt = now;
+          zipProgress(sends, job.id, n, out || 1, 'bytes', n, out || 1);
+        }
+      });
+      return new Response(body, { status: 200, headers });
+    }
     if (job.kind === 'file' && job.member && Number.isFinite(Number(job.member.localOff))) {
       
       const m = job.member;
