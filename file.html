@@ -150,7 +150,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "5743c4969e79415e";
+const BUILT_VER = "390c71818292a311";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -1736,13 +1736,21 @@ function isSevenBytes(bytes) {
 function listedMember(f) {
   const path = String(f.path || '');
   const when = f.modified ? new Date(f.modified) : null;
-  return { path, size: Number(f.size) || 0, dir: !!f.dir || /\/$/.test(path),
+  const row = { path, size: Number(f.size) || 0, dir: !!f.dir || /\/$/.test(path),
            modified: when && !isNaN(when) ? when : null,
            // The manifest's own previews, carried through the listing (a data URL, a text head, a
            // duration). Absent on an upload made before the uploader wrote them.
            thumb: typeof f.thumb === 'string' ? f.thumb : '',
            head: typeof f.head === 'string' ? f.head : '',
            dur: typeof f.dur === 'string' ? f.dur : '' };
+  // WHERE THE BYTES ARE. `tiktokupload.py` writes `off` / `csize` / `method` for every member, and
+  // this function dropped all three — so a save that range-reads the member had no offsets, could
+  // not stream, and fell back to buffering the whole file. `indexedEntry` and `keepEntry` already
+  // keep the same three for the same reason.
+  if (Number.isFinite(Number(f.off))) row.localOff = Number(f.off);
+  if (f.csize !== undefined) row.csize = Number(f.csize);
+  if (f.method !== undefined) row.method = Number(f.method);
+  return row;
 }
 
 // The address of one path inside an archive: `/file/<archive>/<path>`.
@@ -2130,8 +2138,12 @@ async function resolveArchivePath(rawPath) {
       dirSince = [];
       files = inner.files;
       read = (p) => inner.read(p);
+      
+      const ownFile = !stored && reader === rootRead && Number(entry.size) > 0
+        && Number(entry.size) === await sourceSize().catch(() => -1);
       // A `.7z` keeps no slice: its members come out of JS7z over the whole file, never a range.
-      slice = stored && !/\.7z$/i.test(entry.path) ? stored.range : null;
+      if (ownFile && !/\.7z$/i.test(entry.path)) slice = sourceRange;
+      else if (!ownFile) slice = stored && !/\.7z$/i.test(entry.path) ? stored.range : null;
       continue;
     }
     // A folder: a real entry (a zip records them), or just a prefix of the member paths.
@@ -2210,11 +2222,12 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
                            `${addrWalk}/${tail}`, containing, stored ? stored.base : null);
   }
   
-  const memberName = entry.path.replace(/^.*\//, '');
+  const known = read === rootRead ? await withOffsets(entry) : entry;
+  const memberName = known.path.replace(/^.*\//, '');
   if (!isRenderableName(memberName) && /\.[A-Za-z0-9]{1,6}$/.test(memberName)) {
-    return memberFileHostView(memberName, entry, label, () => read(entry.path), slice);
+    return memberFileHostView(memberName, known, label, () => read(known.path), slice);
   }
-  await renderBytes(await read(entry.path), memberName, label);
+  await renderBytes(await read(known.path), memberName, label);
 }
 
 function archiveBasePath(addr) {
@@ -3481,12 +3494,72 @@ async function memberLocalStart(f, slice) {
   return f.localOff + 30 + u16(head, 26) + u16(head, 28);
 }
 
-async function streamMemberSave(f, name, mime, slice, fetchAll) {
+// The buffered path's bytes, read page by page so the page has a number to show. Same order the
+// ranged save uses — one 1 MB range at a time, a deflated member inflated on the way in — only the
+// output is collected in memory instead of being written to a file handle.
+async function memberBytesWithProgress(f, slice, onProgress) {
+  const start = await memberLocalStart(f, slice);
+  const end = start + Number(f.csize);
+  const total = end - start;
+  const chunks = [];
+  let got = 0;
+  if (Number(f.method) !== 8) {
+    for (let a = start; a < end; a += SAVE_PAGE) {
+      const bytes = await slice(a, Math.min(a + SAVE_PAGE, end) - 1);
+      chunks.push(bytes);
+      got += bytes.length;
+      if (onProgress) onProgress(got, total);
+    }
+  } else {
+    const ds = new DecompressionStream('deflate-raw');
+    const feeder = (async () => {
+      const w = ds.writable.getWriter();
+      try {
+        for (let a = start; a < end; a += SAVE_PAGE) {
+          const bytes = await slice(a, Math.min(a + SAVE_PAGE, end) - 1);
+          got += bytes.length;
+          if (onProgress) onProgress(got, total);
+          await w.write(bytes);
+        }
+        await w.close();
+      } catch (e) {
+        try { await w.abort(e); } catch (e2) { /* the readable side already ended */ }
+        throw e;
+      }
+    })();
+    const reader = ds.readable.getReader();
+    await Promise.all([feeder, (async () => {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) return;
+        chunks.push(value);
+      }
+    })()]);
+  }
+  return new Uint8Array(await new Blob(chunks).arrayBuffer());
+}
+
+async function streamMemberSave(f, name, mime, slice, fetchAll, onProgress) {
   const method = Number(f.method);
-  const streamable = typeof window.showSaveFilePicker === 'function'
-    && typeof DecompressionStream === 'function' && typeof slice === 'function'
-    && Number.isFinite(f.localOff) && Number(f.csize) >= 0 && (method === 0 || method === 8);
-  if (!streamable) { saveBytes(await fetchAll(), name, mime); return 'buffered'; }
+  // WHICH condition is missing decides what to do, so it is computed one at a time and reported.
+  // Saying "this browser cannot stream a save" for a browser that can is the mistake this exists to
+  // stop: every branch that falls back names its own reason, and the page prints it.
+  const why = typeof window.showSaveFilePicker !== 'function' ? 'no-picker'
+    : typeof DecompressionStream !== 'function' ? 'no-deflate'
+      : typeof slice !== 'function' ? 'no-ranged-reader'
+        : !Number.isFinite(f.localOff) ? 'no-local-offset'
+          : !(Number(f.csize) >= 0) ? 'no-compressed-size'
+            : (method !== 0 && method !== 8) ? 'compression-method-' + method : '';
+  const streamable = !why;
+  if (!streamable) {
+    // The file has to be built in memory before the OS can be asked anything, so at least the READ
+    // reports its own progress instead of the page sitting still — and the line says which
+    // condition stopped the streaming save, so the next report names the bug instead of the browser.
+    let bytes = null;
+    try { bytes = await memberBytesWithProgress(f, slice, onProgress); } catch (e) { bytes = null; }
+    saveBytes(bytes || (await fetchAll()), name, mime);
+    return 'buffered:' + why;
+  }
   // The DIALOG comes first, before even the 30-byte local header: the click has to look like a
   // download on the spot, and one round trip before the picker would be a visible delay.
   let handle;
@@ -3494,12 +3567,13 @@ async function streamMemberSave(f, name, mime, slice, fetchAll) {
     handle = await window.showSaveFilePicker({ suggestedName: name });
   } catch (e) {
     if (e && e.name === 'AbortError') return 'cancelled';   
-    saveBytes(await fetchAll(), name, mime);
-    return 'buffered';
+    if (onProgress) onProgress(0, 0);
+    saveBytes(await memberBytesWithProgress(f, slice, onProgress).catch(() => fetchAll()), name, mime);
+    return 'buffered:picker-refused:' + (e && e.name || 'unknown');
   }
   let start;
   try { start = await memberLocalStart(f, slice); }
-  catch (e) { saveBytes(await fetchAll(), name, mime); return 'buffered'; }
+  catch (e) { saveBytes(await fetchAll(), name, mime); return 'buffered:bad-local-header'; }
   const writable = await handle.createWritable();
   const end = start + Number(f.csize);
   try {
@@ -3512,6 +3586,10 @@ async function streamMemberSave(f, name, mime, slice, fetchAll) {
         try {
           for (let a = start; a < end; a += SAVE_PAGE) {
             await w.write(await slice(a, Math.min(a + SAVE_PAGE, end) - 1));
+            // Progress is the FETCH, so a deflated member counts the bytes it pulled in, not the
+            // bytes it wrote out: the wait the visitor sees is the download, and inflating is a
+            // fraction of it. `start` is subtracted so the line starts at 0, not at the header.
+            if (onProgress) onProgress(Math.min(a + SAVE_PAGE, end) - start, end - start);
           }
           await w.close();
         } catch (e) {
@@ -3530,14 +3608,39 @@ async function streamMemberSave(f, name, mime, slice, fetchAll) {
     } else {
       for (let a = start; a < end; a += SAVE_PAGE) {
         await writable.write(await slice(a, Math.min(a + SAVE_PAGE, end) - 1));
+        if (onProgress) onProgress(Math.min(a + SAVE_PAGE, end) - start, end - start);
       }
     }
     await writable.close();
+    if (onProgress) onProgress(end - start, end - start);
     return 'streamed';
   } catch (e) {
     try { await writable.abort(); } catch (e2) { /* nothing was committed */ }
     throw e;
   }
+}
+
+// The page's own progress line under the Download button: bytes so far, the percentage of the
+// member, and the rate over the last seconds — the same three numbers the zip listing writes into
+// its link, said here because this page has no link to write them in. It is created on the first
+// click and reused, so pressing Download twice never stacks two bars.
+function saveProgressLine(btn) {
+  let box = document.getElementById('b2p-save-progress');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'b2p-save-progress';
+    box.setAttribute('style', 'margin:10px 0 0;font:13px/1.5 system-ui,sans-serif;max-width:420px');
+    const bar = document.createElement('progress');
+    bar.max = 1000;
+    bar.value = 0;
+    bar.setAttribute('style', 'display:block;width:100%;height:10px;margin:0 0 6px');
+    const line = document.createElement('span');
+    line.id = 'b2p-save-line';
+    line.textContent = 'starting…';
+    box.append(bar, line);
+    (btn.parentNode || document.body).insertBefore(box, btn.nextSibling);
+  }
+  return box;
 }
 
 function memberFileHostView(name, entry, archiveLabel, fetchBytes, slice) {
@@ -3555,10 +3658,47 @@ function memberFileHostView(name, entry, archiveLabel, fetchBytes, slice) {
     const label = btn.textContent;
     btn.disabled = true;
     btn.textContent = `saving ${fmt(size)}…`;
+    const box = saveProgressLine(btn);
+    const bar = box.querySelector('progress');
+    const line = box.querySelector('#b2p-save-line');
+    const clock = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+    const t0 = clock();
+    const samples = [];
+    // Same shape as progressOn's rate: the slope over the last few seconds, never since the click.
+    const shows = (done, total) => {
+      const t = clock();
+      if (!total) {
+        line.textContent = done > 0
+          ? `${fmt(done)} downloaded`
+          : 'reading the file — the browser will ask where to save when it is done';
+        return;
+      }
+      if (done > 0) samples.push({ t, b: done });
+      while (samples.length > 2 && t - samples[0].t > 4000) samples.shift();
+      const pct = total > 0 ? Math.min(100, Math.floor(done * 100 / total)) : 0;
+      if (total > 0) bar.value = Math.round(pct * 10);
+      const first = samples[0], last = samples[samples.length - 1];
+      let tail = '';
+      const span = last && first ? (last.t - first.t) / 1000 : 0;
+      if (span >= 1 && last.b > first.b) {
+        const rate = (last.b - first.b) / span;
+        tail = ` · ${fmt(rate)}/s · ETA ${Math.max(1, Math.ceil((total - done) / rate))}s`;
+      }
+      line.textContent = total > 0
+        ? `${fmt(done)} / ${fmt(total)} · ${pct}%${tail}`
+        : `${fmt(done)} downloaded${tail}`;
+    };
     try {
-      const how = await streamMemberSave(entry, name, mime, slice, fetchBytes);
-      if (how === 'buffered') {
-        status(`this browser cannot stream a save, so ${name} was read whole first`, false);
+      const how = await streamMemberSave(entry, name, mime, slice, fetchBytes, shows);
+      if (String(how).startsWith('buffered')) {
+        const why = String(how).split(':').slice(1).join(':') || 'unknown';
+        line.textContent = `saved ${name} (${fmt(size)}) — read whole first: ${why}`;
+        status(`the streaming save was skipped (${why}), so ${name} was read whole first`, false);
+      } else if (how === 'streamed') {
+        bar.value = 1000;
+        line.textContent = `saved ${name} (${fmt(size)}) in ${Math.max(1, Math.round((clock() - t0) / 1000))}s`;
+      } else if (how === 'cancelled') {
+        line.textContent = 'cancelled — nothing was written';
       }
     } catch (e) {
       if (!(e && e.name === 'AbortError')) {
