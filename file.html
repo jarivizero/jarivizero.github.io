@@ -127,7 +127,7 @@ const CAPACITY = 899 * 898 * 3;
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "2ef47eeb43cef0bc";
+const BUILT_VER = "e0d291440d4272ea";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   
@@ -3032,14 +3032,11 @@ function mdEscape(s) {
     .replace(/"/g, '&quot;');
 }
 
-// GitHub's anchor: lower case, spaces to dashes, and everything that is not a letter, digit, dash or
-// underscore dropped.
 function mdSlug(s) {
   return String(s).toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').trim()
     .replace(/\s+/g, '-');
 }
 
-// A url in a README is relative to the README — which is the address this page was opened by.
 function mdUrl(url) {
   const u = String(url || '').trim();
   if (!u || /^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(u)) return u;
@@ -3048,13 +3045,11 @@ function mdUrl(url) {
 
 function mdInline(src) {
   let s = mdEscape(src);
-  // Code spans first: what is inside one is literal, so its markers are parked out of reach.
   const codes = [];
   s = s.replace(/`([^`]+)`/g, (m, body) => {
     codes.push('<code>' + body.replace(/^ | $/g, '') + '</code>');
     return '\u0001' + (codes.length - 1) + '\u0001';
   });
-  // Images before links: `![x](y)` contains `[x](y)`.
   s = s.replace(/!\[([^\]]*)\]\(\s*([^)\s]+)\s*\)/g,
     (m, alt, url) => `<img src="${mdUrl(url)}" alt="${alt}">`);
   s = s.replace(/\[([^\]]*)\]\(\s*([^)\s]+)\s*\)/g,
@@ -3069,7 +3064,6 @@ function mdInline(src) {
   return s.replace(/\u0001(\d+)\u0001/g, (m, i) => codes[i]);
 }
 
-// Does this line OPEN a block of its own? A paragraph stops in front of one.
 function mdOpens(lines, i) {
   const l = lines[i] || '';
   if (/^ {0,3}(`{3,}|~{3,})/.test(l)) return true;
@@ -3086,8 +3080,6 @@ function mdOpens(lines, i) {
 function mdList(lines, start) {
   const marker = /^( {0,3})([-*+]|(\d{1,9})[.)])[ \t]+/;
   const first = lines[start].match(marker);
-  // The list's OWN indent is the level: a marker deeper than this belongs to the item above it, which
-  // is what makes a nested list nested instead of a second list beside the first.
   const base = first[1].length;
   const ordered = /\d/.test(first[2]);
   const startAt = ordered ? Number(first[3]) : 1;
@@ -3105,8 +3097,6 @@ function mdList(lines, start) {
     if (t) { task = t[1].toLowerCase() === 'x'; rest = rest.slice(t[0].length); }
     const body = [rest];
     i++;
-    // Its own continuation lines: a deeper marker, an indented paragraph — and it ends at the next
-    // marker of its OWN level, or at a block that could not belong to an item.
     while (i < lines.length && lines[i].trim()) {
       const ind = (lines[i].match(/^ */) || [''])[0].length;
       const mm = lines[i].match(marker);
@@ -3158,7 +3148,6 @@ function mdBlocks(text) {
       i++;
       continue;
     }
-    // A heading underlined with === or ---
     if (i + 1 < lines.length && /^ {0,3}(=+|-+)[ \t]*$/.test(lines[i + 1])) {
       const n = lines[i + 1].trim()[0] === '=' ? 1 : 2;
       out.push(`<h${n} id="${mdSlug(line)}">${mdInline(line.trim())}</h${n}>`);
@@ -3176,7 +3165,6 @@ function mdBlocks(text) {
       out.push('<blockquote>\n' + mdBlocks(buf.join('\n')) + '\n</blockquote>');
       continue;
     }
-    // A GFM table: a header row, a delimiter row, then rows.
     if (line.includes('|') && i + 1 < lines.length
         && /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(\|[ \t]*:?-+:?[ \t]*)+\|?[ \t]*$/.test(lines[i + 1])) {
       const cells = (l) => l.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
@@ -3197,8 +3185,6 @@ function mdBlocks(text) {
     if (/^ {0,3}([-*+]|\d{1,9}[.)])[ \t]+/.test(line)) {
       const list = mdList(lines, i);
       if (list.next > i) { out.push(list.html); i = list.next; continue; }
-      // The cursor did not move: a marker line that is not a list is a paragraph, and this
-      // page never spins on a line no rule claimed.
       out.push('<p>' + mdInline(line.trim()) + '</p>');
       i++;
       continue;
@@ -3257,8 +3243,6 @@ body.md-page{margin:0;background:var(--md-bg);color:var(--md-fg);font:16px/1.5 -
 
 function renderMarkdown(text, name) {
   resetPage('md-page');
-  // The head first, the TITLE after it: clearing the head removes the <title> that `document.title`
-  // writes, so setting it before the clear left the tab nameless.
   for (const n of [...document.head.childNodes]) n.remove();
   document.title = name || 'README.md';
   const meta = document.createElement('meta');
@@ -3269,8 +3253,6 @@ function renderMarkdown(text, name) {
   document.head.appendChild(style);
   const art = document.createElement('article');
   art.className = 'markdown-body';
-  // `innerHTML` is fed HTML this file BUILT, and every byte of the file went through mdEscape first:
-  // a README cannot put a tag on this page that mdBlocks did not write.
   art.innerHTML = mdBlocks(String(text));
   body.appendChild(art);
   return art;
@@ -3286,8 +3268,6 @@ function bareText(text) {
   return pre;
 }
 
-// An image tab in Brave is a dark canvas with the picture in the middle and its name and dimensions
-// in the title (measured: `<html style="height:100%">`, body #0e0e0e, `img { display:block; margin:auto }`).
 function bareImage(bytes, mime, name) {
   resetPage();
   bareHead('image');
@@ -3316,10 +3296,6 @@ function barePdf(bytes) {
   embed.style.cssText = 'display:block;width:100%;height:100%;border:0';
   body.appendChild(embed);
 }
-
-// A type this page cannot render — an .apk, an .rbxm, anything with no view. It is still just a file
-// on a file host, so it gets the host's page: name, size, type, date, ETag, SHA-256, and the one
-// button that hands the bytes over (2026-10-29: "non renderable files like apks or python or
 
 const SAVE_PAGE = 1 << 20;                 
 
@@ -3629,8 +3605,6 @@ function fileInfo(index) {
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const httpDate = (d) => (d ? d.toUTCString() : '');
-// What each host shows about the file, in that host's own words. Labels come from the real pages:
-// Drive says "SHA-256 checksum", MEGA "File information", the rest "File details".
 function infoRows(i, style) {
   const size = i.bytes ? fmt(i.bytes) : 'unknown';
   const full = i.bytes ? `${i.bytes.toLocaleString('en-US')} bytes` : 'unknown';
@@ -3650,8 +3624,6 @@ function infoRows(i, style) {
   const rows = [R('File name', i.name), R('Size', `${size} (${full})`), R('File type', i.mime),
     R('Modified', when), R('ETag', i.etag), R('SHA-256', i.sha || 'unknown'),
     R('Preview', 'Not available'), R('Parts', String(i.chunks))];
-  // A member of an archive says WHICH one, so the page never pretends the member is the upload
-  // (2026-10-30: a `.dll` inside a nested zip should read as a file in its own right).
   if (i.from) rows.push(R('Inside', i.from));
   return rows;
 }
@@ -3686,8 +3658,6 @@ const SKIN_COMMON = `
   body[class^="sk-"] dd { font-variant-numeric: tabular-nums; }
 `;
 const SKINS = {
-  // ── gofile: the file page as it ships today. Measured on a real share link (gofile.io/d/…):
-  //    sidebar 288px #202c48, page #162036, panels #202c48 with a 16px radius, Inter, muted #94a3b8.
   gofile: {
     css: `
       body.sk-gofile { margin:0; background:#162036; color:#e2e8f0; font:16px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -3764,9 +3734,6 @@ const SKINS = {
       .sk-gofile .foot nav { display:flex; gap:28px; justify-content:center; margin-bottom:8px; }
       .sk-gofile .foot a { color:#cbd5e1; }
       .sk-gofile .heart { color:#e5484d; }
-      /* The way OUT of a file page. Gofile's folder pages lead with a crumb, so a member of an
-         archive gets one too: the folder it came from, one click away, above the panel. Every other
-         link on a skin is decoration with nowhere to go; this one is a real address. */
       .sk-gofile .crumbs { display:flex; align-items:center; margin:0 0 14px; }
       .sk-gofile .crumbs a { display:inline-flex; align-items:center; gap:8px; height:34px;
         padding:0 14px 0 8px; border-radius:10px; background:rgba(255,255,255,.06); color:#e2e8f0;
@@ -3774,8 +3741,6 @@ const SKINS = {
         max-width:min(100%,620px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .sk-gofile .crumbs a:hover { background:rgba(255,255,255,.12); }
       .sk-gofile .crumbs svg { width:16px; height:16px; }
-      /* The folder panel used to carry gofile's "Import" button, which this page cannot do; the one
-         action a file page has is the row's Download, so the kebab takes the right-hand slot. */
       .sk-gofile .folder .kg { margin-left:auto; }
     `,
     html: (i) => `
@@ -3820,11 +3785,6 @@ const SKINS = {
         </footer>
       </div>`,
   },
-  // ── Google Drive: the NO-PREVIEW page, measured on the real link he sent 2026-10-29
-  //    (`/file/d/1jn…/view`, an .apk). Dark theme, because that is what the page he opened shows:
-  //    #131314 page, 64px bar with the green APK badge and the file name, #333537 download strip with
-  //    its chevron, and a 300x172 #282a2c card at the centre holding "No preview available" (24px)
-  //    above a #004a77 pill. The metadata rides in a dark Details panel, the same surface Drive uses.
   drive: {
     css: `
       body.sk-drive { margin:0; background:#131314; color:#e3e3e3;
@@ -3879,12 +3839,6 @@ const SKINS = {
         <aside><h2>Details</h2><dl>${rowsHtml(i, 'drive')}</dl></aside>
       </div>`,
   },
-  // ── MEGA: the folder page he sent 2026-10-29 (`mega.nz/folder/eoAHRQQT…`), carrying this one file.
-  //    Measured off that page: white, Inter, the 63px #f7f7f7 rail with the red M mark and a red
-  //    active item, a 64px top bar whose search field is the whole left half, `Save to MEGA` on
-  //    #04101e next to a #efefef `Download`, 24px chips on rgba(97,99,102,.1), then the table whose
-  //    header is 12px #616366 and whose rows are 14px #303233. The metadata is MEGA's own
-  //    "File information" block under the listing.
   mega: {
     css: `
       body.sk-mega { margin:0; background:#fff; color:rgba(51,51,51,.7);
@@ -3968,8 +3922,6 @@ const SKINS = {
           <a href="#">Report abuse</a></p>
       </div>`,
   },
-  // ── pixeldrain: measured on pixeldrain.com — #e7ecf2 page, a left nav column, a white card with
-  //    the name and a full-width red DOWNLOAD bar, and the stats strip under it.
   pixeldrain: {
     css: `
       body.sk-pixeldrain { margin:0; background:#e7ecf2; color:#111;
@@ -4017,12 +3969,6 @@ const SKINS = {
         </div>
       </div>`,
   },
-  // ── MediaFire: the .apk download page he sent 2026-10-29
-  //    (`mediafire.com/file/ykaw4xd0s9q0t5h/Good+Lock_1.3.1.apk/file`). Measured off that page:
-  //    white/grey, Open Sans, #222835 text, SIGN UP + LOG IN as pale blue-grey buttons at the top
-  //    left, the #292929 download box with a 250x60 #0074f2 DOWNLOAD (2.05MB), the #383838 Ultra
-  //    strip under it, the file block (orange archive tile, 18px name, 18px bold type, File size /
-  //    Uploaded), the #eee compatibility panel, and the #242830 consent bar along the bottom.
   mediafire: {
     css: `
       body.sk-mediafire { margin:0; background:#fff; color:#222835;
@@ -4119,8 +4065,6 @@ const SKINS = {
 };
 const SKIN_NAMES = Object.keys(SKINS);
 
-// The save is the only action on the page: the worker streams the parts straight into the browser's
-// own download when it can, and the page joins them first when it cannot.
 async function saveInfoFile(btn, info) {
   if (btn.dataset.busy) return;
   btn.dataset.busy = '1';
@@ -4138,14 +4082,11 @@ async function saveInfoFile(btn, info) {
   delete btn.dataset.busy;
 }
 
-// The skin this address asked for, `?skin=` first and the file page's own default last.
 function skinKey() {
   const want = (new URLSearchParams(location.search).get('skin') || '').toLowerCase();
   return SKINS[want] ? want : SKIN_NAMES[0];
 }
 
-// Paint a host's file page from an `info` record, and wire its one button. Two callers: the media
-// archive (whose index describes every member) and a payload this page cannot draw at all.
 function paintSkin(info, onDownload) {
   const key = skinKey();
   resetPage('sk-' + key);
@@ -4158,14 +4099,7 @@ function paintSkin(info, onDownload) {
   document.head.append(meta, style);
   document.title = info.name;
   body.innerHTML = SKINS[key].html(info);
-  // Every link except the download points at THIS page and swallows its own click. `href="#"` was
-  // wrong: on an address that carries the file in its own hash, a `#` link CLEARS that hash, and the
-  // page's `hashchange` listener then re-runs the whole route — the address lost the file and the
-  // DOM was rebuilt. These resolve to the current url, and preventDefault keeps the location and the
-  // document exactly as they are (middle-click still opens a harmless copy of this page).
   for (const a of body.querySelectorAll('a')) {
-    // The crumb is the one anchor that must keep its own address: every other link on a skin is
-    // decoration that has nowhere to go, but this one is the folder the file came from.
     if (a.id === 'b2p-back') continue;
     a.setAttribute('href', location.href);
     a.addEventListener('click', (ev) => ev.preventDefault());
@@ -4182,10 +4116,6 @@ function paintSkin(info, onDownload) {
 
 function renderFileInfo(index) {
   const info = fileInfo(index);
-  // The index becomes this address's own plan, so the download button (worker or in-page) reads the
-  // same chunk list the description did.
-  // `packed: false`: the INDEX payload was wrapped in B2PZ, the FILE it names is not, and that flag
-  // would otherwise turn every save from a stream into a blob built in the page.
   src = { ...src, name: info.name, urls: index.chunks.map((c) => c.url), direct: false, packed: false,
           tt: index };
   partCache.clear();
@@ -4193,15 +4123,6 @@ function renderFileInfo(index) {
   ttPlan = null;
   paintSkin(info, (btn) => saveInfoFile(btn, info));
 }
-
-// `/file#name` and `/file/name` are the same address, spelled differently: the second is what the
-// worker serves this page for (and what 404.html writes it into on a first visit), so the typed url
-// is never rewritten. The `?name.ext` form is an id plus the filename it should save as.
-// `?save` / `?dl=1` / `?save=1`: the address asks for the SAVE, not the player (2026-10-29,
-// after the browser's own "Save video as" failed — see the worker's `dl` branch for the measurement).
-// Accepted both ways round, because both are addresses this page hands out: `/file/<id>?save` and
-// `#<id>?save` (the hash form is what a copied `/file.html#…` address looks like).
-// `?s` is the ONE-LETTER form (2026-11-01: "if a url has ?s in it, it will download the
 
 const SAVE_REQUEST = /(?:^|[?&])(?:save|dl|s)(?:=1)?(?:&|$)/i.test(location.search)
   || /[?&](?:save|dl|s)(?:=1)?$/i.test(location.hash);
