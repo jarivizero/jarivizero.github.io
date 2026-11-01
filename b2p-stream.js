@@ -271,6 +271,17 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
   
   if (event.request.method === 'GET' && url.origin === self.location.origin) {
+    
+    if (isSaveAddress(url)) {
+      const saveName = fileAddress(url.pathname);
+      if (saveName) {
+        const nav = event.request.mode === 'navigate';
+        event.respondWith(serveFileSave(saveName, event.request).then((res) => res || (nav
+          ? loggerTags().catch(() => '').then((tags) => serveFilePage(tags))
+          : new Response('', { status: 404 }))));
+        return;
+      }
+    }
     const inside = archiveAddress(url.pathname);
     if (inside) {
       const nav = event.request.mode === 'navigate';
@@ -745,6 +756,94 @@ async function memberResponse(plan, entry, request, save) {
     return null;
   }
   return new Response(bytes, { status: 200, headers: { ...headers, 'Content-Length': String(bytes.length) } });
+}
+
+// `/file/<name>` with nothing after it, or `/<15-char id>` at the site root: the two addresses that
+// name a FILE rather than a member of one. A member is `archiveAddress` above, and a real page
+// (`/file.html`, `/bin2png`, `/file`) is excluded by the same tests the navigation route uses.
+function fileAddress(pathname) {
+  const underFile = pathname.startsWith(sitePath + 'file/');
+  const rest = underFile ? pathname.slice((sitePath + 'file/').length) : '';
+  if (rest && !rest.includes('/')) {
+    try { return decodeURIComponent(rest); } catch (e) { return null; }
+  }
+  if (!ROOT_ADDRESS.test(pathname) || isRealPath(pathname)) return null;
+  try { return decodeURIComponent(pathname.slice(sitePath.length)); } catch (e) { return null; }
+}
+
+function manifestFilePlan(bytes, previous) {
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  let name = '';
+  const parts = [];
+  for (const line of text.split('\n')) {
+    if (!line || line.startsWith('#')) continue;
+    const f = line.split('\t');
+    if (f[0] === 'file' && f[1] && !name) name = f[1];
+    else if (f[0] === 'part' && f[2]) parts.push(/^https?:/i.test(f[2])
+      ? f[2] : 'https://pbs.twimg.com/media/' + f[2] + '?format=png');
+  }
+  if (!parts.length) return null;
+  return { id: null, name: name || previous.name, mime: mimeFromName(name) || 'application/octet-stream',
+           cap: previous.cap, parts, total: 0, tt: false };
+}
+
+async function filePlan(name) {
+  let plan = await archivePlan(name);
+  for (let depth = 0; plan && depth < 3; depth++) {
+    if (!plan.total) plan.total = await totalBytes(plan);
+    if (!plan.total) return null;
+    const head = await fileBytes(plan, 0, Math.min(63, plan.total - 1));
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(head).trimStart();
+    if (text.startsWith('#bin2png-manifest')) {
+      const full = await fileBytes(plan, 0, Math.min(plan.total - 1, 262143));
+      const next = manifestFilePlan(full, plan);
+      if (!next) return null;
+      plan = next;
+      continue;
+    }
+    if (text.charAt(0) === '{') {
+      let index = null;
+      try { index = JSON.parse(new TextDecoder().decode(await fileBytes(plan, 0, plan.total - 1))); }
+      catch (e) { return null; }
+      if (!index || index.tool !== 'tt2png' || !Array.isArray(index.chunks) || !index.chunks.length) return null;
+      plan = { id: null, name: index.name || plan.name,
+               mime: mimeFromName(index.name) || plan.mime || 'application/zip',
+               cap: Number(index.chunk_size) || plan.cap || 2421906,
+               parts: index.chunks.map((c) => c.url),
+               masks: index.chunks.map((c) => Number(c.mask) || 0),
+               total: Number(index.bytes) || 0, tt: true };
+      continue;
+    }
+    return plan;                                                 // the payload IS the file
+  }
+  return null;
+}
+
+async function serveFileSave(name, request) {
+  try {
+    const plan = await filePlan(name);
+    if (!plan || !Array.isArray(plan.parts) || !plan.parts.length) return null;
+    const named = plan.name || name;
+    if (!/\.[A-Za-z0-9]{1,8}$/.test(named)) return null;          // no usable file name
+    if (!Number(plan.total)) plan.total = await totalBytes(plan);
+    const total = Number(plan.total) || 0;
+    if (!total) return null;
+    const from = resumeStart(request, total);
+    const headers = {
+      'Content-Type': mimeFromName(named) || plan.mime || 'application/octet-stream',
+      'Content-Disposition': attachmentHeader(named),
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*',
+      'Content-Length': String(total - from),
+    };
+    if (from > 0) headers['Content-Range'] = `bytes ${from}-${total - 1}/${total}`;
+    return new Response(streamRange(plan, from, total - 1, total), {
+      status: from > 0 ? 206 : 200, headers,
+    });
+  } catch (e) {
+    return null;
+  }
 }
 
 async function serveMember(address, request, save) {
