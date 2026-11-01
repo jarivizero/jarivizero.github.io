@@ -4,20 +4,16 @@
 <meta charset="UTF-8">
 <meta name="referrer" content="no-referrer">
 <script>
-
 (function () {
   var h = decodeURIComponent(location.hash || '').replace(/^#/, '');
-  
   if (/\((openfull|html)\)/i.test(h)) document.documentElement.className = 'result-only';
 })();
 (function checkBuild() {
-  
   if (!/^https?:$/.test(location.protocol)) return;
   const BUILD = '2026-10-19T04:05';
   const key = 'b2p-build-' + location.pathname;
   let seen = '';
   try { seen = sessionStorage.getItem(key) || ''; } catch (e) {}
-  
   fetch(location.pathname + location.search,
         { cache: 'no-store', headers: { Range: 'bytes=0-8191' } })
     .then((r) => (r.ok ? r.text() : ''))
@@ -52,6 +48,8 @@
     --warn: #fbbf24;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  
+
   html.result-only body { background: #000; }
   html.result-only body > *:not(#result-stage) { display: none !important; }
   #result-stage { display: none; position: fixed; inset: 0; background: #000; z-index: 9999;
@@ -64,6 +62,7 @@
   #result-stage pre { width: 100%; height: 100%; overflow: auto; padding: 1.5rem; margin: 0;
                      background: #000; color: #e4e4e7; font-size: 13px; white-space: pre-wrap; }
   #result-stage .stage-note { color: #71717a; font-size: 13px; text-align: center; padding: 2rem; }
+  
   #result-stage .stream-tools { position: absolute; top: 12px; right: 12px; z-index: 2; margin: 0;
                                 opacity: .85; }
   #result-stage .stream-tools:hover { opacity: 1; }
@@ -74,7 +73,7 @@
     font-size: 14px;
     min-height: 100vh;
   }
-  @import url('https:
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
 
   .header {
     background: var(--bg2);
@@ -687,7 +686,7 @@ let masterFollowed = false;   // a one-file master is followed ONCE, never in a 
 let decTt2png = null;     // the index when the payload is a tt2png bundle (tiktokupload.py)
 let decPackage = null;    // the log when the payload is a ttbackup/ttcloud package
 let decOversize = null;   // "900x900" when a decoded PNG was above the codec's ceiling
-let lastFilterChoice = '';
+let lastFilterChoice = '';// which filter pass won for the last part, for the stats line
 
 const faviconCanvas = document.createElement('canvas');
 faviconCanvas.width = faviconCanvas.height = 64;
@@ -702,7 +701,6 @@ function drawFavicon(now) {
   const s = 64, c = s / 2;
   fctx.clearRect(0, 0, s, s);
   if (faviconMode === 'downloading') {
-    
     fctx.strokeStyle = '#22d3ee';
     fctx.lineWidth = 8;
     fctx.lineCap = 'round';
@@ -711,7 +709,6 @@ function drawFavicon(now) {
     fctx.arc(c, c, s * 0.33, start, start + Math.PI * 1.35);
     fctx.stroke();
   } else {
-    
     const p = 0.5 + 0.5 * Math.sin(now / 500);
     fctx.fillStyle = '#3f3f46';
     fctx.beginPath(); fctx.arc(c, c, s * 0.30, 0, Math.PI * 2); fctx.fill();
@@ -725,15 +722,15 @@ requestAnimationFrame(faviconLoop);
 function setFaviconMode(mode) { faviconMode = mode === 'downloading' ? 'downloading' : 'idle'; }
 
 const CACHE_DB = 'bin2png-cache';
-const CACHE_STORE = 'files';     
-const CACHE_META  = 'meta';      
-const CACHE_HISTORY = 'history'; 
-const CACHE_MAX_BYTES = 50 * 1024 * 1024;   
-const CACHE_MAX_FILE  = 1.1 * 1024 * 1024;  
+const CACHE_STORE = 'files';     // url -> { url, bytes }
+const CACHE_META  = 'meta';      // url -> { url, size, downloadedAt, accessedAt, lastModified }
+const CACHE_HISTORY = 'history'; // url -> { url, mediaId, size, fetchedAt, lastModified, … }
+const CACHE_MAX_BYTES = 50 * 1024 * 1024;   // total storage budget
+const CACHE_MAX_FILE  = 1.1 * 1024 * 1024;  // per-file cap: anything larger is not cached
 
 function cacheOpen() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(CACHE_DB, 2);   
+    const req = indexedDB.open(CACHE_DB, 2);   // v2 adds the history store
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(CACHE_STORE)) db.createObjectStore(CACHE_STORE, { keyPath: 'url' });
@@ -774,7 +771,7 @@ async function historyAll() {
 }
 async function historyAdd(rec) {
   try { const db = await cacheDB(); await idbPut(db, CACHE_HISTORY, rec); }
-  catch (e) {  }
+  catch (e) { }
 }
 
 function pickEvictions(entries, addBytes, maxBytes) {
@@ -802,9 +799,8 @@ async function cacheGet(url) {
     if (!file) { await idbDel(db, CACHE_META, url); return null; }
     meta.accessedAt = Date.now();
     await idbPut(db, CACHE_META, meta);
-    
     return { bytes: asU8(file.bytes), lastModified: meta.lastModified ?? null };
-  } catch (e) { return null; }   
+  } catch (e) { return null; }   // no IndexedDB (private mode?) — cache is simply off
 }
 
 async function cachePut(url, bytes, lastModified) {
@@ -839,13 +835,13 @@ function savedTab() {
   try {
     const v = localStorage.getItem(TAB_KEY);
     return v === 'encode' || v === 'decode' ? v : null;
-  } catch { return null; }   
+  } catch { return null; }   // no storage (private mode, file:// on some builds): just don't remember
 }
 function switchTab(name, remember = true) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['encode','decode'][i] === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.getElementById('tab-' + name).classList.add('active');
-  if (remember) { try { localStorage.setItem(TAB_KEY, name); } catch {  } }
+  if (remember) { try { localStorage.setItem(TAB_KEY, name); } catch { } }
 }
 
 const HASH_MODE_RE = /\((newtab|openfull|download|html)\)/i;
@@ -871,26 +867,20 @@ function mediaIdsFromHash(hash) {
   }
   return ids.length ? ids : null;
 }
-
 function mediaIdFromHash(hash) {
   const ids = mediaIdsFromHash(hash);
   return ids ? ids[0] : null;
 }
 
 let hashInFlight = false;
-
 async function decodeFromHash() {
   const src = hashBody(location.hash);
   if (!src || hashInFlight) return;
-  
   if (!parseMediaIds(src) && !src.split('+').some(isNameToken)) return;
-  
   const mode0 = hashModeOf(location.hash);
-  
   let openedByUs = false;
   try { openedByUs = !!window.opener && !window.opener.closed; } catch (e) { openedByUs = false; }
   if ((mode0 === 'newtab' || mode0 === 'html') && !openedByUs && !resultTabOpened) {
-    
     if (openResultTab(mode0 === 'html' ? 'html' : 'openfull')) {
       setDecStatus(mode0 === 'html' ? 'Opening the decoded page in the new tab.' : 'Decoding in the new tab.', 'success');
       return;
@@ -898,7 +888,7 @@ async function decodeFromHash() {
   }
   hashInFlight = true;
   try {
-    switchTab('decode', false);   
+    switchTab('decode', false);   // a link decodes for this load without becoming the preference
     document.getElementById('dec-url').value = src;
     await handleDecodeUrl();
   } finally {
@@ -910,20 +900,16 @@ function hashToken(u) {
   const m = String(u || '').match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_\-]+)/);
   return m ? m[1] : String(u || '');
 }
-
 let dotAddress = false;
 
 function setResultHash(urls) {
-  
   if (idsOpenName) return;
   const body = (urls || []).map(hashToken).filter(Boolean).join('+');
   if (!body) return;
-  
   const mode = hashModeOf(location.hash);
-  
   const want = (dotAddress ? '.' : '') + body + (mode ? `(${mode})` : '');
   if (location.hash.replace(/^#/, '') === want) return;
-  try { history.replaceState(null, '', '#' + want); } catch (e) {  }
+  try { history.replaceState(null, '', '#' + want); } catch (e) { }
 }
 
 function resultBlobUrl() {
@@ -968,14 +954,12 @@ function openHtmlDocument(bytes) {
     return;
   }
   document.open();
-  
   window.__bin2pngHtml = resultFileName();
   document.write(new TextDecoder().decode(bytes));
   document.close();
 }
 
 function resultElement(doc, bytes, mime) {
-  
   const url = bytes ? URL.createObjectURL(new Blob([bytes], { type: mime })) : '';
   let el = null;
   if (mime.startsWith('video/')) {
@@ -1020,12 +1004,10 @@ function resultFileName() {
 
 function deliverResultIfRequested() {
   const mode = hashModeOf(location.hash);
-  
   if (!mode || decManifest || decTt2png || !decodedBytes) return;
-  
   if (mode === 'html') { openHtmlDocument(decodedBytes); return; }
   if (mode === 'download') {
-    saveBytes(decodedBytes, resultFileName(), decodedMime);   
+    saveBytes(decodedBytes, resultFileName(), decodedMime);   // (download) saves, never plays
     setDecStatus(`Saved ${resultFileName()} — ${fmtBytes(decodedBytes.length)}`, 'success');
     return;
   }
@@ -1045,7 +1027,6 @@ function deliverResultIfRequested() {
     }
     return;
   }
-  
   if (!openResultTab(mode === 'html' ? 'html' : 'openfull')) {
     document.documentElement.classList.add('result-only');
     const stage = document.getElementById('result-stage');
@@ -1088,7 +1069,6 @@ function handleEncodeText() {
 
 let encPackNote = '';
 async function encodeBytesToCanvas(bytes, name) {
-  
   const packed = await packPayload(bytes);
   bytes = packed.bytes;
   encPackNote = packed.note;
@@ -1096,14 +1076,13 @@ async function encodeBytesToCanvas(bytes, name) {
   const chosen = readCanvasOverride();
   if (chosen && chosen.error) { setEncStatus(chosen.error, 'error'); return; }
   const perPart = chosen ? chosen.w * chosen.h * BYTES_PER_PX : TOTAL_PIXELS * BYTES_PER_PX;
-  const maxBytes = perPart;   
+  const maxBytes = perPart;   // 2,421,906 B per PNG at 899x898; smaller when a canvas is chosen
   const total = bytes.length;
   const dimNote = document.getElementById('enc-dim-note');
   if (dimNote) dimNote.textContent = chosen
     ? `using ${chosen.w}×${chosen.h} · ${perPart.toLocaleString()} B per PNG`
     : `auto · up to ${W}×${H} · ${TOTAL_PIXELS * BYTES_PER_PX.toLocaleString()} B per PNG`;
 
-  
   const slices = [];
   if (total === 0) slices.push(bytes);
   else for (let i = 0; i < total; i += maxBytes) slices.push(bytes.subarray(i, i + maxBytes));
@@ -1138,10 +1117,9 @@ async function encodeBytesToCanvas(bytes, name) {
     }
   };
 
-  
   const encodeSlice = async (i) => {
     if (i >= nParts) { finish(); return; }
-    const px = drawPayloadToCanvas(canvas, slices[i]);   
+    const px = drawPayloadToCanvas(canvas, slices[i]);   // preview only
     if (i === 0) firstPixels = px;
     totalPixels += px;
     const blob = await encodePngBlob(slices[i]);
@@ -1182,7 +1160,6 @@ async function deflateBytes(u8) {
   const stream = new Blob([u8]).stream().pipeThrough(new CompressionStream('deflate'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
-
 function readCanvasOverride() {
   const wEl = document.getElementById('enc-w'), hEl = document.getElementById('enc-h');
   const wRaw = (wEl && wEl.value || '').trim(), hRaw = (hEl && hEl.value || '').trim();
@@ -1192,18 +1169,16 @@ function readCanvasOverride() {
     return { error: 'Canvas: give BOTH a width and a height as whole numbers, or leave both empty for auto.' };
   }
   if (w > W || h > H) return { error: `Canvas: never larger than ${W}×${H} — ${w}×${h} is refused.` };
-  
   if (w < MIN_DIM || h < MIN_DIM) return { error: `Canvas: X requires at least ${MIN_DIM}×${MIN_DIM} — ${w}×${h} is refused.` };
   return { w, h };
 }
 
-const MIN_DIM = 4;            
+const MIN_DIM = 4;            // X rejects anything smaller (324, measured on a real draft)
 function canvasFor(n) {
   const chosen = readCanvasOverride();
   if (chosen && !chosen.error) return chosen;
   const need = Math.max(1, Math.ceil(n / 3));
   if (need >= TOTAL_PIXELS) return { w: W, h: H };
-  
   return { w: W, h: Math.max(MIN_DIM, Math.ceil(need / W)) };
 }
 
@@ -1223,7 +1198,6 @@ function filterRow(f, cur, prev, stride, bpp, out, o) {
     out[o + x] = v & 0xff;
   }
 }
-
 function filterScore(buf, off, len) {
   let sum = 0;
   for (let i = 0; i < len; i++) { const v = buf[off + i]; sum += v < 128 ? v : 256 - v; }
@@ -1235,7 +1209,7 @@ function packScanlines(bytes, dims, search = false) {
   const n = bytes.length;
   const { w, h } = dims;
   const stride = w * 4, bpp = 4;
-  const raw = new Uint8Array(h * (stride + 1));   
+  const raw = new Uint8Array(h * (stride + 1));   // zero-filled: unwritten pixels are 0,0,0,0
   let prev = null;
   let cur = new Uint8Array(stride);
   let trial = new Uint8Array(stride);
@@ -1265,7 +1239,7 @@ function packScanlines(bytes, dims, search = false) {
       raw[row] = bestF;
     }
     prev = cur;
-    cur = trial;          
+    cur = trial;          // reuse the trial buffer for the next row's raw bytes, and the old cur as trial
     trial = new Uint8Array(stride);
   }
   return raw;
@@ -1276,7 +1250,6 @@ async function encodePngBlob(bytes) {
   const dv = new DataView(ihdr.buffer);
   dv.setUint32(0, dims.w); dv.setUint32(4, dims.h);
   ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
-  
   const plain = await deflateBytes(packScanlines(bytes, dims, false));
   const searched = await deflateBytes(packScanlines(bytes, dims, true));
   const idat = searched.length < plain.length ? searched : plain;
@@ -1305,7 +1278,7 @@ function drawPayloadToCanvas(canvas, bytes) {
     const base = px * 4;
     const byteOff = px * BYTES_PER_PX;
     if (byteOff >= n) {
-      d[base] = 0; d[base+1] = 0; d[base+2] = 0; d[base+3] = 0;   
+      d[base] = 0; d[base+1] = 0; d[base+2] = 0; d[base+3] = 0;   // transparent padding
     } else {
       const real = Math.min(3, n - byteOff);
       d[base]   = bytes[byteOff] ?? 0;
@@ -1408,18 +1381,16 @@ function renderModified(lastModified) {
 }
 
 function archiveUrl(raw) {
-  
   const m = raw.match(/^(https?:\/\/web\.archive\.org)\/web\/([^/]+)\/(\S+)$/i);
   if (!m) return null;
   const ts = m[2].replace(/(?:if_|id_)$/i, '');
-  return `${m[1].toLowerCase()}/web/${ts}if_/${m[3]}`;   
+  return `${m[1].toLowerCase()}/web/${ts}if_/${m[3]}`;   // if_ = the file itself, no banner
 }
 
 function parseMediaId(raw) {
   raw = (raw || '').trim();
   const archived = archiveUrl(raw);
   if (archived) return archived;
-  
   const urlMatch = raw.match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_\-]+)/);
   let id = null;
   if (urlMatch) {
@@ -1427,10 +1398,9 @@ function parseMediaId(raw) {
   } else if (/^[A-Za-z0-9_\-]{10,}$/.test(raw)) {
     id = raw;
   } else if (/^https?:\/\/\S+$/i.test(raw)) {
-    return raw;   
+    return raw;   // already a complete URL — use it verbatim (this is the cache key)
   }
   if (!id) return null;
-  
   return `https://pbs.twimg.com/media/${id}?format=png`;
 }
 
@@ -1517,7 +1487,6 @@ function saveBytes(bytes, name, mime) {
 async function fetchImageBytes(url) {
   let alt = url.includes('?format=png') ? url.replace('?format=png', '?name=orig') : null;
   if (!alt) {
-    
     const m = url.match(/^https:\/\/web\.archive\.org\/web\/[^/]+\/(?:if_|id_)?(https?:\/\/\S+)$/i);
     if (m) alt = m[1];
   }
@@ -1526,7 +1495,6 @@ async function fetchImageBytes(url) {
     try {
       const res = await fetch(u);
       if (!res.ok) { lastErr = new Error(`HTTP ${res.status} ${res.statusText} (${u})`); continue; }
-      
       const lm = res.headers.get('Last-Modified');
       let t = lm ? Date.parse(lm) : null;
       if (Number.isNaN(t)) t = null;
@@ -1538,9 +1506,9 @@ async function fetchImageBytes(url) {
 
 const STREAM_PLAN_CACHE = 'b2p-plan-v1';
 const STREAM_SCRIPT = 'b2p-stream.js';
-let streamWorker = null;   
-let decStream = null;      
-let noStream = false;      
+let streamWorker = null;   // Promise<registration|null>, cached so one page registers once
+let decStream = null;      // { name, mime, url } when the result is a live stream, not bytes
+let noStream = false;      // set when a stream failed and the whole-file path should run
 
 function streamScriptUrl() { return new URL(STREAM_SCRIPT, location.href); }
 function streamPlanKey(id) { return new URL('__b2p/plan/' + id, streamScriptUrl()).href; }
@@ -1551,12 +1519,10 @@ function ensureStreamWorker() {
       || !window.isSecureContext || location.protocol === 'file:') return Promise.resolve(null);
   streamWorker = (async () => {
     try {
-      
       const reg = await navigator.serviceWorker.register(streamScriptUrl().href);
       if (!navigator.serviceWorker.controller) {
-        
         await new Promise((res) => {
-          const t = setTimeout(res, 600);   
+          const t = setTimeout(res, 600);   // a short look, not a wait: the URL is valid either way
           navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(t); res(); }, { once: true });
         });
       }
@@ -1576,7 +1542,6 @@ async function streamUrlFor(name, urls, mime, total) {
     await cache.put(streamPlanKey(id), new Response(JSON.stringify(plan), {
       headers: { 'Content-Type': 'application/json' } }));
   } catch (e) { return null; }
-  
   const q = new URLSearchParams({ id });
   const ids = urls.map((u) => (u.match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_-]+)/) || [])[1]);
   if (ids.length === urls.length && ids.every(Boolean)) q.set('p', ids.join('+'));
@@ -1609,7 +1574,6 @@ async function startStreamDecode(urls, name, mime) {
   el.controls = true;
   el.autoplay = true;
   el.className = 'decode-media';
-  
   el.addEventListener('error', () => {
     if (!decStream) return;
     decStream = null;
@@ -1624,7 +1588,6 @@ async function startStreamDecode(urls, name, mime) {
                      'so it starts after part 1 instead of after the whole file. ' +
                      'Right-click → Save video as offers this file\u2019s own name.';
 
-  
   if (hashModeOf(location.hash) === 'openfull') {
     document.documentElement.classList.add('result-only');
     const stage = document.getElementById('result-stage');
@@ -1695,7 +1658,7 @@ async function unpackPrefix(bytes) {
       if (done) break;
       if (value && value.length) { chunks.push(value); total += value.length; }
     }
-  } catch (e) {  }
+  } catch (e) { }
   if (!total) return null;
   const out = new Uint8Array(total);
   let at = 0;
@@ -1719,9 +1682,7 @@ async function rangedProbe(targets) {
 }
 
 async function handleDecodeUrl() {
-  
   idsOpenName = null;
-  
   const box = document.getElementById('dec-url');
   let typedAddr = box.value.trim();
   dotAddress = false;
@@ -1736,11 +1697,9 @@ async function handleDecodeUrl() {
     return;
   }
   const multi = targets.length > 1;
-  
   if (dotAddress && !names.resolved.length) {
     try {
       const probe = await rangedProbe(targets);
-      
       if (probe && probe.packed) {
         setDecStatus(`${probe.mime || 'this file'} is stored PACKED (deflated) — its bytes have to ` +
                      'be decompressed from the start, so it is fetched in full rather than streamed.', 'info');
@@ -1751,9 +1710,8 @@ async function handleDecodeUrl() {
           return;
         }
       }
-    } catch (e) {  }
+    } catch (e) { }
   }
-  
   const named = streamedName(names);
   const quickMime = named ? mimeFromName(named) : '';
   const modeNow = hashModeOf(location.hash);
@@ -1768,7 +1726,7 @@ async function handleDecodeUrl() {
   }
 
   let tooLarge = false;
-  let lastModified = null;   
+  let lastModified = null;   // epoch-ms from the Last-Modified response header, if any
   const fetched = await fetchParts(targets, multi ? 'Downloading parts' : null);
   if (fetched.error) { setDecStatus(fetched.error, 'error'); setDecProgress(-1); return; }
   const parts = fetched.parts;
@@ -1776,7 +1734,6 @@ async function handleDecodeUrl() {
   if (fetched.tooLarge) tooLarge = true;
   if (lastModified === null) lastModified = fetched.lastModified;
 
-  
   let bytes = parts[0];
   if (multi) {
     const payloads = [];
@@ -1791,22 +1748,17 @@ async function handleDecodeUrl() {
     }
     bytes = concatParts(payloads);
   }
-  
   const url = multi ? targets.map((u) => u.replace(/^.*\/media\//, '').replace(/\?.*$/, '')).join('+') : targets[0];
 
-  
   setResultHash(targets);
   setDecProgress(90);
   await decodeBytes(bytes);
-  
   if (decManifest) {
     const files = decManifest;
-    
     if (files.length === 1 && (files[0].parts || []).length && !masterFollowed) {
       masterFollowed = true;
       const only = files[0];
       const targets = only.parts.map((p) => {
-        
         const ref = p.url || p.id || '';
         return /^https?:/i.test(ref) ? ref : `https://pbs.twimg.com/media/${ref}?format=png`;
       });
@@ -1835,7 +1787,6 @@ async function handleDecodeUrl() {
       setDecStatus(`${only.name} — ${fmtBytes(payloads.reduce((n, b) => n + b.length, 0))} from its master file`, 'success');
       return;
     }
-    
     if (hashModeOf(location.hash) === 'html') {
       const pick = files.find((f) => /\.x?html?$/i.test(f.name || '')) || files[0];
       const got = await manifestFetchFile(pick);
@@ -1851,10 +1802,9 @@ async function handleDecodeUrl() {
       return;
     }
     let done = 0;
-    
     const fetched = await mapLimit(files, PACKAGE_CONCURRENCY, (f) => manifestFetchFile(f));
     for (let i = 0; i < files.length; i++) {
-      if (!fetched[i]) break;                      
+      if (!fetched[i]) break;                      // stop at the first failure, as before
       saveBytes(fetched[i].bytes, files[i].name, fetched[i].mime);
       done++;
     }
@@ -1867,9 +1817,9 @@ async function handleDecodeUrl() {
   setDecProgress(100);
   renderModified(lastModified);
   const head = multi ? `${targets.length} parts → ${fmtBytes(bytes.length)}` : fmtBytes(bytes.length);
-  
   if (decManifest || decPackage || decTt2png) {
     
+
   } else if (cachedParts === targets.length) setDecStatus(`${multi ? 'Stitched ' : 'Decoded '}${head} — ${decodedMime} · from cache, no download needed`, 'success');
   else if (tooLarge) setDecStatus(`${multi ? 'Stitched ' : 'Decoded '}${head} — a part was not cached (over ${fmtBytes(CACHE_MAX_FILE)})`, 'warn');
   else if (multi) setDecStatus(`Stitched ${head} — ${decodedMime}`, 'success');
@@ -1877,9 +1827,7 @@ async function handleDecodeUrl() {
   renderCacheInfo();
   await recordHistory(url, bytes, lastModified, tooLarge);
   renderHistory();
-  
   deliverResultIfRequested();
-  
   if (names.resolved.length) {
     const el = document.getElementById('dec-status');
     if (el && !/IDSDICTIONARY/.test(el.textContent)) {
@@ -1892,9 +1840,8 @@ async function decodeBytes(bytes, depth = 0) {
   if (depth === 0) { masterFollowed = false; decZipNote = null; decInnerName = null; decZipEntries = null; decManifest = null; decTt2png = null; decPackage = null; decOversize = null; ttAutoFetched = null; ttFile = null; ttRawJson = ''; decStream = null; }
   const mime = guessMime(bytes);
   if (mime === 'image/png') {
-    
     const exact = await decodePngExact(bytes);
-    if (exact) return presentDecoded(exact, depth, true);   
+    if (exact) return presentDecoded(exact, depth, true);   // the PAYLOAD, not the PNG
     await decodePngBlob(new Blob([bytes], { type: 'image/png' }), depth);
     return;
   }
@@ -1902,7 +1849,6 @@ async function decodeBytes(bytes, depth = 0) {
 }
 
 async function presentDecoded(bytes, depth = 0, fromCodec = false) {
-  
   if (depth < 2) {
     const unpacked = await unpackPayload(bytes);
     if (unpacked) {
@@ -1911,7 +1857,6 @@ async function presentDecoded(bytes, depth = 0, fromCodec = false) {
     }
   }
   const mime = guessMime(bytes);
-  
   if (isManifest(bytes)) {
     decManifest = parseManifest(bytes);
     decodedBytes = bytes;
@@ -1922,15 +1867,13 @@ async function presentDecoded(bytes, depth = 0, fromCodec = false) {
                  'reassemble it; the names and the order are in this file, not in a `+` link.', 'success');
     return;
   }
-  
   const tt = parseTt2png(bytes);
   if (tt) {
     decTt2png = tt;
     decodedBytes = bytes;
     decodedMime = 'application/json';
-    ttRawJson = new TextDecoder().decode(bytes);   
+    ttRawJson = new TextDecoder().decode(bytes);   // verbatim, for the Raw manifest button
     showDecodedResult();
-    
     const archive = Array.isArray(tt.files) || /\.(zip|apk|jar|7z|rar|tar|tgz|bz2|xz|gz)$/i.test(tt.name || '');
     if (archive) {
       setDecStatus(`tt2png — ${tt.name}, ${fmtBytes(tt.bytes)} in ${tt.chunks.length} TikTok part(s). ` +
@@ -1943,7 +1886,6 @@ async function presentDecoded(bytes, depth = 0, fromCodec = false) {
     }
     setDecStatus(`tt2png — ${tt.name}, ${fmtBytes(tt.bytes)} in ${tt.chunks.length} TikTok part(s). ` +
                  'Reassembling it from TikTok and checking the sha256 in this index …', 'info');
-    
     const got = await tt2pngAutoFetch();
     const b = document.querySelector('#dec-body button.btn.primary');
     if (b) b.textContent = got ? '⬇ Fetch and verify again'
@@ -1990,7 +1932,7 @@ function handleDecodeFile(input) {
   const file = input.files[0];
   if (!file) return;
   setDecStatus('Reading file…', 'info');
-  renderModified(null);   
+  renderModified(null);   // a local file has no Last-Modified
   const reader = new FileReader();
   reader.onload = e => decodeBytes(new Uint8Array(e.target.result));
   reader.readAsArrayBuffer(file);
@@ -2000,7 +1942,7 @@ function alphaBytes(d) {
   const out = [];
   for (let i = 0; i < d.length; i += 4) {
     const alpha = d[i + 3];
-    if (alpha === 0) break;   
+    if (alpha === 0) break;   // transparent = end of data
     if (alpha === 255) out.push(d[i], d[i + 1], d[i + 2]);
     else if (alpha === 170) out.push(d[i], d[i + 1]);
     else if (alpha === 85) out.push(d[i]);
@@ -2032,11 +1974,10 @@ async function decodePngExact(bytes) {
       } else if (type === 'IEND') break;
       off = start + len + 4;
     }
-    
     const palette = color === 3 && depth === 8 && plte && plte.length >= 3;
     if (depth !== 8 || interlace !== 0 || !w || !h || !idat.length) return null;
     if (color !== 6 && !palette) return null;
-    if (w > W || h > H) decOversize = `${w}×${h}`;   
+    if (w > W || h > H) decOversize = `${w}×${h}`;   // shown as a note on the result, see showDecodedResult
     let zlen = 0; for (const c of idat) zlen += c.length;
     const z = new Uint8Array(zlen);
     let zo = 0; for (const c of idat) { z.set(c, zo); zo += c.length; }
@@ -2064,7 +2005,6 @@ async function decodePngExact(bytes) {
       }
     }
     if (!palette) return alphaBytes(px);
-    
     const out = [];
     for (let i = 0; i < px.length; i++) {
       const idx = px[i];
@@ -2080,7 +2020,7 @@ async function decodePngExact(bytes) {
 }
 
 function parseTt2png(bytes) {
-  if (!bytes || bytes.length < 12 || bytes[0] !== 0x7B) return null;   
+  if (!bytes || bytes.length < 12 || bytes[0] !== 0x7B) return null;   // 0x7B = '{'
   let text = '';
   try { text = new TextDecoder().decode(bytes); } catch (e) { return null; }
   if (text.indexOf('"tool"') < 0 || text.indexOf('tt2png') < 0) return null;
@@ -2106,7 +2046,7 @@ async function mapLimit(items, limit, fn) {
 }
 
 function parseTtPackage(bytes) {
-  if (!bytes || bytes.length < 12 || bytes[0] !== 0x7B) return null;   
+  if (!bytes || bytes.length < 12 || bytes[0] !== 0x7B) return null;   // '{'
   let j;
   try { j = JSON.parse(new TextDecoder().decode(bytes)); } catch (e) { return null; }
   if (!j || j.tool !== 'ttbackup' || !j.entries || typeof j.entries !== 'object') return null;
@@ -2126,7 +2066,6 @@ function parseTtPackage(bytes) {
 
 async function packageEntryBytes(entry) {
   const chunks = [...entry.chunks].sort((a, b) => a.index - b.index);
-  
   const raw = await Promise.all(chunks.map(async (c) => {
     const r = await fetch(c.url);
     if (!r.ok) throw new Error(`${entry.path}: chunk ${c.index} — HTTP ${r.status}`);
@@ -2239,15 +2178,14 @@ function showTt2pngPayload(bytes, mime, name) {
   if (!host) {
     host = document.createElement('div');
     host.id = 'tt-payload';
-    body.insertBefore(host, body.firstChild);   
+    body.insertBefore(host, body.firstChild);   // the file first, the index's details below it
   }
-  host.textContent = '';                        
+  host.textContent = '';                        // a retry must not stack two players
   const mimeEl = document.getElementById('dec-mime');
   const sizeEl = document.getElementById('dec-size');
   if (mimeEl) mimeEl.textContent = mime;
   if (sizeEl) sizeEl.textContent = fmtBytes(bytes.length);
   ttFile = { bytes, name, mime };
-  
   const save = document.createElement('button');
   save.className = 'btn tt-save';
   save.textContent = `⬇ Save ${name}`;
@@ -2260,7 +2198,6 @@ function showTt2pngPayload(bytes, mime, name) {
   if (el) {
     el.className = 'decode-media';
     host.appendChild(el);
-    
     if (typeof el.play === 'function') {
       el.play().catch(() => {
         el.muted = true;
@@ -2273,7 +2210,6 @@ function showTt2pngPayload(bytes, mime, name) {
     }
   }
   if (!el) {
-    
     const note = document.createElement('div');
     note.className = 'zip-note';
     note.textContent = `${name} is ${mime} — Chromium cannot show it here. Use the Save button ` +
@@ -2284,15 +2220,14 @@ function showTt2pngPayload(bytes, mime, name) {
 }
 
 let ttAutoFetched = null;
-let ttStreamShown = false;   
+let ttStreamShown = false;   // this index is already playing through the worker
 let ttFile = null;
-
 let ttRawJson = '';
 async function tt2pngAutoFetch() {
   const t = decTt2png;
   if (!t || ttAutoFetched === t) return null;
   ttAutoFetched = t;
-  ttStreamShown = false;        
+  ttStreamShown = false;        // a NEW index has no stream yet (a Save click on the same one keeps it)
   return tt2pngFetchAll();
 }
 
@@ -2338,7 +2273,6 @@ function showTt2pngStream(t, mime, url) {
   const sizeEl = document.getElementById('dec-size');
   if (mimeEl) mimeEl.textContent = mime;
   if (sizeEl) sizeEl.textContent = fmtBytes(t.bytes);
-  
   const save = document.createElement('button');
   save.className = 'btn tt-save';
   save.textContent = `⬇ Save ${t.name}`;
@@ -2373,7 +2307,6 @@ function showTt2pngStream(t, mime, url) {
 async function tt2pngFetchAll() {
   const t = decTt2png;
   if (!t) return null;
-  
   const early = mimeFromName(t.name) || '';
   if (/^(video|audio)\//.test(early) && !ttStreamShown) {
     const url = await tt2pngStreamUrl(t, early);
@@ -2390,7 +2323,6 @@ async function tt2pngFetchAll() {
   const urls = t.chunks.map((c) => c.url);
   setDecStatus(`tt2png — fetching ${urls.length} part(s) from TikTok, ${fmtBytes(t.bytes)} to assemble`, 'info');
   let got = await fetchParts(urls, `Fetching ${t.name} from TikTok`);
-  
   if (got.error) {
     setDecStatus(`${got.error} — retrying once`, 'info');
     got = await fetchParts(urls, `Retrying ${t.name} from TikTok`);
@@ -2423,7 +2355,6 @@ async function tt2pngFetchAll() {
 }
 
 function zipCentralDirectory(buf, fileSize) {
-  
   const at = fileSize - buf.length;
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   let eocd = -1;
@@ -2434,7 +2365,6 @@ function zipCentralDirectory(buf, fileSize) {
   let entries = dv.getUint16(eocd + 10, true);
   let cdSize = dv.getUint32(eocd + 12, true);
   let cdOff = dv.getUint32(eocd + 16, true);
-  
   if (entries === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) {
     let loc = -1;
     for (let i = eocd - 20; i >= 0; i--) {
@@ -2454,7 +2384,7 @@ function zipCentralDirectory(buf, fileSize) {
       return { error: 'this zip is ZIP64 with no locator in the tail' };
     }
   }
-  const start = cdOff - at;                       
+  const start = cdOff - at;                       // where the directory starts inside buf
   if (start < 0) {
     return { needFrom: cdOff, entries, cdSize, cdOff,
              error: `the directory starts ${fmtBytes(cdOff - at)} before this part` };
@@ -2515,7 +2445,7 @@ async function ttListZipFromTail(t) {
     if (cd.needFrom === undefined || cd.needFrom < total - covered) {
       setDecStatus(`zip tail — ${cd.error}`, 'error'); return false;
     }
-    from--; tried++;                                
+    from--; tried++;                                // the directory reaches into the part before
   }
   setDecStatus('zip tail — the last 4 part(s) did not contain a readable zip directory', 'error');
   return false;
@@ -2545,7 +2475,7 @@ function renderTailListing(cd, tailBytes, t) {
     row.className = 'zip-row';
     const nm = document.createElement('span');
     nm.className = 'zip-name';
-    nm.textContent = (f.dir ? '📁 ' : '📄 ') + f.path;   
+    nm.textContent = (f.dir ? '📁 ' : '📄 ') + f.path;   // textContent: names are untrusted
     row.appendChild(nm);
     const sz = document.createElement('span');
     sz.className = 'zip-size';
@@ -2555,7 +2485,6 @@ function renderTailListing(cd, tailBytes, t) {
     list.appendChild(row);
   }
   host.appendChild(list);
-  
   const one = cd.files.length === 1 ? cd.files[0] : null;
   if (one && !one.dir && /\.(zip|tar|tgz|tar\.gz|tar\.bz2|tar\.xz)$/i.test(one.path)) {
     const note = document.createElement('div');
@@ -2610,7 +2539,6 @@ async function decodePngBlob(blob, depth = 0) {
         const imgData = ctx.getImageData(0, 0, offscreen.width, offscreen.height);
         URL.revokeObjectURL(url);
 
-        
         const payload = alphaBytes(imgData.data);
         presentDecoded(payload, depth, true).then(resolve, reject);
         return;
@@ -2657,7 +2585,6 @@ function readZipEntries(bytes) {
 
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];
 const PACK_HEADER = 9;
-
 const PACKAGE_CONCURRENCY = 6;
 function isPacked(bytes) {
   return !!(bytes && bytes.length > PACK_HEADER
@@ -2675,7 +2602,7 @@ async function packPayload(bytes) {
     out.set(z, PACK_HEADER);
     return { bytes: out, note: `${fmtBytes(bytes.length)} → ${fmtBytes(out.length)} deflated` };
   } catch (e) {
-    return { bytes, note: '' };          
+    return { bytes, note: '' };          // no stream support, or a hostile payload: store it raw
   }
 }
 async function unpackPayload(bytes) {
@@ -2729,7 +2656,6 @@ function parseManifest(bytes) {
   for (const line of text.split('\n')) {
     if (!line || line.startsWith('#')) continue;
     const f = line.split('\t');
-    
     if (f[0] === 'file' && f.length >= 4) {
       out.push({ name: f[1], bytes: Number(f[2]) || 0, sha256: (f[4] || '').toLowerCase(), parts: [] });
     } else if (f[0] === 'part' && f.length >= 3 && out.length) {
@@ -2743,7 +2669,6 @@ const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 const IDS_ITERATIONS = 100000;
 const IDS_IV = 12, IDS_TAG = 16;
-
 const IDS_NOTES = `# IDSDICTIONARY — file name → pbs id, for bin2png.
 #
 # Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4
@@ -2775,7 +2700,6 @@ function b64uDecode(text) {
 function idsNoCrypto() {
   return typeof crypto === 'undefined' || !crypto.subtle;
 }
-
 async function idsKey(name, passphrase = '') {
   if (idsNoCrypto()) throw new Error('this origin has no crypto.subtle, so a dictionary name cannot be opened here');
   const secret = new TextEncoder().encode(name + (passphrase ? '\u0000' + passphrase : ''));
@@ -2789,7 +2713,6 @@ async function idsHmac(key, data) {
   const k = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return new Uint8Array(await crypto.subtle.sign('HMAC', k, data));
 }
-
 async function idsXor(key, iv, data) {
   const out = new Uint8Array(data.length);
   let counter = 0, at = 0;
@@ -2824,12 +2747,10 @@ async function idsDecryptId(name, payloadB64, passphrase = '') {
   return new TextDecoder().decode(await idsXor(key, iv, ct));
 }
 let idsDictCache = null;
-
 let idsOpenName = null;
 async function idsDictRecords(fresh) {
   if (idsDictCache && !fresh) return idsDictCache;
   const url = new URL(IDS_DICT_FILE, location.href);
-  
   if (fresh) url.searchParams.set('fresh', String(Date.now()));
   let res;
   try { res = await fetch(url.href); }
@@ -2846,19 +2767,16 @@ async function idsDictRecords(fresh) {
   idsDictCache = map;
   return map;
 }
-
 async function idsResolve(name) {
   const hash = await digestHex(new TextEncoder().encode(name));
   if (!hash) throw new Error('sha256 is unavailable on this origin');
   let payload = (await idsDictRecords()).get(hash);
   if (!payload) {
-    
     payload = (await idsDictRecords(true)).get(hash);
   }
   if (!payload) throw new Error(`${name} is not in ${IDS_DICT_FILE} (its hash starts ${hash.slice(0, 12)}…)`);
   return idsDecryptId(name, payload);
 }
-
 function idsExpand(plain) {
   const t = String(plain || '').trim();
   if (!t) throw new Error('the record decrypted to nothing');
@@ -2869,7 +2787,6 @@ function idsExpand(plain) {
     return `https://pbs.twimg.com/media/${id}?format=png`;
   }).join('+');
 }
-
 const IDS_NAME_PREFIX = /^(?:n|name):/i;
 const IDS_ID_PREFIX = /^id:/i;
 function isNameToken(tok) {
@@ -2878,7 +2795,6 @@ function isNameToken(tok) {
   if (IDS_NAME_PREFIX.test(t)) return true;
   return /\./.test(t) && !/^[A-Za-z0-9_-]{10,}$/.test(t);
 }
-
 async function resolveNameTokens(raw) {
   const parts = String(raw || '').split('+').map((s) => s.trim()).filter(Boolean);
   const out = [], resolved = [];
@@ -2934,7 +2850,6 @@ function renderPackageBody(body) {
         return null;
       }
     });
-    
     for (const r of results) if (r) got.push(r);
     for (const d of p.dirs) got.push({ path: d.endsWith('/') ? d : d + '/', data: new Uint8Array(0) });
     if (!got.length) {
@@ -2993,7 +2908,6 @@ function renderTt2pngBody(body) {
   sum.textContent = t.sha256 ? `sha256 ${t.sha256} — checked after the TikTok parts are joined`
                              : 'no sha256 in this index, so the assembled file cannot be checked';
   body.appendChild(sum);
-  
   const inside = Array.isArray(t.files) ? t.files : null;
   if (inside) {
     const head = document.createElement('div');
@@ -3001,7 +2915,6 @@ function renderTt2pngBody(body) {
     const listed = t.files_total && t.files_total > inside.length
       ? `${inside.length} of ${t.files_total} file(s)` : `${inside.length} file(s)`;
     const total = t.files_bytes || inside.reduce((n, f) => n + (f.size || 0), 0);
-    
     head.textContent = `Inside${t.inner ? ` ${t.inner}` : ''}: ${listed}, ${fmtBytes(total)} uncompressed` +
                        (t.inner ? ` (it is the one member of ${t.name})` : '');
     body.appendChild(head);
@@ -3027,7 +2940,6 @@ function renderTt2pngBody(body) {
   }
   const tools = document.createElement('div');
   tools.className = 'hist-tools';
-  
   const archiveIndex = Array.isArray(t.files) || /\.(zip|apk|jar|7z|rar|tar|tgz|bz2|xz|gz)$/i.test(t.name || '');
   if (archiveIndex) {
     const get = document.createElement('button');
@@ -3054,7 +2966,6 @@ function renderTt2pngBody(body) {
     btn.disabled = false;
   });
   tools.appendChild(btn);
-  
   if (!inside && /\.zip$/i.test(t.name || '')) {
     const last = t.chunks[t.chunks.length - 1] || {};
     const tail = document.createElement('button');
@@ -3071,7 +2982,6 @@ function renderTt2pngBody(body) {
     });
     tools.appendChild(tail);
   }
-  
   const raw = document.createElement('button');
   raw.className = 'btn';
   raw.id = 'tt-raw-btn';
@@ -3083,7 +2993,7 @@ function renderTt2pngBody(body) {
     pre.className = 'decode-text-pre';
     pre.id = 'tt-raw';
     pre.textContent = ttRawJson || JSON.stringify(decTt2png, null, 1);
-    body.insertBefore(pre, tools.nextSibling);   
+    body.insertBefore(pre, tools.nextSibling);   // right under the toolbar it was opened from
     raw.textContent = '⊟ Raw manifest';
   });
   tools.appendChild(raw);
@@ -3096,7 +3006,7 @@ function renderTt2pngBody(body) {
     const name = document.createElement('span');
     name.className = 'zip-name';
     let host = 'tiktok cdn';
-    try { host = new URL(c.url).host; } catch (e) {  }
+    try { host = new URL(c.url).host; } catch (e) { }
     name.textContent = `${i + 1}/${t.chunks.length}  ${host}`;
     row.appendChild(name);
     const size = document.createElement('span');
@@ -3148,7 +3058,7 @@ function renderManifestBody(body) {
     const size = document.createElement('span');
     size.className = 'zip-size';
     size.textContent = f.bytes ? fmtBytes(f.bytes) : `${f.parts.length} part(s)`;
-    if (f.sha256) size.title = 'sha256 ' + f.sha256;   
+    if (f.sha256) size.title = 'sha256 ' + f.sha256;   // the digest the download is checked against
     row.appendChild(size);
     if (f.parts.length > 1) {
       const b = document.createElement('button');
@@ -3190,10 +3100,9 @@ function renderManifestBody(body) {
         a.style.cssText = 'font-size:11.5px;color:var(--accent);word-break:break-all';
         sub.appendChild(a);
       } else {
-        sub.appendChild(size2);   
+        sub.appendChild(size2);   // not a pbs url: never rendered as a clickable link
       }
       if (p.id) {
-        
         const pid = document.createElement('span');
         pid.className = 'zip-size';
         pid.textContent = 'id ' + p.id;
@@ -3210,7 +3119,6 @@ async function manifestFetchFile(f) {
   const urls = f.parts.map(p => p.url);
   const got = await fetchParts(urls, `Fetching ${f.name}`);
   if (got.error) { setDecStatus(got.error, 'error'); return null; }
-  
   const payloads = [];
   let anyCodec = false;
   for (const p of got.parts) {
@@ -3223,7 +3131,6 @@ async function manifestFetchFile(f) {
     return null;
   }
   const bytes = payloads.length === 1 ? payloads[0] : concatParts(payloads);
-  
   if (f.sha256) {
     const digest = await digestHex(bytes);
     if (digest && digest !== f.sha256) {
@@ -3245,7 +3152,6 @@ async function manifestFetchFile(f) {
       lastModified: got.lastModified || null,
       mime,
       note: 'manifest',
-      
       part: urls.length > 1 ? i + 1 : 0,
       parts: urls.length,
       cached: got.parts[i].length <= CACHE_MAX_FILE,
@@ -3274,7 +3180,7 @@ function renderZipBody(body) {
   for (const e of entries) {
     const row = document.createElement('div'); row.className = 'zip-row';
     const name = document.createElement('span'); name.className = 'zip-name';
-    name.textContent = (e.dir ? '📁 ' : '📄 ') + e.name;   
+    name.textContent = (e.dir ? '📁 ' : '📄 ') + e.name;   // untrusted name -> textContent
     row.appendChild(name);
     if (!e.dir) {
       const size = document.createElement('span'); size.className = 'zip-size';
@@ -3300,7 +3206,7 @@ async function makeVideoThumb(bytes, mime) {
     try {
       v.currentTime = Math.min(1, (v.duration || 2) / 3);
       await new Promise(r => { v.onseeked = r; setTimeout(r, 2000); });
-    } catch (e) {  }
+    } catch (e) { }
     const w = 160;
     const h = Math.max(1, Math.round(w * (v.videoHeight && v.videoWidth ? v.videoHeight / v.videoWidth : 0.5625)));
     const c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -3359,7 +3265,6 @@ function historyMasterFile(rows) {
   for (const r of rows) {
     const urls = recordPartUrls(r);
     lines.push(`file\t${historyName(r)}\t${r.outSize || r.size || 0}\t${urls.length}`);
-    
     urls.forEach((u, i) => lines.push(
       `part\t${i + 1}/${urls.length}\t${u}\t${urls.length === 1 ? (r.mediaId || '') : ''}`));
   }
@@ -3401,7 +3306,6 @@ async function historyDownloadEncoded() {
 
 async function historySaveDictionary() {
   const rows = await historyAll();
-  
   const byName = new Map();
   for (const r of rows) {
     if (!r.name) continue;
@@ -3421,7 +3325,6 @@ async function historySaveDictionary() {
   let written = 0;
   const unordered = [];
   for (const [name, g] of [...byName].sort((a, b) => a[0].localeCompare(b[0]))) {
-    
     const perUrl = new Map();
     for (const it of g.items) {
       const prev = perUrl.get(it.url);
@@ -3432,7 +3335,6 @@ async function historySaveDictionary() {
     if (items.length === 1) {
       plain = hashToken(items[0].url);
     } else {
-      
       const ordered = items.every((i) => i.part > 0) && items.every((i) => i.parts === items.length)
         ? items.slice().sort((a, b) => a.part - b.part) : null;
       if (!ordered) { unordered.push(`${name} (${items.length} parts, no order recorded)`); continue; }
@@ -3462,7 +3364,6 @@ async function renderHistory() {
   if (!rows.length) { wrap.style.display = 'none'; return; }
   wrap.style.display = 'block';
 
-  
   const tools = document.createElement('div');
   tools.className = 'hist-tools';
   const allBox = document.createElement('input');
@@ -3487,13 +3388,11 @@ async function renderHistory() {
     b.addEventListener('click', fn);
     tools.appendChild(b);
   };
-  
   mk('⬇ Download predecoded', 'The master file itself — the .bin2png text listing every ticked entry', historyDownloadPredecoded);
   mk('⬇ Download encoded', 'The SAME master file through the codec, as PNG part(s) ready to post', historyDownloadEncoded);
-  
   mk('🔑 Save IDSDICTIONARY.txt', 'Every named entry in this history as a published keyring — one record per name, each encrypted with a key derived from its own name', historySaveDictionary);
   const stale = wrap.querySelector('.hist-tools');
-  if (stale) stale.remove();          
+  if (stale) stale.remove();          // re-render must not stack toolbars
   wrap.insertBefore(tools, listEl);
 
   for (const r of rows) {
@@ -3508,8 +3407,7 @@ async function renderHistory() {
     row.appendChild(box);
     const main = document.createElement('div'); main.className = 'hist-main';
     const id = document.createElement('div'); id.className = 'hist-id';
-    
-    id.textContent = r.name ? `📄 ${r.name} · ${r.mediaId || r.url}` : (r.mediaId || r.url);   
+    id.textContent = r.name ? `📄 ${r.name} · ${r.mediaId || r.url}` : (r.mediaId || r.url);   // untrusted -> textContent
     id.title = r.url;
     main.appendChild(id);
     const meta = document.createElement('div'); meta.className = 'hist-meta';
@@ -3541,7 +3439,7 @@ async function renderHistory() {
 function historyFetch(url) {
   switchTab('decode', false);
   document.getElementById('dec-url').value = url;
-  handleDecodeUrl();   
+  handleDecodeUrl();   // cache-first inside, so a cached entry does no network
 }
 
 function guessMime(bytes) {
@@ -3554,9 +3452,7 @@ function guessMime(bytes) {
   if (sig(0, 0x52, 0x49, 0x46, 0x46) && sig(8, 0x57, 0x45, 0x42, 0x50)) return 'image/webp';
   if (sig(0, 0x42, 0x4D)) return 'image/bmp';
   if (sig(0, 0x00, 0x00, 0x00) && (sig(4, 0x66, 0x74, 0x79, 0x70) || (bytes.length > 8 && sig(4, 0x66, 0x74, 0x79, 0x70)))) return 'video/mp4';
-  
   if (bytes.length > 8 && sig(4, 0x66, 0x74, 0x79, 0x70)) return 'video/mp4';
-  
   if (sig(0, 0x1A, 0x45, 0xDF, 0xA3)) {
     const head = new TextDecoder('latin1').decode(h.subarray(0, Math.min(64, h.length)));
     return /webm/i.test(head) ? 'video/webm' : 'video/x-matroska';
@@ -3574,7 +3470,6 @@ function guessMime(bytes) {
   if (sig(0, 0xD0, 0xCF, 0x11, 0xE0)) return 'application/msword';
   if (sig(0, 0x7F, 0x45, 0x4C, 0x46)) return 'application/x-elf';
   if (sig(0, 0x4D, 0x5A)) return 'application/x-msdownload';
-  
   const sample = bytes.slice(0, 4096);
   let ctrl = 0;
   for (const b of sample) {
@@ -3625,7 +3520,6 @@ function showDecodedResult() {
     renderPackageBody(body);
     document.getElementById('dec-result').style.display = 'block';
     document.getElementById('dec-actions').style.display = 'flex';
-    
     setDecStatus(`Package — ${decPackage.files.length} file(s) in ${decPackage.dirs.length} ` +
                  `folder(s), ${fmtBytes(decPackage.total)}. Download restores them from TikTok ` +
                  'and checks every sha256.', 'success');
@@ -3647,7 +3541,6 @@ function showDecodedResult() {
     return;
   }
 
-  
   if (decOversize) {
     const overNote = document.createElement('div');
     overNote.className = 'zip-note';
@@ -3656,7 +3549,6 @@ function showDecodedResult() {
     body.appendChild(overNote);
   }
 
-  
   if (decZipNote || decInnerName) {
     const note = document.createElement('div');
     note.className = 'zip-note';
@@ -3672,7 +3564,6 @@ function showDecodedResult() {
     body.appendChild(img);
   } else if (mime.startsWith('video/')) {
     const v = document.createElement('video');
-    
     v.src = url; v.controls = true; v.autoplay = true; v.playsInline = true; v.className = 'decode-media';
     body.appendChild(v);
   } else if (mime.startsWith('audio/')) {
@@ -3685,10 +3576,8 @@ function showDecodedResult() {
     pre.className = 'decode-text-pre';
     const code = document.createElement('code');
     code.className = 'decode-text-code';
-    
     code.textContent = text;
     pre.appendChild(code);
-    
     if (mime === 'text/html' && !hashModeOf(location.hash)) {
       const note = document.createElement('div');
       note.className = 'zip-note';
@@ -3707,7 +3596,6 @@ function showDecodedResult() {
       });
       note.appendChild(label);
       note.appendChild(open);
-      
       body.appendChild(pre);
       body.insertBefore(note, pre);
     }
@@ -3732,12 +3620,9 @@ function showDecodedResult() {
 }
 
 function downloadDecoded() {
-  
   if (ttFile) { saveBytes(ttFile.bytes, ttFile.name, ttFile.mime); return; }
-  
   if (decStream) { saveStreamedFile(decStream.name, decStream.parts); return; }
   if (!decodedBytes) return;
-  
   saveBytes(decodedBytes, resultFileName(), decodedMime);
 }
 
@@ -3762,7 +3647,7 @@ decDz.addEventListener('drop', e => {
   const file = e.dataTransfer.files[0];
   if (!file) return;
   setDecStatus('Reading file…', 'info');
-  renderModified(null);   
+  renderModified(null);   // a dropped local file has no Last-Modified
   const reader = new FileReader();
   reader.onload = ev => decodeBytes(new Uint8Array(ev.target.result));
   reader.readAsArrayBuffer(file);
