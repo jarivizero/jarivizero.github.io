@@ -346,6 +346,8 @@ const MIME_BY_EXT = {
   mp4: 'video/mp4', m4v: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
   mkv: 'video/x-matroska', mp3: 'audio/mpeg', m4a: 'audio/mp4', ogg: 'audio/ogg',
   oga: 'audio/ogg', opus: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac',
+  gif: 'image/gif', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+  pdf: 'application/pdf',
 };
 function mimeFromName(name) {
   const ext = (String(name || '').match(/\.([A-Za-z0-9]+)$/) || [])[1];
@@ -674,7 +676,7 @@ async function partsForName(name) {
       if (SUPABASE_ID.test(four)) {
         const blob = await supaManifestText(four);
         const dbPlan = blob ? planFromList(blob, name) : null;
-        return dbPlan && dbPlan.parts.length ? dbPlan.parts : null;
+        return dbPlan && dbPlan.parts.length ? dbPlan : null;
       }
       const parts = plain.split('+').map((k) => k.trim()).filter(Boolean).map(mediaUrl);
       return parts.length ? parts : null;
@@ -707,6 +709,13 @@ async function archivePlan(address, asCatbox, allowNames) {
     if (!allowNames) return null;
     const named = await partsForName(address);
     if (!named) return null;
+    if (!Array.isArray(named)) {
+      if (!Array.isArray(named.parts) || !named.parts.length) return null;
+      const file = named.name || address;
+      return { id: null, name: file, mime: mimeFromName(file) || named.mime || 'application/zip',
+               cap: Number(named.cap) || 2421906, parts: named.parts,
+               masks: named.masks, total: Number(named.total) || 0, tt: !!named.tt };
+    }
     return { id: null, name: address, mime: mimeFromName(address) || 'application/zip',
              cap: 2421906, parts: named, total: 0 };
   }
