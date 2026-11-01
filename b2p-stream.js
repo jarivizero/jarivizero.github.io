@@ -9,7 +9,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "4ef3b42d9c6645b0";
+const BUILT_VER = "eff245cc3c63c4e7";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
 const dictKey = DICT_URL + '?cache=' + BUILT_VER;
 
@@ -219,6 +219,16 @@ self.addEventListener('fetch', (event) => {
         return;
       }
     }
+    if (isRawAddress(url)) {
+      const rawName = fileAddress(url.pathname);
+      if (rawName) {
+        const nav = event.request.mode === 'navigate';
+        event.respondWith(serveFileRaw(rawName, event.request).then((res) => res || (nav
+          ? loggerTags().catch(() => '').then((tags) => serveFilePage(tags))
+          : new Response('', { status: 404 }))));
+        return;
+      }
+    }
     const inside = archiveAddress(url.pathname);
     if (inside) {
       const nav = event.request.mode === 'navigate';
@@ -301,6 +311,40 @@ function filenameHeader(name) {
 const SAVE_PARAMS = ['s', 'dl', 'save'];
 function isSaveAddress(url) {
   return SAVE_PARAMS.some((k) => url.searchParams.has(k));
+}
+
+const RAW_PARAMS = ['r'];
+function isRawAddress(url) {
+  return RAW_PARAMS.some((k) => url.searchParams.has(k));
+}
+
+function sniffMime(head) {
+  const b = head || new Uint8Array(0);
+  const at = (off, str) => {
+    for (let i = 0; i < str.length; i++) if (b[off + i] !== str.charCodeAt(i)) return false;
+    return true;
+  };
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (at(0, 'GIF87a') || at(0, 'GIF89a')) return 'image/gif';
+  if (at(0, 'RIFF') && at(8, 'WEBP')) return 'image/webp';
+  if (at(0, 'BM')) return 'image/bmp';
+  if (at(0, '%PDF')) return 'application/pdf';
+  if (b.length >= 12 && at(4, 'ftyp')) {
+    if (at(8, 'avif') || at(8, 'avis')) return 'image/avif';
+    if (at(8, 'heic') || at(8, 'heix')) return 'image/heic';
+    if (at(8, 'M4A')) return 'audio/mp4';
+    if (at(8, 'qt  ')) return 'video/quicktime';
+    return 'video/mp4';
+  }
+  if (b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b && (b[2] === 3 || b[2] === 5) && (b[3] === 4 || b[3] === 6)) {
+    return 'application/zip';
+  }
+  if (b.length >= 4 && b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return 'video/x-matroska';
+  if (at(0, 'OggS')) return 'audio/ogg';
+  if (at(0, 'ID3')) return 'audio/mpeg';
+  if (b.length >= 2 && b[0] === 0xff && (b[1] & 0xe0) === 0xe0) return 'audio/mpeg';
+  return '';
 }
 
 function headersFor(plan) {
@@ -708,6 +752,43 @@ async function serveFileSave(name, request) {
       'Access-Control-Allow-Origin': '*',
       'Content-Length': String(total - from),
       'X-B2P-Save': named,
+      'X-B2P-Sw': BUILT_VER || 'unbaked',
+    };
+    if (from > 0) headers['Content-Range'] = `bytes ${from}-${total - 1}/${total}`;
+    return new Response(streamRange(plan, from, total - 1, total), {
+      status: from > 0 ? 206 : 200, headers,
+    });
+  } catch (e) {
+    return null;
+  }
+}
+
+async function serveFileRaw(name, request) {
+  try {
+    const plan = await filePlan(name);
+    if (!plan || !Array.isArray(plan.parts) || !plan.parts.length) return null;
+    const named = plan.name || name;
+    if (!Number(plan.total)) plan.total = await totalBytes(plan);
+    const total = Number(plan.total) || 0;
+    if (!total) return null;
+    try {
+      const cache = await caches.open(PLAN_CACHE);
+      await cache.put(planKey('archive-' + await digestHex(name)), new Response(JSON.stringify(plan), {
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    } catch (e) { }
+    const head = await fileBytes(plan, 0, Math.min(31, total - 1)).catch(() => new Uint8Array(0));
+    const type = sniffMime(head) || mimeFromName(named) || plan.mime || 'application/octet-stream';
+    const from = resumeStart(request, total);
+    const headers = {
+      'Content-Type': type,
+      'Content-Disposition': filenameHeader(named),
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'public, max-age=600',
+      'ETag': '"b2p-' + total.toString(16) + '-' + (type.includes('image') ? 'i' : 'f') + '"',
+      'Access-Control-Allow-Origin': '*',
+      'Content-Length': String(total - from),
+      'X-B2P-Raw': named,
       'X-B2P-Sw': BUILT_VER || 'unbaked',
     };
     if (from > 0) headers['Content-Range'] = `bytes ${from}-${total - 1}/${total}`;
