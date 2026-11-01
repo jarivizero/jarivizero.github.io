@@ -1,23 +1,19 @@
 
-
 const PLAN_CACHE = 'b2p-plan-v2';
 const PART_CACHE = 'b2p-part-v1';
 const MARK = '/__b2p/';
 
 const PAGE_CACHE = 'b2p-page-v1';
-
 const PRECACHE = ['file', 'sw-ver.txt'];
 const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "a977a94ed4e27e36";
+const BUILT_VER = "4ef3b42d9c6645b0";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
-
 const dictKey = DICT_URL + '?cache=' + BUILT_VER;
 
 self.addEventListener('install', (event) => {
-  
   event.waitUntil(resync().then(() => self.skipWaiting()));
 });
 
@@ -32,19 +28,18 @@ async function resync(dictChanged) {
         dictChanged = !BUILT_VER || (!!live && live !== BUILT_VER);
       }
       await cache.put(urlOf(rel), res.clone());
-    } catch (e) {  }
+    } catch (e) { }
   }
   if (dictChanged) {
     try {
       const res = await fetch(DICT_URL, { cache: 'reload' });
       if (res.ok) await cache.put(dictKey, res.clone());
-    } catch (e) {  }
+    } catch (e) { }
   }
 }
 
 self.addEventListener('message', (event) => {
   if (!event.data) return;
-  
   if (event.data.type === 'whoami') {
     if (event.source && event.source.postMessage) {
       event.source.postMessage({ type: 'b2p-client', id: event.source.id || '' });
@@ -63,20 +58,17 @@ const REAL_PATH = new RegExp('^/(?:' +
 const isRealPath = (p) => p === '/' || REAL_PATH.test(p);
 
 const FILE_PAGE = /(?:^|\/)file(?:\/.*)?$/;
-
 const ROOT_ADDRESS = /^\/[A-Za-z0-9_-]{15}(?:\.[A-Za-z0-9]+)?$/;
 const PAGE_URL = new URL('file', self.location.href).href;
 
 async function serveFilePage(logger) {
   const cache = await caches.open(PAGE_CACHE);
   const hit = await cache.match(PAGE_URL);
-  
   fetch(PAGE_URL, { cache: 'reload' })
     .then((r) => (r.ok ? cache.put(PAGE_URL, r.clone()) : null)).catch(() => {});
   const res = hit || await fetch(PAGE_URL);
   if (!logger) return new Response(res.body, { status: res.status, headers: {
     ...Object.fromEntries(res.headers), 'X-B2P-Sw': BUILT_VER || 'unbaked' } });
-  
   const html = await res.text();
   const at = html.lastIndexOf('</body>');
   const out = at < 0 ? html + logger : html.slice(0, at) + logger + html.slice(at);
@@ -126,7 +118,6 @@ async function sha256Bytes(text) {
 async function digestHex(text) {
   return hexOf(await sha256Bytes(text));
 }
-
 async function plainBytes(rawKey, blob) {
   const [v, iv, ct] = String(blob).split('.');
   if (v !== 'v1' || !iv || !ct) throw new Error('not a v1 blob blob');
@@ -161,16 +152,15 @@ function blobSource() {
 }
 
 async function readSwVersion() {
-  
   try {
     const res = await fetch(urlOf('sw-ver.txt') + '?fresh=' + Date.now(), { cache: 'no-store' });
     if (res.ok) return (await res.text()).trim() || 'unknown';
-  } catch (e) {  }
+  } catch (e) { }
   try {
     const cache = await caches.open(PAGE_CACHE);
     const hit = await cache.match(urlOf('sw-ver.txt'));
     if (hit) return (await hit.text()).trim() || 'unknown';
-  } catch (e) {  }
+  } catch (e) { }
   return 'unknown';
 }
 
@@ -213,16 +203,12 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(serveDictionary(url));
     return;
   }
-  
   if (url.pathname.endsWith('/__b2p/zip/')) {
-    
     event.respondWith(serveZipJob(url, event.clientId, event.request).catch((e) => zipErrorPage('', e.message)));
     return;
   }
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
-  
   if (event.request.method === 'GET' && url.origin === self.location.origin) {
-    
     if (isSaveAddress(url)) {
       const saveName = fileAddress(url.pathname);
       if (saveName) {
@@ -246,14 +232,13 @@ self.addEventListener('fetch', (event) => {
   if (event.request.mode === 'navigate' && url.origin === self.location.origin &&
       (FILE_PAGE.test(url.pathname) ||
        (ROOT_ADDRESS.test(url.pathname) && !isRealPath(url.pathname)))) {
-    
     event.respondWith(
       loggerTags().catch(() => '').then((tags) => serveFilePage(tags)));
     return;
   }
-  
   if (event.request.method === 'GET' && event.request.mode === 'navigate' &&
       url.origin === self.location.origin) {
+    if (url.pathname === self.location.pathname || url.pathname.endsWith('/sw-ver.txt')) return;
     event.respondWith(loggedPage(event.request).catch(() => fetch(event.request)));
     return;
   }
@@ -295,10 +280,10 @@ function planFromUrl(url) {
   }
   if (!parts) return null;
   let name = 'file';
-  try { name = decodeURIComponent(url.pathname.split('/').pop() || 'file'); } catch (e) {  }
+  try { name = decodeURIComponent(url.pathname.split('/').pop() || 'file'); } catch (e) { }
   const cap = Number(url.searchParams.get('c')) || 2421906;
   return {
-    id: null,                       
+    id: null,                       // no cache entry: nothing to write a size back to
     name,
     mime: url.searchParams.get('m') || mimeFromName(name) || 'application/octet-stream',
     cap,
@@ -328,7 +313,7 @@ function headersFor(plan) {
   };
 }
 
-const WINDOW = 512 * 1024;   
+const WINDOW = 512 * 1024;   // bytes served per open-ended range request
 
 function parseRange(header, total) {
   const m = /^bytes=(\d*)-(\d*)$/.exec(String(header || '').trim());
@@ -339,7 +324,6 @@ function parseRange(header, total) {
     return { start: Math.max(0, total - n), end: total - 1, open: false };
   }
   const start = parseInt(m[1], 10);
-  
   const open = m[2] === '';
   const end = open ? total - 1 : Math.min(parseInt(m[2], 10), total - 1);
   if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) {
@@ -352,20 +336,17 @@ async function serve(request, url) {
   if (url.pathname.endsWith('/plan/') || url.pathname.includes('/plan/')) {
     return new Response('plan storage is the Cache API, not a request', { status: 405 });
   }
-  
   if (url.pathname.endsWith('/__b2p/stats')) {
     return new Response(JSON.stringify([...netBytes], null, 1), {
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
   }
-  
   if (url.pathname.endsWith('/__b2p/log')) {
     return new Response(JSON.stringify(REQLOG, null, 1), {
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
   }
   const id = url.searchParams.get('id');
-  
   const plan = (await readPlan(id)) || planFromUrl(url);
   if (!plan || !Array.isArray(plan.parts) || !plan.parts.length) {
     return new Response('no streaming plan for this address', { status: 410 });
@@ -376,14 +357,12 @@ async function serve(request, url) {
   } catch (e) {
     return new Response('cannot read the last part: ' + e.message, { status: 502 });
   }
-  
   const headers = headersFor(plan);
   if (isSaveAddress(url)) {
     headers['Content-Disposition'] = attachmentHeader(plan.name);
     if (request.method === 'HEAD') {
       return new Response(null, { status: 200, headers: { ...headers, 'Content-Length': String(total) } });
     }
-    
     return new Response(streamRange(plan, 0, total - 1, total), {
       status: 200, headers: { ...headers, 'Content-Length': String(total) },
     });
@@ -399,7 +378,6 @@ async function serve(request, url) {
   }
   const r = parseRange(range, total);
   if (!r) {
-    
     return new Response(streamRange(plan, 0, total - 1, total), {
       status: 200, headers: { ...headers, 'Content-Length': String(total) },
     });
@@ -409,7 +387,6 @@ async function serve(request, url) {
       status: 416, headers: { ...headers, 'Content-Range': `bytes */${total}` },
     });
   }
-  
   const end = r.open ? Math.min(r.end, r.start + WINDOW - 1) : r.end;
   return new Response(streamRange(plan, r.start, end, total), {
     status: 206,
@@ -423,7 +400,6 @@ async function serve(request, url) {
 
 function streamRange(plan, start, end, total) {
   let at = start;
-  
   const wide = end - start >= plan.cap - 1;
   return new ReadableStream({
     async pull(ctrl) {
@@ -433,21 +409,14 @@ function streamRange(plan, start, end, total) {
         if (i >= plan.parts.length) { ctrl.close(); return; }
         const off = at - i * plan.cap;
         const want = Math.min(end - at + 1, plan.cap - off);
-        
         const reachesNext = at + want - 1 < end;
-        
         const nextWant = Math.min(end - (at + want) + 1, plan.cap);
         if (wide && reachesNext && nextWant > 0 && i + 1 < plan.parts.length) {
-          
           if (plan.tt) ttWindow(plan, i + 1, 0, nextWant).catch(() => {});
-          
           else if (!payloadOf.has(plan.parts[i + 1])) partPayload(plan, i + 1).catch(() => {});
         }
-        
         if (plan.tt) {
-          
           const known = payloadOf.get(plan.parts[i]);
-          
           const held = known ? null : ttWinGet(plan.parts[i], off, want);
           const part = known || held || await ttWindow(plan, i, off, want);
           const n = Math.min(want, part.length - (known ? off : 0));
@@ -471,7 +440,6 @@ function streamRange(plan, start, end, total) {
 async function totalBytes(plan) {
   const last = await partPayload(plan, plan.parts.length - 1);
   plan.total = (plan.parts.length - 1) * plan.cap + last.length;
-  
   if (plan.id) {
     const cache = await caches.open(PLAN_CACHE);
     await cache.put(planKey(plan.id), new Response(JSON.stringify(plan), {
@@ -481,15 +449,15 @@ async function totalBytes(plan) {
   return plan.total;
 }
 
-const sitePath = new URL('./', self.location.href).pathname;      
+const sitePath = new URL('./', self.location.href).pathname;      // '/' or '/<repo>/'
 
 function archiveAddress(pathname) {
   if (!pathname.startsWith(sitePath + 'file/')) return null;
   const rest = pathname.slice((sitePath + 'file/').length);
   const cut = rest.indexOf('/');
-  if (cut <= 0) return null;                                       
+  if (cut <= 0) return null;                                       // /file/<archive>: the listing
   const member = rest.slice(cut + 1);
-  if (!member || member.endsWith('/')) return null;                
+  if (!member || member.endsWith('/')) return null;                // a folder: the renderer
   try {
     return { archive: decodeURIComponent(rest.slice(0, cut)), member: decodeURIComponent(member) };
   } catch (e) { return null; }
@@ -499,10 +467,10 @@ async function archivePlan(address) {
   const key = planKey('archive-' + await digestHex(address));
   const hit = await (await caches.open(PLAN_CACHE)).match(key).catch(() => null);
   if (hit) {
-    try { return await hit.json(); } catch (e) {  }
+    try { return await hit.json(); } catch (e) { }
   }
   const id = String(address).replace(/\.[A-Za-z0-9]+$/, '');
-  if (!/^[A-Za-z0-9_-]{15}$/.test(id)) return null;                
+  if (!/^[A-Za-z0-9_-]{15}$/.test(id)) return null;                // a name needs the page's keyring
   const plan = { id: null, name: address, mime: 'application/zip', cap: 2421906,
                  parts: ['https://pbs.twimg.com/media/' + id + '?format=png'], total: 0 };
   let got;
@@ -528,9 +496,8 @@ async function archivePlan(address) {
              masks: index.chunks.map((c) => Number(c.mask) || 0),
              total: Number(index.bytes) || 0, tt: true };
   }
-  
   if (got.packed) return null;
-  return plan;                                                     
+  return plan;                                                     // the parts ARE the archive
 }
 
 async function firstPayload(plan) {
@@ -574,7 +541,6 @@ async function zipDir(plan) {
     const nlen = U16(cd, k + 28), elen = U16(cd, k + 30), clen = U16(cd, k + 32);
     const localOff = U32(cd, k + 42);
     const name = new TextDecoder().decode(cd.subarray(k + 46, k + 46 + nlen));
-    
     if (!dir.has(name)) {
       dir.set(name, { name, method, csize, size: U32(cd, k + 24), crc: U32(cd, k + 16),
                       time: U16(cd, k + 12), date: U16(cd, k + 14),
@@ -624,7 +590,6 @@ async function memberResponse(plan, entry, request, save) {
   if (!entry.csize) {
     return new Response(new Uint8Array(0), { status: 200, headers: { ...headers, 'Content-Length': '0' } });
   }
-  
   if (entry.method === 0) {
     const r = parseRange(request.headers.get('Range'), entry.csize);
     if (r && r.unsatisfiable) {
@@ -688,13 +653,12 @@ async function filePlan(name) {
   for (let depth = 0; plan && depth < 4; depth++) {
     if (!plan.total) plan.total = await totalBytes(plan);
     if (!plan.total) return null;
-    
     const head = await fileBytes(plan, 0, Math.min(63, plan.total - 1));
     const wrapped = head.length > 3 && head[0] === 0x42 && head[1] === 0x32 && head[2] === 0x50 &&
                     head[3] === 0x5a;
     const text = new TextDecoder('utf-8', { fatal: false }).decode(head).replace(/^\uFEFF/, '').trimStart();
     if (!wrapped && !text.startsWith('#bin2png-manifest') && text.charAt(0) !== '{') {
-      return plan;                                               
+      return plan;                                               // the payload IS the file
     }
     const body = await listPayload(plan);
     const list = new TextDecoder('utf-8', { fatal: false }).decode(body).replace(/^\uFEFF/, '');
@@ -705,7 +669,7 @@ async function filePlan(name) {
       continue;
     }
     let index = null;
-    try { index = JSON.parse(list); } catch (e) { return plan; }  
+    try { index = JSON.parse(list); } catch (e) { return plan; }  // a .json that really is a file
     if (!index || index.tool !== 'tt2png') return plan;
     if (!Array.isArray(index.chunks) || !index.chunks.length) return null;
     plan = { id: null, name: index.name || plan.name,
@@ -723,18 +687,17 @@ async function serveFileSave(name, request) {
     const plan = await filePlan(name);
     if (!plan || !Array.isArray(plan.parts) || !plan.parts.length) return null;
     const named = plan.name || name;
-    if (!/\.[A-Za-z0-9]{1,8}$/.test(named)) return null;          
+    if (!/\.[A-Za-z0-9]{1,8}$/.test(named)) return null;          // no usable file name
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const total = Number(plan.total) || 0;
     if (!total) return null;
-    
     if (plan.parts && plan.parts.length) {
       try {
         const cache = await caches.open(PLAN_CACHE);
         await cache.put(planKey('archive-' + await digestHex(name)), new Response(JSON.stringify(plan), {
           headers: { 'Content-Type': 'application/json' },
         }));
-      } catch (e) {  }
+      } catch (e) { }
     }
     const from = resumeStart(request, total);
     const headers = {
@@ -744,7 +707,6 @@ async function serveFileSave(name, request) {
       'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': '*',
       'Content-Length': String(total - from),
-      
       'X-B2P-Save': named,
       'X-B2P-Sw': BUILT_VER || 'unbaked',
     };
@@ -764,16 +726,15 @@ async function serveMember(address, request, save) {
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const entry = await zipEntry(plan, address.member);
     if (!entry) return null;
-    
     if (/\.(zip|apk|jar|7z)$/i.test(entry.name)) return null;
     return await memberResponse(plan, entry, request, save);
   } catch (e) {
-    return null;                       
+    return null;                       // the renderer, which renders a member by itself
   }
 }
 
-const DOS_TIME_NOON = 12 << 11;              
-const DOS_DATE_1980 = (1 << 5) | 1;          
+const DOS_TIME_NOON = 12 << 11;              // 12:00:00 when the directory carries no time
+const DOS_DATE_1980 = (1 << 5) | 1;          // 1980-01-01, the zip epoch
 function attachmentHeader(name) {
   const raw = String(name || 'download.zip').replace(/[\r\n]/g, ' ').replace(/[\\/"]/g, '_').trim() || 'download.zip';
   const ascii = raw.replace(/[^\x20-\x7e]/g, '_');
@@ -787,7 +748,7 @@ function zipProgress(clientId, job, done, total, unit, bytes, bytesTotal) {
       .then((c) => c && c.postMessage({ type: 'b2p-zip', job, done, total, unit,
                                         bytes: Number(bytes) || 0, bytesTotal: Number(bytesTotal) || 0 }))
       .catch(() => {});
-  } catch (e) {  }
+  } catch (e) { }
 }
 
 function fromIterator(it) {
@@ -810,7 +771,7 @@ async function* readerChunks(stream) {
       if (value && value.length) yield value;
     }
   } finally {
-    try { reader.releaseLock(); } catch (e) {  }
+    try { reader.releaseLock(); } catch (e) { }
   }
 }
 function countingStream(stream, onBytes) {
@@ -845,9 +806,9 @@ async function* zipStream(plan, members, prefix, onMember) {
     const lh = new Uint8Array(30 + name.length);
     const lv = new DataView(lh.buffer);
     lv.setUint32(0, 0x04034b50, true);
-    lv.setUint16(4, 20, true);                  
-    lv.setUint16(6, 0x0800, true);              
-    lv.setUint16(8, 0, true);                   
+    lv.setUint16(4, 20, true);                  // version needed to extract
+    lv.setUint16(6, 0x0800, true);              // UTF-8 names (the whole site speaks UTF-8)
+    lv.setUint16(8, 0, true);                   // STORED: the folder's bytes are already here
     lv.setUint16(10, time, true);
     lv.setUint16(12, date, true);
     lv.setUint32(14, crc, true);
@@ -857,7 +818,6 @@ async function* zipStream(plan, members, prefix, onMember) {
     lh.set(name, 30);
     yield lh;
     if (size) {
-      
       let body = streamRange(plan, start, start + (Number(e.csize) || size) - 1, plan.total);
       if (e.method === 8) body = body.pipeThrough(new DecompressionStream('deflate-raw'));
       let got = 0;
@@ -951,7 +911,6 @@ async function serveZipJob(url, clientId, request) {
     if (!Number(plan.total)) throw new Error('the archive reports no size');
     const sends = job.client || clientId;
     if (job.kind === 'file' && job.member && job.inner && Number.isFinite(Number(job.inner.localOff))) {
-      
       const inner = job.inner, m = job.member;
       const head = await fileBytes(plan, inner.localOff, inner.localOff + 29);
       if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) {
@@ -981,9 +940,7 @@ async function serveZipJob(url, clientId, request) {
       return new Response(body, { status: 200, headers });
     }
     if (job.kind === 'file' && job.member && Number.isFinite(Number(job.member.localOff))) {
-      
       const m = job.member;
-      
       const localOff = (Number(job.base) || 0) + Number(m.localOff);
       const csize = Number(m.csize), method = Number(m.method) || 0;
       if (method !== 0 && method !== 8) throw new Error(`the member uses compression method ${method}`);
@@ -992,7 +949,6 @@ async function serveZipJob(url, clientId, request) {
         throw new Error('the member local header is not where the directory says it is');
       }
       const start = localOff + 30 + U16(head, 26) + U16(head, 28);
-      
       const out = Number(m.size) > 0 ? Number(m.size) : (method === 0 ? csize : 0);
       const headers = {
         'Content-Type': job.mime || 'application/octet-stream',
@@ -1000,7 +956,6 @@ async function serveZipJob(url, clientId, request) {
         'Cache-Control': 'no-store',
         'Access-Control-Allow-Origin': '*',
       };
-      
       const from = method === 0 ? resumeStart(request, csize) : 0;
       if (out) headers['Content-Length'] = String(Math.max(0, out - from));
       if (method === 0) {
@@ -1021,7 +976,6 @@ async function serveZipJob(url, clientId, request) {
       return new Response(body, { status: from > 0 ? 206 : 200, headers });
     }
     if (job.kind === 'file') {
-      
       const from = resumeStart(request, plan.total);
       const headers = {
         'Content-Type': job.mime || 'application/octet-stream',
@@ -1032,7 +986,6 @@ async function serveZipJob(url, clientId, request) {
       };
       headers['Content-Length'] = String(plan.total - from);
       if (from > 0) headers['Content-Range'] = `bytes ${from}-${plan.total - 1}/${plan.total}`;
-      
       let told = from, toldAt = 0;
       const body = countingStream(streamRange(plan, from, plan.total - 1, plan.total), (n) => {
         const done = from + n;
@@ -1045,7 +998,6 @@ async function serveZipJob(url, clientId, request) {
       return new Response(body, { status: from > 0 ? 206 : 200, headers });
     }
     const prefix = String(job.prefix || '');
-    
     const base = Number(job.base) || 0;
     const members = Array.isArray(job.members) && job.members.length
       ? job.members.map((e) => ({ name: String(e.name), size: Number(e.size) || 0,
@@ -1059,7 +1011,6 @@ async function serveZipJob(url, clientId, request) {
     if (!members.length) throw new Error(`there are no files under "${prefix}" in ${plan.name || 'the archive'}`);
     const odd = members.find((e) => e.method !== 0 && e.method !== 8);
     if (odd) throw new Error(`${odd.name} uses compression method ${odd.method}, which this page cannot unpack`);
-    
     let done = 0, bytesOut = 0, toldBytes = 0, toldAt = 0;
     const outTotal = zipTotal(members, prefix);
     const say = (force) => {
@@ -1092,15 +1043,15 @@ function concatBytes(list) {
   return all;
 }
 
-const netBytes = new Map();    
-const REQLOG = [];             
+const netBytes = new Map();    // part url -> bytes actually fetched from the network
+const REQLOG = [];             // the last 300 ranged reads: { who, part, from, want, got }
 function noteReq(who, part, from, want, got) {
   REQLOG.push({ who, part: String(part).slice(-10), from, want, got });
   if (REQLOG.length > 300) REQLOG.shift();
 }
-const prefixOf = new Map();    
-const payloadOf = new Map();   
-const partLocks = new Map();   
+const prefixOf = new Map();    // part url -> { bytes, eof }: the PNG bytes in hand so far
+const payloadOf = new Map();   // part url -> Uint8Array: a part that has been read in full
+const partLocks = new Map();   // part url -> promise, so two ranges never grow one part at once
 
 function partPayload(plan, i, need = Infinity) {
   const key = plan.parts[i];
@@ -1118,7 +1069,6 @@ async function growPart(plan, i, need) {
 
   let e = prefixOf.get(key);
   if (!e) {
-    
     const cache = await caches.open(PART_CACHE);
     const hit = await cache.match(key);
     if (hit) {
@@ -1139,7 +1089,6 @@ async function growPart(plan, i, need) {
       if (dec.payload.length >= need) return dec.payload;
     }
     if (e.eof) return settle(plan, i, dec ? dec.payload : new Uint8Array(0));
-    
     const want = need === Infinity
       ? (1 << 30)
       : Math.max(65536, Math.ceil(need * 1.08) + 8192 - e.bytes.length);
@@ -1147,18 +1096,14 @@ async function growPart(plan, i, need) {
     e.bytes = concatBytes([e.bytes, got.bytes]);
     e.eof = got.whole || got.bytes.length < want;
   }
-  
   throw new Error(`part ${i + 1} could not be read past ${e.bytes.length} B`);
 }
 
 async function fetchPrefix(url, from, want) {
   const res = await fetch(url, {
-    
     mode: 'cors',
     credentials: 'omit',
-    
     referrerPolicy: 'no-referrer',
-    
     headers: { Range: `bytes=${from}-${from + want - 1}` },
   });
   if (!res.ok) throw new Error(`part: HTTP ${res.status}`);
@@ -1166,7 +1111,6 @@ async function fetchPrefix(url, from, want) {
   netBytes.set(url, (netBytes.get(url) || 0) + body.length);
   noteReq('prefix', url, from, want, body.length);
 
-  
   return { bytes: body, whole: res.status !== 206 };
 }
 
@@ -1179,16 +1123,16 @@ function pngTail(bytes) {
     const type = String.fromCharCode(bytes[off + 4], bytes[off + 5], bytes[off + 6], bytes[off + 7]);
     const end = off + 8 + len + 4;
     if (type === 'IEND') return bytes.subarray(Math.min(end, bytes.length));
-    if (end > bytes.length) return null;      
+    if (end > bytes.length) return null;      // the envelope is not in hand yet
     off = end;
   }
   return null;
 }
 
-const TTHDR = new Map();        
-const TTWIN = new Map();        
-const TTWIN_PER_URL = 3;        
-const TTWIN_MAX = 12;           
+const TTHDR = new Map();        // part url -> the payload's byte offset in the PNG
+const TTWIN = new Map();        // part url -> [{ off, bytes }, …] newest first
+const TTWIN_PER_URL = 3;        // a member read touches a chunk from 1-2 offsets; 3 is slack
+const TTWIN_MAX = 12;           // urls kept; a long download slides through more, oldest goes first
 function ttWinGet(key, off, want) {
   for (const w of TTWIN.get(key) || []) {
     if (off >= w.off && off + want <= w.off + w.bytes.length) {
@@ -1204,9 +1148,8 @@ function ttWinPut(key, off, bytes) {
   TTWIN.set(key, list.slice(0, TTWIN_PER_URL));
   while (TTWIN.size > TTWIN_MAX) TTWIN.delete(TTWIN.keys().next().value);
 }
-
-const TTLOCK = new Map();       
-const TTFLIGHT = new Map();     
+const TTLOCK = new Map();       // "<url>#head" -> promise (the 512-byte probe)
+const TTFLIGHT = new Map();     // url -> promise of { off, bytes }: one fetch of a chunk at a time
 function ttWindow(plan, i, off, want) {
   const key = plan.parts[i];
   const serve = async () => {
@@ -1218,7 +1161,6 @@ function ttWindow(plan, i, off, want) {
   };
   const cur = TTFLIGHT.get(key);
   if (cur) {
-    
     return cur.then(
       (w) => (w && off >= w.off && off + want <= w.off + w.bytes.length
         ? w.bytes.subarray(off - w.off, off - w.off + want)
@@ -1234,7 +1176,6 @@ function ttWindow(plan, i, off, want) {
 }
 async function ttWindowNow(plan, i, off, want) {
   const key = plan.parts[i];
-  
   const known = payloadOf.get(key);
   if (known) return known.subarray(off, off + want);
   let hdr = TTHDR.get(key);
@@ -1246,7 +1187,6 @@ async function ttWindowNow(plan, i, off, want) {
   if (!res.ok && res.status !== 416) throw new Error(`part ${i + 1}: HTTP ${res.status}`);
   return finishWindow(plan, i, key, off, want, res);
 }
-
 async function ttHeader(plan, i, key) {
   const lock = key + '#head';
   const cur = TTLOCK.get(lock);
@@ -1271,9 +1211,7 @@ async function finishWindow(plan, i, key, off, want, res) {
   const raw = new Uint8Array(await res.arrayBuffer());
   netBytes.set(key, (netBytes.get(key) || 0) + raw.length);
   noteReq('win:' + String(plan.name || plan.id || '?').slice(0, 12), key, off, want, raw.length);
-  
   const body = unmaskBytes(raw, ttMask(plan, i));
-  
   if (off === 0 && plan.cap && body.length === plan.cap) {
     payloadOf.set(key, body);
     prefixOf.delete(key);
@@ -1303,7 +1241,6 @@ async function ttPartPayload(plan, i, need = Infinity) {
   const job = (partLocks.get(key) || Promise.resolve()).then(async () => {
     const cached = await (await caches.open(PART_CACHE)).match(key);
     if (cached) {
-      
       const whole = new Uint8Array(await cached.arrayBuffer());
       payloadOf.set(key, whole);
       return whole;
@@ -1343,13 +1280,12 @@ function settleTT(plan, i, payload) {
 
 function settle(plan, i, payload) {
   const key = plan.parts[i];
-  
   if (i !== plan.parts.length - 1 && payload.length !== plan.cap) {
     throw new Error(`part ${i + 1} holds ${payload.length} B, not the planned ${plan.cap} — ` +
                     'this payload was not encoded at the default canvas');
   }
   payloadOf.set(key, payload);
-  prefixOf.delete(key);   
+  prefixOf.delete(key);   // the PNG bytes that produced it are dead weight now
   caches.open(PART_CACHE).then((cache) => cache.put(key, new Response(payload, {
     headers: { 'Content-Type': 'application/octet-stream' },
   }))).catch(() => {});
@@ -1366,7 +1302,7 @@ async function pngPrefixPayload(bytes) {
     const len = dv.getUint32(off);
     const type = String.fromCharCode(bytes[off + 4], bytes[off + 5], bytes[off + 6], bytes[off + 7]);
     const start = off + 8, end = Math.min(start + len, bytes.length);
-    const cut = end < start + len;   
+    const cut = end < start + len;   // the chunk is only half in hand
     if (type === 'IHDR' && !cut) {
       w = dv.getUint32(start); h = dv.getUint32(start + 4);
       depth = bytes[start + 8]; color = bytes[start + 9]; interlace = bytes[start + 12];
@@ -1394,7 +1330,7 @@ async function inflateTolerant(zip) {
       if (done) break;
       if (value && value.length) { chunks.push(value); total += value.length; }
     }
-  } catch (e) {  }
+  } catch (e) { }
   if (chunks.length === 1) return chunks[0];
   const all = new Uint8Array(total);
   let at = 0;
