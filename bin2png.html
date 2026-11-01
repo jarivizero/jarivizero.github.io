@@ -29,9 +29,6 @@
     }).catch(() => {});
 })();
 
-// Install the range worker NOW, on any page load. It is what answers a stream address — and, since
-// 2026-10-19, any address that is not a file — so waiting for the first stream leaves the next
-// navigation to the server.
 (function bootWorker() {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator) || !window.isSecureContext) return;
   navigator.serviceWorker.register('b2p-stream.js').catch(() => {});
@@ -55,9 +52,6 @@
     --warn: #fbbf24;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  /* (openfull) is not "the page, replaced later" — it is a result view. The class is set in <head>
-     below, BEFORE the body is parsed, so the UI never paints at all (a white flash then a black
-     screen was the old behaviour). */
   html.result-only body { background: #000; }
   html.result-only body > *:not(#result-stage) { display: none !important; }
   #result-stage { display: none; position: fixed; inset: 0; background: #000; z-index: 9999;
@@ -70,7 +64,6 @@
   #result-stage pre { width: 100%; height: 100%; overflow: auto; padding: 1.5rem; margin: 0;
                      background: #000; color: #e4e4e7; font-size: 13px; white-space: pre-wrap; }
   #result-stage .stage-note { color: #71717a; font-size: 13px; text-align: center; padding: 2rem; }
-  /* The one control a fullscreen player keeps: get the whole file. */
   #result-stage .stream-tools { position: absolute; top: 12px; right: 12px; z-index: 2; margin: 0;
                                 opacity: .85; }
   #result-stage .stream-tools:hover { opacity: 1; }
@@ -680,9 +673,6 @@
 <script>
 const W = 899, H = 898;
 const TOTAL_PIXELS = W * H;
-// The encoder cuts a file at this many bytes per PNG, so part i starts at i * CAPACITY. The
-// streaming worker depends on that arithmetic: it is how a byte range finds its part without
-// downloading the parts before it.
 const CAPACITY = TOTAL_PIXELS * 3;
 
 let encodedParts = [];
