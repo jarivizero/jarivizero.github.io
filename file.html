@@ -6,7 +6,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>file</title>
 <script>
-
 try {
   const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
     || (/^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname) ? location.pathname.slice(1) : '')
@@ -15,7 +14,6 @@ try {
   const address = decodeURIComponent(hash || fromPath).trim();
   let hint = location.search.replace(/^\?/, '');
   try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
-  
   let raw = address;
   for (;;) {
     if (raw.length > 1 && (raw.charAt(0) === '.' || raw.charAt(0) === ',')) { raw = raw.slice(1); continue; }
@@ -26,7 +24,6 @@ try {
   const ext = (name.match(/\.([A-Za-z0-9]+)$/) || [])[1];
   const e = ext ? ext.toLowerCase() : '';
   const MEDIA = ['mp4','m4v','mov','webm','mkv','avi','mp3','m4a','aac','ogg','oga','opus','flac','wav'];
-  
   const IMAGE = ['png','jpg','jpeg','gif','webp','bmp','avif','ico','svg'];
   const kind = forcedMedia || MEDIA.includes(e) ? 'media'
     : (raw.charAt(0) === '.' ? 'text' : (e ? (IMAGE.includes(e) ? 'image' : 'text') : ''));
@@ -39,30 +36,31 @@ try {
     meta.content = 'light dark';
     document.head.appendChild(meta);
   } else {
-    
     document.documentElement.className = '';
   }
-} catch (e) {  }
+} catch (e) { }
 </script>
 <style>
   
   html.media-address, html.media-address body { background: #000; }
   
+
   html.image-address, html.image-address body { background: #0e0e0e; }
   
+
   
+
   .status { margin: 6px 0 0; font-size: 12px; }
   .status.error { color: #b42318; }
   img { max-width: 100%; }
   
+
 </style>
 </head>
 <body>
 <script>
 'use strict';
-
 const SITE_BASE = (() => {
-  
   const at = location.pathname.match(/\/file(\/|$)/);
   const dir = at ? location.pathname.slice(0, at.index + 1)
                  : new URL('.', location.href).pathname;
@@ -71,7 +69,6 @@ const SITE_BASE = (() => {
 const siteUrl = (rel) => new URL(rel, SITE_BASE).href;
 
 const BUILD = '2026-10-29T04:10';
-
 async function checkSiteVersion() {
   if (!/^https?:$/.test(location.protocol)) return;
   try {
@@ -88,7 +85,7 @@ async function checkSiteVersion() {
       if (worker) worker.postMessage({ type: 'resync', ver: live });
     }
     try { localStorage.setItem('b2p-sw-ver', live); } catch (e) {}
-  } catch (e) {  }
+  } catch (e) { }
 }
 window.addEventListener('load', () => { checkSiteVersion(); });
 (async function checkBuild() {
@@ -98,7 +95,6 @@ window.addEventListener('load', () => { checkSiteVersion(); });
     seen = sessionStorage.getItem(key) || '';
   } catch (e) {}
   try {
-    
     const head = await fetch(siteUrl('file.html'),
                              { cache: 'no-store', headers: { Range: 'bytes=0-8191' } });
     if (!head.ok) return;
@@ -109,28 +105,26 @@ window.addEventListener('load', () => { checkSiteVersion(); });
     const text = await res.text();
     const m = text.match(/const BUILD = '([^']+)'/);
     if (!m || m[1] === BUILD || seen === m[1]) return;
-    
     if (window.caches) {
       try {
         const cache = await caches.open('b2p-page-v1');
         await cache.put(siteUrl('file'), new Response(text, {
           headers: { 'Content-Type': 'text/html; charset=utf-8' },
         }));
-      } catch (e) {  }
+      } catch (e) { }
     }
     try { sessionStorage.setItem(key, m[1]); } catch (e) {}
     location.reload();
-  } catch (e) {  }
+  } catch (e) { }
 })();
 
-const CAPACITY = 899 * 898 * 3;          
+const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the encoder cuts it
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
-
-const BUILT_VER = "a977a94ed4e27e36";
+const BUILT_VER = "4ef3b42d9c6645b0";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
-const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   
+const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
 const PACK_HEADER = 9;
 
 const $ = (id) => document.getElementById(id);
@@ -144,7 +138,6 @@ function fmt(n) {
   return (n / 1073741824).toFixed(2) + ' GB';
 }
 function hex(n, w = 2) { return n.toString(16).padStart(w, '0'); }
-
 function mbPerSec(bytesPerSec) {
   const mb = bytesPerSec / 1048576;
   if (!Number.isFinite(mb) || mb <= 0) return '';
@@ -166,16 +159,13 @@ function resetPage(cls) {
   body.removeAttribute('style');
   document.documentElement.removeAttribute('style');
 }
-
 function bareHead(kind) {
   for (const n of [...document.head.childNodes]) n.remove();
   const meta = document.createElement('meta');
   if (kind === 'media') { meta.name = 'viewport'; meta.content = 'width=device-width'; }
   else { meta.name = 'color-scheme'; meta.content = 'light dark'; }
   document.head.appendChild(meta);
-  
 }
-
 function status(text, bad) {
   let el = $('b2p-status');
   if (!el) {
@@ -187,7 +177,6 @@ function status(text, bad) {
   el.textContent = text || '';
   if (!text) el.remove();
 }
-
 async function sha256(bytes) {
   const d = await crypto.subtle.digest('SHA-256', bytes);
   return [...new Uint8Array(d)].map((b) => hex(b)).join('');
@@ -250,7 +239,6 @@ function parseDictionary(text) {
   }
   return map;
 }
-
 async function dictionary(force) {
   if (!force) {
     if (dictCache) return dictCache;
@@ -262,7 +250,7 @@ async function dictionary(force) {
     if (!res.ok) throw new Error(`no ${IDS_DICT_FILE} next to this page (HTTP ${res.status}) — looked at ${url}`);
     return (dictCache = parseDictionary(await res.text()));
   } catch (e) {
-    if (dictCache) return dictCache;     
+    if (dictCache) return dictCache;     // a failed refresh must not throw away the list we have
     throw e;
   }
 }
@@ -280,7 +268,6 @@ function isNameToken(tok) {
 function pbsUrls(plain) {
   const t = String(plain || '').trim();
   if (!t) throw new Error('the record decrypted to nothing');
-  
   return t.split('+').map((k) => k.trim()).filter(Boolean).map((part) => {
     if (/^https?:/i.test(part)) return part;
     if (!/^[A-Za-z0-9_-]+$/.test(part)) {
@@ -296,24 +283,20 @@ async function resolveToken(token) {
   if (/^https?:/i.test(t)) return { name: decodeURIComponent(t.split('/').pop().split('?')[0]) || 'file', urls: [t] };
   if (IDS_ID_PREFIX.test(t)) {
     const id = t.replace(IDS_ID_PREFIX, '').trim();
-    
     return { name: id, urls: pbsUrls(id) };
   }
   if (isNameToken(t)) {
     const name = t.replace(IDS_NAME_PREFIX, '');
     const hash = await sha256(new TextEncoder().encode(name));
     let record = (await dictionary()).get(hash);
-    
     if (!record) record = (await dictionary(true).catch(() => null) || new Map()).get(hash);
     if (record) return { name, urls: pbsUrls(await idsDecrypt(name, record)) };
-    
     const stem = name.replace(/\.[A-Za-z0-9]+$/, '');
     if (stem && stem !== name && PBS_ID.test(stem)) {
       return { name, urls: pbsUrls(stem), guess: true };
     }
     throw new Error(`${name} is not in ${IDS_DICT_FILE} (its hash starts ${hash.slice(0, 12)}…)`);
   }
-  
   const list = t.split('+').map((s) => s.trim()).filter(Boolean);
   const urls = [];
   let name = null;
@@ -325,7 +308,6 @@ async function resolveToken(token) {
   }
   return { name, urls };
 }
-
 async function decodePngExact(bytes) {
   if (!(bytes && bytes.length > 33 && bytes[0] === 0x89 && bytes[1] === 0x50)) return null;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -408,7 +390,6 @@ async function inflate(comp, format) {
   return new Uint8Array(await new Response(
     new Blob([comp]).stream().pipeThrough(new DecompressionStream(format))).arrayBuffer());
 }
-
 async function unpackPrefix(bytes) {
   if (!isPacked(bytes)) return null;
   const chunks = [];
@@ -421,7 +402,7 @@ async function unpackPrefix(bytes) {
       if (done) break;
       if (value && value.length) { chunks.push(value); total += value.length; }
     }
-  } catch (e) {  }
+  } catch (e) { }
   if (!total) return null;
   const out = new Uint8Array(total);
   let at = 0;
@@ -474,7 +455,7 @@ async function partPayloadLoose(i) {
 }
 
 async function sourceSize() {
-  if (Number(src.totalHint)) return src.totalHint;      
+  if (Number(src.totalHint)) return src.totalHint;      // remembered with the directory listing
   if (src.direct) {
     const res = await fetch(src.urls[0], { method: 'HEAD' });
     if (!res.ok) {
@@ -484,7 +465,6 @@ async function sourceSize() {
     }
     return Number(res.headers.get('Content-Length')) || 0;
   }
-  
   if (src.tt) {
     return Number(src.tt.bytes) ||
       src.tt.chunks.reduce((n, c) => n + (Number(c.size) || 0), 0);
@@ -509,21 +489,17 @@ async function sourceRange(start, end) {
       throw err;
     }
     if (res.status !== 206) {
-      
       const all = new Uint8Array(await res.arrayBuffer());
       return all.subarray(start, end + 1);
     }
     return new Uint8Array(await res.arrayBuffer());
   }
-  
   if (src.tt) {
-    
     const plan = await ttPlanUrl();
     if (plan) {
       const bytes = await streamRange(plan, start, end);
       if (bytes) return bytes;
     }
-    
     const pieces = [];
     let base = 0;
     for (let i = 0; i < src.tt.chunks.length && base <= end; i++) {
@@ -560,9 +536,7 @@ async function wholeFile(onProgress) {
     noteLastModified(res);
     return unpackPayload(new Uint8Array(await res.arrayBuffer()));
   }
-  
   if (src.tt) {
-    
     const n = src.tt.chunks.length;
     const pieces = new Array(n);
     let done = 0;
@@ -587,7 +561,6 @@ async function wholeFile(onProgress) {
 
 const MIME_BY_EXT = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
-  
   bmp: 'image/bmp', ico: 'image/x-icon', mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
   mp3: 'audio/mpeg', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac',
   wav: 'audio/wav', m4a: 'audio/mp4',
@@ -602,7 +575,6 @@ function mimeFromName(name) {
   const ext = (String(name || '').match(/\.([A-Za-z0-9]+)$/) || [])[1];
   return (ext && MIME_BY_EXT[ext.toLowerCase()]) || '';
 }
-
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
   for (let n = 0; n < 256; n++) {
@@ -617,7 +589,7 @@ function crc32(bytes) {
   for (let i = 0; i < bytes.length; i++) c = (c >>> 8) ^ CRC_TABLE[(c ^ bytes[i]) & 0xff];
   return (c ^ 0xffffffff) >>> 0;
 }
-function zipOf(entries) {                 
+function zipOf(entries) {                 // [{ path, bytes }] → the archive, as a Uint8Array
   const enc = new TextEncoder();
   const locals = [], centrals = [];
   let at = 0;
@@ -649,9 +621,9 @@ function zipOf(entries) {
   return concat([...locals, cd, eocd]);
 }
 
-const ZIP_JOBS = new Map();          
+const ZIP_JOBS = new Map();          // job id → the function that renders its progress
 let pageClientId = '';
-let clientWaiter = null;              
+let clientWaiter = null;              // one in-flight `whoami` ask
 if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (ev) => {
     const d = ev.data || {};
@@ -668,7 +640,6 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     }
   });
 }
-
 function pageClient() {
   if (pageClientId) return Promise.resolve(pageClientId);
   const ctl = navigator.serviceWorker && navigator.serviceWorker.controller;
@@ -684,7 +655,6 @@ function pageClient() {
   }
   return clientWaiter.promise;
 }
-
 async function startStreamedSave(job, onProgress) {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return null;
   const reg = await ensureStreamWorker();
@@ -699,7 +669,6 @@ async function startStreamedSave(job, onProgress) {
     }));
   } catch (e) { return null; }
   if (onProgress) ZIP_JOBS.set(id, onProgress);
-  
   const a = document.createElement('a');
   a.href = new URL('__b2p/zip/?id=' + encodeURIComponent(id), streamScriptUrl()).href;
   a.rel = 'noopener';
@@ -708,7 +677,6 @@ async function startStreamedSave(job, onProgress) {
   a.remove();
   return { id };
 }
-
 function planForWorker(name, mime) {
   return {
     name: name || src.name || 'archive.zip',
@@ -720,7 +688,6 @@ function planForWorker(name, mime) {
     tt: !!src.tt,
   };
 }
-
 function masksNow() {
   return (src.tt && Array.isArray(src.tt.chunks))
     ? src.tt.chunks.map((c) => Number(c.mask) || 0) : [];
@@ -734,11 +701,10 @@ function canStreamArchive() {
   return !src.packed && !src.direct
     && Array.isArray(src.urls) && src.urls.length > 0;
 }
-
 const RATE_WINDOW_MS = 4000;
 function progressOn(link, label, restore) {
   const clock = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
-  const samples = [];                        
+  const samples = [];                        // { t, b }: byte counts of the last few seconds
   return (p) => {
     if (!p) return;
     if (p.error) {
@@ -747,7 +713,6 @@ function progressOn(link, label, restore) {
       status(`${label.replace('…', '')} failed — ${p.error}`, true);
       return;
     }
-    
     const bytes = Number(p.bytes != null ? p.bytes : (p.unit === 'bytes' ? p.done : 0)) || 0;
     const bytesTotal = Number(p.bytesTotal != null ? p.bytesTotal : (p.unit === 'bytes' ? p.total : 0)) || 0;
     const t = clock();
@@ -772,7 +737,6 @@ function progressOn(link, label, restore) {
     link.dataset.busy = '1';
     link.textContent = bits.length ? `${label} ${bits.join(' · ')}` : `${label} (${p.done}/${p.total})`;
     if (p.total && p.done >= p.total) {
-      
       setTimeout(() => { link.dataset.busy = ''; link.textContent = restore; }, 2500);
       link.dataset.busy = '';
     }
@@ -791,7 +755,7 @@ async function poolEach(list, width, fn) {
 }
 
 function saveBytes(bytes, name, mime) {
-  const blob = new Blob([bytes], { type: 'application/octet-stream' });   
+  const blob = new Blob([bytes], { type: 'application/octet-stream' });   // a save, never a player
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name || 'file.bin';
@@ -801,7 +765,7 @@ function saveBytes(bytes, name, mime) {
   setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
 
-const STREAM_PLAN_CACHE = 'b2p-plan-v2';      
+const STREAM_PLAN_CACHE = 'b2p-plan-v2';      // v2: a plan carries `masks` (see b2p-stream.js)
 const STREAM_SCRIPT = 'b2p-stream.js';
 let streamWorker = null;
 
@@ -817,13 +781,11 @@ function ensureStreamWorker() {
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return Promise.resolve(null);
   streamWorker = (async () => {
     try {
-      
       const reg = await navigator.serviceWorker.register(streamScriptUrl().href);
-      
       reg.update().catch(() => {});
       if (!navigator.serviceWorker.controller) {
         await new Promise((res) => {
-          const t = setTimeout(res, 600);   
+          const t = setTimeout(res, 600);   // a short look, not a wait: the URL is valid either way
           navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(t); res(); }, { once: true });
         });
       }
@@ -843,7 +805,6 @@ async function streamUrlFor(name, urls, mime) {
       headers: { 'Content-Type': 'application/json' },
     }));
   } catch (e) { return null; }
-  
   const q = new URLSearchParams({ id });
   const ids = urls.map((u) => (u.match(/pbs\.twimg\.com\/media\/([A-Za-z0-9_-]+)/) || [])[1]);
   if (ids.length === urls.length && ids.every(Boolean)) q.set('p', ids.join('+'));
@@ -857,7 +818,6 @@ async function peekHead(n = 64) {
     if (src.direct) return await sourceRange(0, n - 1);
     const ends = await rangedEnds();
     if (ends) return ends.head.subarray(0, n);
-    
     const first = await partPayload(0);
     return first.subarray(0, n);
   } catch (e) { return null; }
@@ -867,7 +827,6 @@ function isManifestHead(bytes) {
   const t = new TextDecoder('latin1').decode(bytes.subarray(0, 20));
   return t.startsWith('#bin2png-manifest');
 }
-
 async function peekForRender() {
   const raw = await peekHead(4096).catch(() => null);
   if (!raw) return { raw: null, plain: null, packed: false };
@@ -886,7 +845,6 @@ async function saveAsDownload(mime) {
   else url = await streamUrlFor(src.name, src.urls, mime);
   if (url) {
     const sep = url.includes('?') ? '&' : '?';
-    
     const a = document.createElement('a');
     a.href = url + sep + 'dl=1';
     a.rel = 'noopener';
@@ -895,14 +853,12 @@ async function saveAsDownload(mime) {
     a.remove();
     return;
   }
-  
   saveBytes(await wholeFile(), src.name, mime);
 }
 
 async function renderMedia(mime) {
   mime = mime || 'application/octet-stream';
   const head = await peekForRender();
-  
   if (manifestDepth < 1 && isManifestHead(head.plain)) {
     const master = followManifest(await wholeFile());
     if (master) {
@@ -912,7 +868,6 @@ async function renderMedia(mime) {
       return renderMedia(mimeFromName(master.name) || '');
     }
   }
-  
   if (head.plain) {
     const text = new TextDecoder('utf-8', { fatal: false }).decode(head.plain.subarray(0, 64)).trimStart();
     if (text.startsWith('{') || text.startsWith('[')) {
@@ -922,23 +877,18 @@ async function renderMedia(mime) {
   }
   if (SAVE_REQUEST) return saveAsDownload(mime);
   const isVideo = mime.startsWith('video/');
-  
   const el = pendingVideo && (isVideo === (pendingVideo.tagName === 'VIDEO'))
     ? pendingVideo : bareMedia(isVideo ? 'video' : 'audio');
   pendingVideo = null;
 
-  
   if (!src.direct && !src.packed && head.packed) src.packed = true;
   if (src.direct) {
-    
     setMediaSource(el, src.urls[0], mime);
   } else {
-    
     const url = src.packed ? null : await streamUrlFor(src.name, src.urls, mime);
     if (url) setMediaSource(el, url, mime);
     else setMediaSource(el, URL.createObjectURL(new Blob([await wholeFile()], { type: mime })), mime);
   }
-  
   if (src.guess) {
     el.addEventListener('error', () => { if (!el.readyState) show404(); }, { once: true });
   }
@@ -963,11 +913,9 @@ function findEocd(buf) {
 }
 
 async function readZipCentral() {
-  
   if (src.direct || src.tt) return readZipCentralDirect();
   const n = src.urls.length;
   let last = await partPayload(n - 1);
-  
   let block = last, at = (n - 1) * CAPACITY, from = n - 2;
   let eocd = findEocd(block);
   while (eocd < 0 && from >= 0 && block.length < 70000) {
@@ -977,7 +925,6 @@ async function readZipCentral() {
     eocd = findEocd(block);
   }
   if (eocd < 0) {
-    
     if (await followIndex(await sourceRange(0, 4095).catch(() => null))) return readZipCentral();
     throw new Error('no zip end-of-directory record in the last part');
   }
@@ -986,7 +933,6 @@ async function readZipCentral() {
   let cdSize = u32(block, eocd + 12);
   let cdOff = u32(block, eocd + 16);
   if (entries === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) {
-    
     let loc = -1;
     for (let i = eocd - 20; i >= 0; i--) if (u32(block, i) === 0x07064b50) { loc = i; break; }
     if (loc >= 0) {
@@ -999,7 +945,6 @@ async function readZipCentral() {
       } else throw new Error('this zip is ZIP64 and its directory is further back than one part');
     } else throw new Error('this zip is ZIP64 with no locator in the tail');
   }
-  
   if (cdOff < at) {
     const first = Math.floor(cdOff / CAPACITY);
     const pieces = [];
@@ -1043,7 +988,7 @@ async function readZipCentralDirect() {
 function sniffMime(head) {
   const b = head;
   const at = (i, ...sig) => sig.every((v, k) => b[i + k] === v);
-  if (b.length > 12 && at(4, 0x66, 0x74, 0x79, 0x70)) return 'video/mp4';       
+  if (b.length > 12 && at(4, 0x66, 0x74, 0x79, 0x70)) return 'video/mp4';       // …ftyp
   if (at(0, 0x1a, 0x45, 0xdf, 0xa3)) {
     const head = new TextDecoder('latin1').decode(b.subarray(0, Math.min(64, b.length)));
     return /webm/i.test(head) ? 'video/webm' : 'video/x-matroska';
@@ -1052,13 +997,11 @@ function sniffMime(head) {
   if (at(0, 0xff, 0xd8, 0xff)) return 'image/jpeg';
   if (at(0, 0x47, 0x49, 0x46, 0x38)) return 'image/gif';
   if (at(0, 0x52, 0x49, 0x46, 0x46) && b.length > 11) return 'image/webp';
-  
   if (b.length > 5 && at(0, 0x00, 0x00, 0x01, 0x00)) return 'image/x-icon';
   if (at(0, 0x25, 0x50, 0x44, 0x46)) return 'application/pdf';
   if (at(0, 0x49, 0x44, 0x33)) return 'audio/mpeg';
   if (at(0, 0x4f, 0x67, 0x67, 0x53)) return 'audio/ogg';
   if (at(0, 0x66, 0x4c, 0x61, 0x43)) return 'audio/flac';
-  
   const sample = b.subarray(0, Math.min(4096, b.length));
   let ctrl = 0, printable = 0;
   for (const c of sample) {
@@ -1111,12 +1054,10 @@ async function sniffSource() {
     const tail = await sourceRange(Math.max(0, total - 65557), total - 1);
     if (looksLikeZipTail(tail)) return { zip: true };
     const head = await sourceRange(0, Math.min(total - 1, 65535));
-    
     const unpacked = isPacked(head) ? await unpackPayload(head) : null;
     return { mime: sniffMime(unpacked || head), head };
   }
   if (src.ranged) {
-    
     const ends = await rangedEnds().catch(() => null);
     if (ends) {
       if (looksLikeZipTail(ends.tail)) return { zip: true };
@@ -1124,18 +1065,15 @@ async function sniffSource() {
       const plain = packed ? await unpackPrefix(ends.head) : null;
       return { mime: sniffMime(plain || ends.head), packed, head: ends.head };
     }
-    
   }
   try {
     const tail = await partPayload(src.urls.length - 1);
     if (looksLikeZipTail(tail)) return { zip: true };
     const head = await partPayload(0);
-    
     const packed = isPacked(head);
     const unpacked = packed ? await unpackPrefix(head) : null;
     return { mime: sniffMime(unpacked || head), packed, head };
   } catch (e) {
-    
     const head = await partPayloadLoose(0).catch(() => null);
     if (!head) throw e;
     return { head, mime: '', packed: isPacked(head), short: e.message };
@@ -1176,7 +1114,7 @@ function parseCentral(block, at, entries, cdSize, cdOff, total) {
 }
 
 const MEMO_CACHE = 'b2p-memo-v1';
-const MEMO_MAX_BYTES = 64 * 1024 * 1024;   
+const MEMO_MAX_BYTES = 64 * 1024 * 1024;   // a member bigger than this is read, never stored
 let memoBase = null;
 async function memoRoot() {
   if (memoBase) return memoBase;
@@ -1188,10 +1126,8 @@ async function memoRoot() {
 }
 const memoUrl = async (what) => siteUrl('__b2p/memo/' + (await memoRoot()) + '/' +
   (await sha256(new TextEncoder().encode(String(what)))));
-
 const memoStats = { hit: 0, miss: 0, put: 0 };
 window.__b2pMemo = memoStats;
-
 async function memoGet(what) {
   try {
     const hit = await (await caches.open(MEMO_CACHE)).match(await memoUrl(what));
@@ -1210,9 +1146,8 @@ async function memoPut(what, value) {
       headers: { 'Content-Type': 'application/octet-stream', 'X-Memo': bytes ? 'bytes' : 'json' },
     }));
     memoStats.put++;
-  } catch (e) {  }
+  } catch (e) { }
 }
-
 function once(get) {
   let job = null;
   return () => (job || (job = Promise.resolve().then(get)));
@@ -1256,7 +1191,6 @@ function iconFor(path, dir) {
   }
   return ['unknown', '[   ]'];
 }
-
 function apacheSize(n) {
   if (!Number.isFinite(n)) return '-';
   if (n < 1024) return String(n);
@@ -1265,14 +1199,12 @@ function apacheSize(n) {
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
   return `${v >= 10 ? Math.round(v) : v.toFixed(1)}${units[i]}`;
 }
-
 function apacheDate(d) {
   if (!d) return '';
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
          `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
-
 const ICON_FILE = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAABnRSTlMAAAAAAABupgeRAAABEElEQVR42nRRx3HDMBC846AHZ7sP54BmWAyrsP588qnwlhqw/k4v5ZwWxM1hzmGRgV1cYqrRarXoH2w2m6qqiqKIR6cPtzc3xMSML2Te7XZZlnW7Pe/91/dX47WRBHuA9oyGmRknzGDjab1ePzw8bLfb6WRalmW4ip9FDVpYSWZgOp12Oh3nXJ7nxoJSGEciteP9y+fH52q1euv38WosqA6T2gGOT44vry7BEQtJkMAMMpa6JagAMcUfWYa4hkkzAc7fFlSjwqCoOUYAF5RjHZPVCFBOtSBGfgUDji3c3jpibeEMQhIMh8NwshqyRsBJgvF4jMs/YlVR5KhgNpuBLzk0OcUiR3CMhcPaOzsZiAAA/AjmaB3WZIkAAAAASUVORK5CYII=';
 const ICON_DIR = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABt0lEQVR42oxStZoWQRCs2cXdHTLcHZ6EjAwnQWIkJyQlRt4Cd3d3d1n5d7q7ju1zv/q+mh6taQsk8fn29kPDRo87SDMQcNAUJgIQkBjdAoRKdXjm2mOH0AqS+PlkP8sfp0h93iu/PDji9s2FzSSJVg5ykZqWgfGRr9rAAAQiDFoB1OfyESZEB7iAI0lHwLREQBcQQKqo8p+gNUCguwCNAAUQAcFOb0NNGjT+BbUC2YsHZpWLhC6/m0chqIoM1LKbQIIBwlTQE1xAo9QDGDPYf6rkTpPc92gCUYVJAZjhyZltJ95f3zuvLYRGWWCUNkDL2333McBh4kaLlxg+aTmyL7c2xTjkN4Bt7oE3DBP/3SRz65R/bkmBRPGzcRNHYuzMjaj+fdnaFoJUEdTSXfaHbe7XNnMPyqryPcmfY+zURaAB7SHk9cXSH4fQ5rojgCAVIuqCNWgRhLYLhJB4k3iZfIPtnQiCpjAzeBIRXMA6emAqoEbQSoDdGxFUrxS1AYcpaNbBgyQBGJEOnYOeENKR/iAd1npusI4C75/c3539+nbUjOgZV5CkAU27df40lH+agUdIuA/EAgDmZnwZlhDc0wAAAABJRU5ErkJggg==';
 const ICON_UP = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAACM0lEQVR42myTA+w1RxRHz+zftmrbdlTbtq04qRGrCmvbDWp9tq3a7tPcub8mj9XZ3eHOGQdJAHw77/LbZuvnWy+c/CIAd+91CMf3bo+bgcBiBAGIZKXb19/zodsAkFT+3px+ssYfyHTQW5tr05dCOf3xN49KaVX9+2zy1dX4XMk+5JflN5MBPL30oVsvnvEyp+18Nt3ZAErQMSFOfelCFvw0HcUloDayljZkX+MmamTAMTe+d+ltZ+1wEaRAX/MAnkJdcujzZyErIiVSzCEvIiq4O83AG7LAkwsfIgAnbncag82jfPPdd9RQyhPkpNJvKJWQBKlYFmQA315n4YPNjwMAZYy0TgAweedLmLzTJSTLIxkWDaVCVfAbbiKjytgmm+EGpMBYW0WwwbZ7lL8anox/UxekaOW544HO0ANAshxuORT/RG5YSrjlwZ3lM955tlQqbtVMlWIhjwzkAVFB8Q9EAAA3AFJ+DR3DO/Pnd3NPi7H117rAzWjpEs8vfIqsGZpaweOfEAAFJKuM0v6kf2iC5pZ9+fmLSZfWBVaKfLLNOXj6lYY0V2lfyVCIsVzmcRV9Y0fx02eTaEwhl2PDrXcjFdYRAohQmS8QEFLCLKGYA0AeEakhCCFDXqxsE0AQACgAQp5w96o0lAXuNASeDKWIvADiHwigfBINpWKtAXJvCEKWgSJNbRvxf4SmrnKDpvZavePu1K/zu/due1X/6Nj90MBd/J2Cic7WjBp/jUdIuA8AUtd65M+PzXIAAAAASUVORK5CYII=';
@@ -1289,7 +1221,6 @@ const INDEX_CSS = `
   html[dir=rtl] a { background-position-x: right; }
   #parentDirLinkBox, #downloadBox { margin-bottom: 10px; padding-bottom: 10px; }
 `;
-
 const ICON_BY_KIND = {
   image2: 'png jpg jpeg gif webp bmp ico svg avif tif tiff heic'.split(' '),
   movie: 'mp4 m4v mov webm mkv avi wmv flv'.split(' '),
@@ -1304,7 +1235,6 @@ function iconForFile(path) {
   if (ext === 'pdf') return 'binary';
   return 'unknown';
 }
-
 function fmtSize(n) {
   if (!Number.isFinite(n) || n <= 0) return '';
   if (n < 1024) return `${n} B`;
@@ -1313,7 +1243,6 @@ function fmtSize(n) {
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
   return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
 }
-
 function fmtDate(d) {
   if (!d || isNaN(d)) return '';
   const p = (n) => String(n).padStart(2, '0');
@@ -1321,7 +1250,6 @@ function fmtDate(d) {
   return `${d.getMonth() + 1}/${d.getDate()}/${String(d.getFullYear()).slice(2)}, ` +
          `${(h % 12) || 12}:${p(d.getMinutes())}:${p(d.getSeconds())} ${h >= 12 ? 'PM' : 'AM'}`;
 }
-
 function indexView(label, total, opts) {
   opts = opts || {};
   const baseLabel = opts.base || label;
@@ -1329,7 +1257,6 @@ function indexView(label, total, opts) {
   const state = { label, total: total || 0 };
   document.title = `Index of ${label}`;
 
-  
   if (!document.head.querySelector('meta[name="color-scheme"]')) {
     const meta = document.createElement('meta');
     meta.name = 'color-scheme';
@@ -1355,7 +1282,6 @@ function indexView(label, total, opts) {
     a.id = 'parentDirLink';
     a.className = 'icon up';
     a.href = opts.parentHref;
-    
     const span = document.createElement('span');
     span.id = 'parentDirText';
     span.textContent = '[parent directory]';
@@ -1364,7 +1290,6 @@ function indexView(label, total, opts) {
     body.appendChild(box);
   }
 
-  
   let zipLink = null, dirLink = null;
   if (!opts.parentHref || opts.downloadZip || opts.downloadDir) {
     const box = document.createElement('div');
@@ -1436,7 +1361,6 @@ function indexView(label, total, opts) {
   table.append(thead, tbody);
   body.appendChild(table);
 
-  
   const sortTable = (column) => {
     const oldOrder = parseInt(headRow.cells[column].dataset.order || '1', 10);
     const nextOrder = 0 - oldOrder;
@@ -1470,7 +1394,6 @@ function indexView(label, total, opts) {
     a.textContent = text;
     a.href = href || '#';
     if (href && cls !== 'dir') {
-      
       a.target = '_blank';
       a.rel = 'noopener';
     } else if (onClick) {
@@ -1480,7 +1403,6 @@ function indexView(label, total, opts) {
     const sizeTd = document.createElement('td');
     sizeTd.className = 'detailsColumn';
     sizeTd.dataset.value = String(Number.isFinite(size) ? size : 0);
-    
     sizeTd.textContent = cls === 'dir' ? '-' : fmtSize(size);
     const dateTd = document.createElement('td');
     dateTd.className = 'detailsColumn';
@@ -1492,7 +1414,6 @@ function indexView(label, total, opts) {
   };
 
   return {
-    
     setLabel(next) {
       state.label = next;
       h1.textContent = `Index of ${next}`;
@@ -1502,9 +1423,7 @@ function indexView(label, total, opts) {
     addMember(f) {
       const base = f.path.replace(/\/$/, '').split('/').pop() || f.path;
       const text = base + (f.dir ? '/' : '');
-      
       const href = src.direct ? null : memberHref(baseLabel, f.path);
-      
       const listsHere = f.dir || /\.(zip|apk|jar|7z|tar)$/i.test(f.path);
       const a = addRow(listsHere ? 'dir' : 'file', text, f.dir || href ? null : async (el) => {
         el.textContent = text + ' …';
@@ -1537,7 +1456,6 @@ function findEntry(files, want) {
     || files.find((f) => f.path.endsWith('/' + w))
     || files.find((f) => f.dir && f.path.replace(/\/$/, '') === w);
   if (hit) return hit;
-  
   const inside = files.find((f) => f.path.startsWith(w + '/'));
   return inside ? { path: w + '/', size: 0, dir: true, modified: null } : null;
 }
@@ -1563,28 +1481,23 @@ async function rootRows() {
 }
 
 let central = null;
-
 function centralListing() {
   if (!central) central = (async () => {
-    
     const key = 'central|listing';
     const memo = await memoGet(key);
     const held = memo && memo.json;
     if (held && Array.isArray(held.files) && held.files.length) {
-      
       src.totalHint = Number(held.total) || 0;
       return { files: held.files.map(reviveEntry), read: (f) => memberBytes(f), remembered: true };
     }
     try {
       const listing = await readZipCentral();
-      
       const total = await sourceSize().catch(() => 0);
       await memoPut(key, { v: 1, total, files: listing.files.map(keepEntry) });
       return { files: listing.files, read: (f) => memberBytes(f) };
     } catch (e) {
       console.warn('the archive directory is not readable by range:', e.message);
       const bytes = await wholeFile();
-      
       if (/\.tar$/i.test(src.name || '')) {
         const tar = await openTar(async () => bytes, src.name || 'archive.tar', 'root',
                                   src.tt && !src.tt.inner ? src.tt : null, await wholeSpan());
@@ -1594,7 +1507,6 @@ function centralListing() {
       try {
         listing = await zipFromMemory(bytes);
       } catch (notZip) {
-        
         if (!isSevenBytes(bytes) && !/\.7z$/i.test(src.name || '')) throw notZip;
         const seven = await openSevenZip(async () => bytes, src.name || 'archive.7z', 'root',
                                          src.tt && !src.tt.inner ? src.tt : null);
@@ -1622,11 +1534,9 @@ function listedMember(f) {
   const when = f.modified ? new Date(f.modified) : null;
   const row = { path, size: Number(f.size) || 0, dir: !!f.dir || /\/$/.test(path),
            modified: when && !isNaN(when) ? when : null,
-           
            thumb: typeof f.thumb === 'string' ? f.thumb : '',
            head: typeof f.head === 'string' ? f.head : '',
            dur: typeof f.dur === 'string' ? f.dur : '' };
-  
   if (Number.isFinite(Number(f.off))) row.localOff = Number(f.off);
   if (f.csize !== undefined) row.csize = Number(f.csize);
   if (f.method !== undefined) row.method = Number(f.method);
@@ -1635,18 +1545,15 @@ function listedMember(f) {
 
 function memberHref(label, path) {
   const rel = String(path).replace(/^\/+/, '').split('/').map(encodeURIComponent).join('/');
-  
   const base = String(label || 'archive.zip').split('/').map(encodeURIComponent).join('/');
   return siteUrl('file/' + base + '/' + rel);
 }
-
 function folderHref(label, prefix) {
   const up = String(prefix || '').replace(/[^/]+\/$/, '');
   if (up) return memberHref(label, up);
   const base = String(label || 'archive.zip').split('/').map(encodeURIComponent).join('/');
   return siteUrl('file/' + base);
 }
-
 function archiveHref(label) {
   const base = String(label || 'archive.zip').split('/').map(encodeURIComponent).join('/');
   return siteUrl('file/' + base);
@@ -1688,7 +1595,6 @@ function previewKind(name) {
   if (VIEW_TEXT.test(n)) return 'text';
   return '';
 }
-
 function typeLabel(path, dir) {
   if (dir) return 'Folder';
   const ext = (String(path).match(/\.([A-Za-z0-9]+)$/) || [])[1] || '';
@@ -1701,7 +1607,6 @@ function typeLabel(path, dir) {
   if (/\.(zip|apk|jar|7z|tar)$/i.test(path)) return `${up} archive`;
   return `${up} file`;
 }
-
 function hasPreviews(items) {
   return items.some((f) => !f.dir && (f.thumb || f.head));
 }
@@ -1782,7 +1687,6 @@ function previewGlyph(kind) {
   return `<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#616366" stroke-width="1.6"><path d="M6 3h8l4 4v14H6z"/></svg>`;
 }
 const FOLDER_GLYPH = `<svg viewBox="0 0 24 24" width="28" height="28" fill="#f2a53a"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
-
 const CARET = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#616366"
   stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
 const GRID_ICON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
@@ -1856,7 +1760,6 @@ function renderMediaFolder(o) {
       ? `<img src="${esc(f.thumb)}" alt="" loading="lazy">`
       : (f.head ? `<pre class="txt">${esc(f.head)}</pre>`
         : `<span class="glyph">${kind === 'dir' ? FOLDER_GLYPH : previewGlyph(kind)}</span>`);
-    
     const card = document.createElement('a');
     card.className = 'card';
     card.href = href || '#';
@@ -1889,7 +1792,6 @@ function renderMediaFolder(o) {
     tr.append(nameTd, dateTd, typeTd, sizeTd);
     tbody.appendChild(tr);
   }
-  
   const show = (grid) => {
     $('b2p-cards').hidden = !grid;
     $('b2p-rows').hidden = grid;
@@ -1898,7 +1800,6 @@ function renderMediaFolder(o) {
   };
   $('b2p-grid').addEventListener('click', () => show(true));
   $('b2p-list').addEventListener('click', () => show(false));
-  
   for (const a of body.querySelectorAll('.top a, .foot a, .chip')) {
     if (a.tagName !== 'A') continue;
     a.setAttribute('href', location.href);
@@ -1921,7 +1822,6 @@ function renderMediaFolder(o) {
       delete btn.dataset.busy;
     });
   }
-  
   const up = $('b2p-up');
   if (up && window.__b2pZip) up.addEventListener('click', (e) => { e.preventDefault(); walkTo(up.href); });
   return { cards: items.length };
@@ -1939,7 +1839,6 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
     return { name: innerName, size: bytes.length };
   } : (onProgress) => saveWholeArchive(onProgress));
   const downloadDir = prefix ? (onProgress) => downloadFolder(label, prefix, files, read, spanBase, onProgress) : null;
-  
   const items = childEntries(files, prefix);
   const plainList = /^(index|raw)$/i.test(new URLSearchParams(location.search).get('view') || '');
   const mediaArchive = hasPreviews(childEntries(files, ''));
@@ -1952,11 +1851,8 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
   }
   const view = indexView(shown, 0, {
     base: addr,
-    
     parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
-    
     downloadZip,
-    
     downloadDir,
   });
   fillFolder(view, prefix, files);
@@ -1965,16 +1861,15 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
 
 async function resolveArchivePath(rawPath) {
   const parts = String(rawPath || '').split('/').filter(Boolean);
-  const consumed = [];     
-  const walked = [];       
-  let dirSince = [];       
+  const consumed = [];     // archive names opened on the way (a 7z costs a run of JS7z)
+  const walked = [];       // every segment stepped through, folder or archive, for label + address
+  let dirSince = [];       // folders stepped into SINCE the last archive was opened
   let files = await rootRows();
   let read = rootRead;
-  
   let slice = sourceRange;
-  let deepest = null;      
+  let deepest = null;      // a GETTER: a nested archive's bytes are fetched only when really needed
   let lastWasArchive = false;
-  let archiveSpan = null;   
+  let archiveSpan = null;   // where the archive we opened starts in the address's own file
   let spanBase = 0;
   while (parts.length) {
     const name = parts[0];
@@ -1982,14 +1877,11 @@ async function resolveArchivePath(rawPath) {
     const archive = entry && !entry.dir && /\.(zip|apk|jar|7z|tar)$/i.test(name);
     if (archive) {
       parts.shift();
-      
       const at = walked.concat([name]).join('/');
       const reader = read;
       const getBytes = once(() => reader(entry.path));
-      
       const stored = reader === rootRead ? await storedSpan(await withOffsets(entry)) : null;
       spanBase = stored ? stored.base : null;
-      
       const indexed = ttArchiveIndex(at, entry.path);
       const inner = await openInnerArchive(getBytes, entry.path, at, stored, indexed);
       deepest = getBytes;
@@ -1999,17 +1891,14 @@ async function resolveArchivePath(rawPath) {
       dirSince = [];
       files = inner.files;
       read = (p) => inner.read(p);
-      
       archiveSpan = { localOff: Number(entry.localOff), csize: Number(entry.csize),
                       method: Number(entry.method) || 0, size: Number(entry.size) || 0 };
       const ownFile = !stored && reader === rootRead && Number(entry.size) > 0
         && Number(entry.size) === await sourceSize().catch(() => -1);
-      
       if (ownFile && !/\.7z$/i.test(entry.path)) slice = sourceRange;
       else if (!ownFile) slice = stored && !/\.7z$/i.test(entry.path) ? stored.range : null;
       continue;
     }
-    
     const dir = !!entry && entry.dir;
     const prefixOnly = !entry && files.some((f) => f.path.startsWith(name + '/'));
     if (!dir && !prefixOnly) break;
@@ -2018,9 +1907,7 @@ async function resolveArchivePath(rawPath) {
     dirSince.push(name);
     walked.push(name);
   }
-  
   const within = dirSince.length ? dirSince.join('/') + '/' : '';
-  
   const base = walked.slice(0, walked.length - dirSince.length).join('/');
   return { consumed, walked, within, base, files, rest: within + parts.join('/'), read, slice, archiveSpan,
            lastWasArchive, bytes: lastWasArchive ? deepest : null, spanBase };
@@ -2030,16 +1917,11 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   const addrBase = baseAddr || baseLabel;
   const { consumed, walked, within, base, files, rest, read, slice, lastWasArchive, bytes: deepest,
           spanBase, archiveSpan } = await resolveArchivePath(rawPath);
-  
   const label = consumed.length ? `${baseLabel}/${consumed.join('/')}` : baseLabel;
-  
   const addrArch = consumed.length ? `${addrBase}/${consumed.join('/')}` : addrBase;
   const addrWalk = walked.length ? `${addrBase}/${walked.join('/')}` : addrBase;
-  
   if (rest === '' || /\/$/.test(rest)) {
-    
     const up = lastWasArchive && walked.length > 1 ? walked.slice(0, -1).join('/') : '';
-    
     const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
     return renderZipFolder(label, rest, files, read, deepest,
                            lastWasArchive ? addrWalk : addrArch,
@@ -2047,7 +1929,6 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   }
   const entry = findEntry(files, rest);
   if (!entry) {
-    
     const dir = rest.replace(/[^/]+$/, '');
     const up = lastWasArchive && walked.length > 1 ? walked.slice(0, -1).join('/') : '';
     const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
@@ -2059,21 +1940,17 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   }
   if (entry.dir) return renderZipFolder(label, entry.path, files, read, deepest, addrArch, null, spanBase);
   if (/\.(zip|apk|jar|7z|tar)$/i.test(entry.path)) {
-    
     const at = (base ? base + '/' : '') + entry.path;
     const getBytes = once(() => read(entry.path));
     const stored = read === rootRead ? await storedSpan(await withOffsets(entry)) : null;
     const indexed = ttArchiveIndex(at, entry.path);
     const inner = await openInnerArchive(getBytes, entry.path, at, stored, indexed);
-    
     const tail = within && entry.path.startsWith(within) ? entry.path.slice(within.length) : entry.path;
-    
     const up = walked.length > 1 ? walked.slice(0, -1).join('/') : '';
     const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
     return renderZipFolder(`${label}/${entry.path}`, '', inner.files, (p) => inner.read(p), getBytes,
                            `${addrWalk}/${tail}`, containing, stored ? stored.base : null);
   }
-  
   const dirPart = String(rest || '').replace(/[^/]+$/, '');
   const back = {
     href: dirPart ? memberHref(addrWalk, dirPart) : archiveBasePath(addrWalk),
@@ -2090,7 +1967,6 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
 function archiveBasePath(addr) {
   return siteUrl('file/' + String(addr || '').split('/').map(encodeURIComponent).join('/'));
 }
-
 function zipTarget(href) {
   const state = window.__b2pZip;
   if (!state) return null;
@@ -2099,7 +1975,7 @@ function zipTarget(href) {
   if (url.pathname === base) return { url, member: '' };
   if (!url.pathname.startsWith(base + '/')) return null;
   let member = url.pathname.slice(base.length + 1);
-  try { member = decodeURIComponent(member); } catch (e) {  }
+  try { member = decodeURIComponent(member); } catch (e) { }
   return { url, member };
 }
 async function walkTo(href, push) {
@@ -2115,9 +1991,8 @@ async function walkTo(href, push) {
     location.assign(target.url.href);
     return;
   }
-  
   if (push !== false) {
-    try { history.pushState({ b2pZip: target.member }, '', target.url.href); } catch (e) {  }
+    try { history.pushState({ b2pZip: target.member }, '', target.url.href); } catch (e) { }
   }
 }
 document.addEventListener('click', (event) => {
@@ -2125,13 +2000,13 @@ document.addEventListener('click', (event) => {
   if (!a) return;
   if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey ||
       event.shiftKey || event.altKey) return;
-  if (a.target && a.target !== '_self') return;    
+  if (a.target && a.target !== '_self') return;    // a FILE opens its own tab, never this one
   const target = zipTarget(a.href);
   if (!target) return;
   const base = new URL(archiveBasePath(window.__b2pZip.addr)).pathname;
   const folder = target.url.pathname.startsWith(base + '/') &&
     (target.url.pathname.endsWith('/') || /\.(zip|7z|tar|apk|jar)$/i.test(target.url.pathname));
-  if (target.member !== '' && !folder) return;     
+  if (target.member !== '' && !folder) return;     // a FILE is the browser's business
   event.preventDefault();
   walkTo(a.href);
 });
@@ -2146,9 +2021,7 @@ async function downloadFolder(label, prefix, files, read, spanBase, onProgress) 
   const name = `${base}.zip`;
   const count = members.length;
   if (spanBase !== null && canStreamArchive()) {
-    
     const plan = planForWorker(label, 'application/zip');
-    
     let list = null;
     if (spanBase > 0) {
       list = members.map((f) => ({ name: f.path, localOff: Number(f.localOff), size: Number(f.size) || 0,
@@ -2164,7 +2037,6 @@ async function downloadFolder(label, prefix, files, read, spanBase, onProgress) 
   }
   const out = new Array(members.length);
   let done = 0, got = 0;
-  
   const bytesTotal = members.reduce((a, f) => a + (Number(f.size) || 0), 0);
   const say = () => {
     if (onProgress) onProgress({ done, total: count, unit: 'files', bytes: got, bytesTotal });
@@ -2180,7 +2052,6 @@ async function downloadFolder(label, prefix, files, read, spanBase, onProgress) 
   saveBytes(bytes, name, 'application/zip');
   return { name, size: bytes.length };
 }
-
 let js7zLoading = null;
 function loadJs7z() {
   if (!js7zLoading) js7zLoading = (async () => {
@@ -2197,7 +2068,6 @@ function loadJs7z() {
   })();
   return js7zLoading;
 }
-
 async function run7z(bytes, name, args, readOut) {
   const JS7z = await loadJs7z();
   const lines = [];
@@ -2212,10 +2082,8 @@ async function run7z(bytes, name, args, readOut) {
   rt.callMain(args.map((a) => a.replace(/\{in\}/g, '/in/' + name)));
   const code = await exit;
   const out = readOut ? readOut(rt) : null;
-  
   return { code, out, log: lines.join('\n') };
 }
-
 function parse7zList(text, archiveIn) {
   const rows = [];
   let cur = null, first = true;
@@ -2231,7 +2099,6 @@ function parse7zList(text, archiveIn) {
     const when = String(rec.Modified || '').slice(0, 19).replace(' ', 'T');
     const date = when ? new Date(when) : null;
     const dir = /^D/.test(rec.Attributes || '');
-    
     rows.push({ path: dir ? path.replace(/\/+$/, '') + '/' : path, size: Number(rec.Size) || 0,
                 dir, modified: date && !isNaN(date) ? date : null });
   };
@@ -2244,14 +2111,12 @@ function parse7zList(text, archiveIn) {
   flush();
   return rows;
 }
-
 async function openSevenZip(getBytes, entryPath, stamp, indexed) {
   const name = entryPath.replace(/^.*\//, '').replace(/[^\w.\- ]/g, '_') || 'archive.7z';
   const tag = `7z|${stamp || entryPath}`;
   let files = null;
   const listed = await memoGet(tag + '|list');
   if (Array.isArray(listed && listed.json)) files = listed.json.map(listedMember);
-  
   if (!files && indexed && Array.isArray(indexed.files) && indexed.files.length) {
     files = indexed.files.map(listedMember);
     await memoPut(tag + '|list', files.map((f) => ({ path: f.path, size: f.size, dir: f.dir,
@@ -2281,20 +2146,17 @@ async function openSevenZip(getBytes, entryPath, stamp, indexed) {
     },
   };
 }
-
 function tarText(b, at, len) {
   let s = '';
   const end = Math.min(at + len, b.length);
   for (let i = at; i < end && b[i]; i++) s += String.fromCharCode(b[i]);
   return s;
 }
-
 function tarNum(b, at, len) {
   if (b[at] & 0x80) { let n = 0; for (let i = at + 1; i < at + len; i++) n = n * 256 + b[i]; return n; }
   const s = tarText(b, at, len).replace(/[^0-7]/g, '');
   return s ? parseInt(s, 8) : 0;
 }
-
 async function tarWalk(range, size) {
   const files = [];
   let at = 0, longName = '', guard = 0;
@@ -2303,14 +2165,14 @@ async function tarWalk(range, size) {
     if (h.length < 512) break;
     let blank = true;
     for (let i = 0; i < 512; i++) if (h[i]) { blank = false; break; }
-    if (blank) break;                                   
+    if (blank) break;                                   // the end-of-archive block
     const size0 = tarNum(h, 124, 12);
     const type = String.fromCharCode(h[156] || 48);
     const magic = tarText(h, 257, 6);
     const prefix = magic === 'ustar' ? tarText(h, 345, 155) : '';
     const data = at + 512;
     const blocks = Math.ceil(size0 / 512) * 512;
-    if (type === 'L') {                                 
+    if (type === 'L') {                                 // GNU long name: the name IS the data
       longName = new TextDecoder().decode(await range(data, data + Math.max(0, size0 - 1)))
         .replace(/\0+$/, '');
       at = data + blocks; continue;
@@ -2320,7 +2182,7 @@ async function tarWalk(range, size) {
     longName = '';
     if (!name) { at = data + blocks; continue; }
     const dir = type === '5' || /\/$/.test(name);
-    const linked = type === '1' || type === '2';        
+    const linked = type === '1' || type === '2';        // a link has no bytes of its own
     const when = tarNum(h, 136, 12);
     files.push({ path: dir ? name.replace(/\/+$/, '') + '/' : name, size: linked ? 0 : size0, dir,
                  modified: when ? new Date(when * 1000) : null,
@@ -2329,7 +2191,6 @@ async function tarWalk(range, size) {
   }
   return files;
 }
-
 async function openTar(getBytes, path, stamp, indexed, span) {
   const tag = `tar|${stamp || path}`;
   let files = null;
@@ -2360,7 +2221,7 @@ async function openTar(getBytes, path, stamp, indexed, span) {
         if (span) out = end >= e.localOff ? await span.range(e.localOff, end) : new Uint8Array(0);
         else { const b = await load(); out = b.subarray(e.localOff, end + 1); }
       }
-      if (!out) {                         
+      if (!out) {                         // an index with no offsets: find it in the headers
         const b = await load();
         e = findEntry(await walkBytes(b), want);
         if (!e) throw new Error(`"${want}" is not in ${path}`);
@@ -2372,7 +2233,6 @@ async function openTar(getBytes, path, stamp, indexed, span) {
     },
   };
 }
-
 async function wholeSpan() {
   if (src.packed) return null;
   try {
@@ -2398,7 +2258,6 @@ async function zipDirRanged(range, size) {
 async function zipReadRanged(range, f) {
   const head = await range(f.localOff, f.localOff + 29);
   if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) {
-    
     const hex = [...head.subarray(0, 4)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
     throw new Error(`the member local header is not where the directory says it is`
       + ` (read ${f.localOff}..${f.localOff + 29}, got ${hex}, method ${f.method},`
@@ -2439,7 +2298,6 @@ function indexedEntry(f) {
 }
 
 function keepEntry(f) {
-  
   return { path: f.path, size: f.size, dir: f.dir,
            modified: f.modified ? f.modified.toISOString() : null,
            localOff: f.localOff, csize: f.csize, method: f.method, crc: f.crc };
@@ -2452,26 +2310,21 @@ function reviveEntry(o) {
 }
 
 async function openInnerArchive(getBytesOnce, path, stamp, stored, indexed) {
-  
   let once = null;
   const getBytes = async () => {
     if (once === null) once = await getBytesOnce();
     return once;
   };
-  
   if (/\.7z$/i.test(path)) return openSevenZip(getBytes, path, stamp, indexed);
-  
   if (/\.tar$/i.test(path)) return openTar(getBytes, path, stamp, indexed, stored || null);
   const tag = `zip|${stamp || path}`;
   let files = null;
   const listed = await memoGet(tag + '|list');
   if (Array.isArray(listed && listed.json)) files = listed.json.map(reviveEntry);
-  
   if (!files && indexed && Array.isArray(indexed.files) && indexed.files.length) {
     files = indexed.files.map(indexedEntry);
   }
   if (!files) {
-    
     if (stored) {
       try { files = await zipDirRanged(stored.range, stored.size); } catch (e) { files = null; }
     }
@@ -2486,7 +2339,6 @@ async function openInnerArchive(getBytesOnce, path, stamp, stored, indexed) {
       if (memo && memo.bytes) return memo.bytes;
       const e = findEntry(files, p);
       if (!e) throw new Error(`"${p}" is not in ${path}`);
-      
       let out = null;
       if (stored) { try { out = await zipReadRanged(stored.range, e); } catch (err) { out = null; } }
       if (!out) out = await extractFrom(await getBytes(), e);
@@ -2530,7 +2382,6 @@ function parseTt2png(bytes) {
   if (!j || j.tool !== 'tt2png' || !Array.isArray(j.chunks) || !j.chunks.length) return null;
   return j;
 }
-
 function chunkPayload(bytes, mask = 0) {
   if (!(bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50)) return null;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -2541,7 +2392,6 @@ function chunkPayload(bytes, mask = 0) {
     const end = off + 8 + len + 4;
     if (type === 'IEND') {
       const payload = bytes.subarray(Math.min(end, bytes.length));
-      
       if (!mask) return payload;
       const out = new Uint8Array(payload.length);
       for (let k = 0; k < payload.length; k++) out[k] = payload[k] ^ mask;
@@ -2552,7 +2402,6 @@ function chunkPayload(bytes, mask = 0) {
   }
   return null;
 }
-
 const ttWhole = new Map();
 async function ttChunk(i) {
   if (ttWhole.has(i)) return ttWhole.get(i);
@@ -2572,7 +2421,6 @@ async function ttChunk(i) {
   ttWhole.set(i, payload);
   return payload;
 }
-
 const ttDataOff = new Map();
 async function ttPayloadOff(i) {
   if (ttDataOff.has(i)) return ttDataOff.get(i);
@@ -2591,7 +2439,6 @@ async function ttPayloadOff(i) {
   ttDataOff.set(i, off);
   return off;
 }
-
 async function ttChunkRange(i, a, b) {
   if (b < a) return new Uint8Array(0);
   const c = src.tt.chunks[i] || {};
@@ -2615,11 +2462,9 @@ async function ttChunkRange(i, a, b) {
   if (Number(c.size) && payload.length === Number(c.size)) ttWhole.set(i, payload);
   return payload.subarray(a, b + 1);
 }
-
 let ttPlan = null;
-const ttPlanMimes = new Map();     
+const ttPlanMimes = new Map();     // which type each cached tt plan was built for
 async function ttPlanUrl(mime) {
-  
   if (ttPlan !== null && (ttPlanMimes.get(ttPlan) || '') === (mime || '')) return ttPlan || null;
   ttPlan = '';
   const reg = await ensureStreamWorker();
@@ -2629,7 +2474,6 @@ async function ttPlanUrl(mime) {
                  cap: Number(src.tt.chunk_size) || Number((src.tt.chunks[0] || {}).size) || CAPACITY,
                  parts: src.urls,
                  masks: masksNow(),
-                 
                  masks: (src.tt.chunks || []).map((c) => Number(c.mask) || 0),
                  total: Number(src.tt.bytes) || 0, tt: true };
   try {
@@ -2642,7 +2486,6 @@ async function ttPlanUrl(mime) {
   ttPlanMimes.set(ttPlan, mime || '');
   return ttPlan;
 }
-
 async function shareArchivePlan(label) {
   if (src.direct || src.packed) return;
   if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
@@ -2652,7 +2495,6 @@ async function shareArchivePlan(label) {
       cap: src.tt ? (Number(src.tt.chunk_size) || CAPACITY) : CAPACITY,
       parts: src.urls,
       masks: masksNow(),
-      
       masks: masksNow(),
       total: await sourceSize(),
       tt: !!src.tt,
@@ -2664,23 +2506,22 @@ async function shareArchivePlan(label) {
     await cache.put(key, new Response(JSON.stringify(plan), {
       headers: { 'Content-Type': 'application/json' },
     }));
-  } catch (e) {  }
+  } catch (e) { }
 }
-
-const TT_HEAD = 262144;      
-const TT_GRACE = 5;          
-const TT_AHEAD = 3;          
+const TT_HEAD = 262144;      // 256 KB: the measured floor for a faststart MP4 (128 KB fails)
+const TT_GRACE = 5;          // extend the blob when this few seconds of media remain
+const TT_AHEAD = 3;          // chunks fetched ahead of the one needed
 
 async function renderTt2pngProgressive(index, mime) {
   const n = index.chunks.length;
   const el = bareMedia(mime.startsWith('audio/') ? 'audio' : 'video');
   const parts = new Array(n);
-  let p0 = null;             
-  let have = 0;              
-  let version = 0;           
-  let shownVersion = 0;      
+  let p0 = null;             // chunk 1's payload, as much of it as has arrived
+  let have = 0;              // chunks fully in hand, contiguous from 0
+  let version = 0;           // bumped whenever p0 or `have` grows
+  let shownVersion = 0;      // the version the player is holding
   let shownUrl = '';
-  let started = false;       
+  let started = false;       // the element has decoded something at least once
 
   const range = async (i, from, to) => {
     const c = index.chunks[i] || {};
@@ -2697,7 +2538,6 @@ async function renderTt2pngProgressive(index, mime) {
   };
   const checkHash = async (bytes, payload, i) => {
     const c = index.chunks[i] || {};
-    
     if (c.sha256 && (await sha256(bytes)) !== c.sha256 && (await sha256(payload)) !== c.sha256) {
       throw new Error(`chunk ${i + 1} of ${n} does not hash to the index`);
     }
@@ -2706,15 +2546,14 @@ async function renderTt2pngProgressive(index, mime) {
     if (have <= 1) return p0;
     return concat([p0, ...parts.slice(1, have)]);
   };
-  const play = () => el.play().catch(() => { el.muted = true; el.play().catch(() => {  }); });
-  
+  const play = () => el.play().catch(() => { el.muted = true; el.play().catch(() => { }); });
   const show = () => {
     if (!p0 || version === shownVersion) return;
     const at = el.currentTime || 0;
     const old = shownUrl;
     shownUrl = URL.createObjectURL(new Blob([bytesNow()], { type: mime }));
     if (at > 0.05) {
-      el.addEventListener('loadedmetadata', () => { try { el.currentTime = at; } catch (e) {  } }, { once: true });
+      el.addEventListener('loadedmetadata', () => { try { el.currentTime = at; } catch (e) { } }, { once: true });
     }
     setMediaSource(el, shownUrl, mime);
     shownVersion = version;
@@ -2731,16 +2570,13 @@ async function renderTt2pngProgressive(index, mime) {
   const nearlyDry = () => (el.buffered.length
     ? el.buffered.end(el.buffered.length - 1) - (el.currentTime || 0) < TT_GRACE
     : false);
-  
   const needsData = () => Boolean(el.error) || !el.buffered.length || nearlyDry();
   const ticker = setInterval(() => {
     if (version !== shownVersion && (shownVersion === 0 || needsData())) show();
   }, 750);
 
   try {
-    
     const head = await range(0, 0, TT_HEAD - 1);
-    
     const restP = head.length === TT_HEAD ? range(0, head.length) : Promise.resolve(null);
     p0 = chunkPayload(head, Number((index.chunks[0] || {}).mask) || 0);
     if (!p0) throw new Error('chunk 1 does not start with a PNG');
@@ -2748,7 +2584,6 @@ async function renderTt2pngProgressive(index, mime) {
     show();
     const headAlive = alive(4000);
 
-    
     const rest = await restP;
     if (await headAlive) started = true;
     const whole = rest ? concat([head, rest]) : head;
@@ -2760,7 +2595,6 @@ async function renderTt2pngProgressive(index, mime) {
     version++;
     if (!started) { show(); if (await alive(2500)) started = true; }
 
-    
     const fetches = new Array(n);
     const pull = (i) => { if (i < n && !fetches[i]) { fetches[i] = range(i); fetches[i].catch(() => {}); } };
     let probeAt = 2;
@@ -2781,7 +2615,7 @@ async function renderTt2pngProgressive(index, mime) {
         show();
       }
     }
-    show();                                  
+    show();                                  // the whole file, so seeking and the end are real
   } catch (e) {
     clearInterval(ticker);
     document.title = `${index.name || 'file'} — ${e.message}`;
@@ -2796,7 +2630,7 @@ async function renderTt2pngStream(index, mime) {
   const swUrl = new URL('../b2p-stream.js', location.href).href;
   let reg;
   try { reg = await navigator.serviceWorker.register(swUrl, { scope: new URL('./', swUrl).href }); }
-  catch (e) { return null; }                                   
+  catch (e) { return null; }                                   // file://, a private window, an http origin
   await Promise.race([navigator.serviceWorker.ready, new Promise((ok) => setTimeout(ok, 2500))]);
   if (!navigator.serviceWorker.controller) {
     await Promise.race([
@@ -2804,7 +2638,7 @@ async function renderTt2pngStream(index, mime) {
       new Promise((ok) => setTimeout(ok, 1500)),
     ]);
   }
-  if (!navigator.serviceWorker.controller) return null;        
+  if (!navigator.serviceWorker.controller) return null;        // the first visit, before claim()
 
   const id = 'tt-' + (index.sha256 || '').slice(0, 16) + '-' + index.chunks.length;
   const plan = {
@@ -2818,7 +2652,6 @@ async function renderTt2pngStream(index, mime) {
     tt: true,
   };
   const planHref = new URL('__b2p/plan/' + encodeURIComponent(id), swUrl).href;
-  
   await (await caches.open(STREAM_PLAN_CACHE)).put(planHref, new Response(JSON.stringify(plan), {
     headers: { 'Content-Type': 'application/json' },
   }));
@@ -2827,9 +2660,7 @@ async function renderTt2pngStream(index, mime) {
 }
 
 async function renderTt2png(index) {
-  
   if (!isRenderableName(index.name)) return renderFileInfo(index);
-  
   if (SAVE_REQUEST) {
     src = { ...src, name: mimeFromName(src.name) ? src.name : (index.name || src.name),
             urls: index.chunks.map((c) => c.url), direct: false, guess: false, packed: false, tt: index };
@@ -2840,7 +2671,6 @@ async function renderTt2png(index) {
   }
   const mime = mimeFromName(index.name || '');
   if (!/^(video|audio)\//.test(mime)) return renderTt2pngFull(index);
-  
   try {
     const stream = await renderTt2pngStream(index, mime);
     if (stream) {
@@ -2852,7 +2682,7 @@ async function renderTt2png(index) {
       if (!err) { document.title = index.name || 'file'; return stream.el; }
       status('the stream worker could not serve this file — playing it from the parts instead.');
     }
-  } catch (e) {  }
+  } catch (e) { }
   return renderTt2pngProgressive(index, mime);
 }
 
@@ -2894,7 +2724,6 @@ async function renderBytes(bytes, name, fromLabel) {
   if (mime.startsWith('image/')) return bareImage(bytes, mime, name);
   if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
     const text = new TextDecoder().decode(bytes);
-    
     if (isMarkdownName(name)) { renderMarkdown(text, name); return; }
     bareText(text);
     return;
@@ -2911,7 +2740,6 @@ async function renderBytes(bytes, name, fromLabel) {
     body.appendChild(embed);
     return;
   }
-  
   return binaryView(bytes, name, fromLabel);
 }
 
@@ -2923,7 +2751,6 @@ function followManifest(bytes) {
     if (!line || line.startsWith('#')) continue;
     const f = line.split('\t');
     if (f[0] === 'file' && f.length >= 4) files.push({ name: f[1], parts: [] });
-    
     else if (f[0] === 'part' && f.length >= 3 && files.length) {
       files[files.length - 1].parts.push(f[2] || f[3]);
     }
@@ -2937,12 +2764,10 @@ function followManifest(bytes) {
 }
 
 let indexHops = 0;
-
 let indexSeen = null;
 async function followIndex(head) {
   if (!head || src.tt || indexHops >= 2) return false;
   const plain = isPacked(head) ? (await unpackPrefix(head).catch(() => null)) || head : head;
-  
   if (isManifestHead(plain)) {
     const master = followManifest(await wholeFile());
     if (!master) return false;
@@ -2951,15 +2776,12 @@ async function followIndex(head) {
     partCache.clear();
     return true;
   }
-  
   const text = new TextDecoder('utf-8', { fatal: false }).decode(plain.subarray(0, 64)).trimStart();
   if (text.charAt(0) !== '{') return false;
   const index = parseTt2png(await wholeFile());
   if (index) indexSeen = index;
-  
   if (!index || !/\.(zip|apk|jar|tar|7z)$/i.test(String(index.name || ''))) return false;
   indexHops++;
-  
   src = { ...src, name: mimeFromName(src.name) ? src.name : (index.name || src.name),
           urls: index.chunks.map((c) => c.url), direct: false, guess: false, packed: false, tt: index };
   partCache.clear();
@@ -2968,9 +2790,9 @@ async function followIndex(head) {
   return true;
 }
 
-let manifestDepth = 0;    
-let pendingVideo = null;  
-let dictFreshOnce = false;  
+let manifestDepth = 0;    // one hop only: a master that names a master is a bug, not a file
+let pendingVideo = null;  // the optimistic player: the SAME element gets the real stream
+let dictFreshOnce = false;  // one forced dictionary re-read per page, never a loop
 
 const NOTFOUND_CSS = `
   html, body { margin:0; min-height:100%; background:#fff; color:#1b1b1f;
@@ -2985,7 +2807,6 @@ const NOTFOUND_CSS = `
 function show404() {
   pendingVideo = null;
   resetPage('notfound');
-  
   document.documentElement.className = '';
   document.documentElement.removeAttribute('style');
   for (const n of [...document.head.childNodes]) n.remove();
@@ -3011,7 +2832,6 @@ function show404() {
 
 function bareMedia(tag) {
   resetPage();
-  
   document.documentElement.style.height = '100%';
   document.documentElement.style.background = '#000';
   body.setAttribute('style', 'margin:0;height:100%;background:#000;display:flex;' +
@@ -3301,7 +3121,7 @@ function barePdf(bytes) {
   body.appendChild(embed);
 }
 
-const SAVE_PAGE = 1 << 20;                 
+const SAVE_PAGE = 1 << 20;                 // 1 MB per ranged read, one at a time — real backpressure
 
 async function memberLocalStart(f, slice) {
   const head = await slice(f.localOff, f.localOff + 29);
@@ -3337,7 +3157,7 @@ async function memberBytesWithProgress(f, slice, onProgress) {
         }
         await w.close();
       } catch (e) {
-        try { await w.abort(e); } catch (e2) {  }
+        try { await w.abort(e); } catch (e2) { }
         throw e;
       }
     })();
@@ -3355,19 +3175,15 @@ async function memberBytesWithProgress(f, slice, onProgress) {
 
 async function streamMemberSave(f, name, mime, slice, fetchAll, onProgress, spanBase, archiveSpan) {
   const method = Number(f.method);
-  
   const why = typeof window.showSaveFilePicker !== 'function' ? 'no-picker'
     : typeof DecompressionStream !== 'function' ? 'no-deflate'
       : typeof slice !== 'function' ? 'no-ranged-reader'
         : !Number.isFinite(f.localOff) ? 'no-local-offset'
           : !(Number(f.csize) >= 0) ? 'no-compressed-size'
             : (method !== 0 && method !== 8) ? 'compression-method-' + method : '';
-  
   const viaWorker = async (tag) => {
-    
     if (!(Number.isFinite(Number(f.localOff)) && Number(f.csize) >= 0
           && (method === 0 || method === 8))) return '';
-    
     const span = typeof slice === 'function' ? { base: Number(spanBase) || 0 }
       : (archiveSpan && Number.isFinite(Number(archiveSpan.localOff)) && Number(archiveSpan.csize) > 0)
         ? { inner: { localOff: Number(archiveSpan.localOff), csize: Number(archiveSpan.csize),
@@ -3388,21 +3204,18 @@ async function streamMemberSave(f, name, mime, slice, fetchAll, onProgress, span
   };
   const streamable = !why;
   if (!streamable) {
-    
     const how = await viaWorker(why);
     if (how) return how;
-    
     let bytes = null;
     try { bytes = await memberBytesWithProgress(f, slice, onProgress); } catch (e) { bytes = null; }
     saveBytes(bytes || (await fetchAll()), name, mime);
     return 'buffered:' + why;
   }
-  
   let handle;
   try {
     handle = await window.showSaveFilePicker({ suggestedName: name });
   } catch (e) {
-    if (e && e.name === 'AbortError') return 'cancelled';   
+    if (e && e.name === 'AbortError') return 'cancelled';   // he closed the dialog: nothing to undo
     const how = await viaWorker('picker-refused:' + (e && e.name || 'unknown'));
     if (how) return how;
     if (onProgress) onProgress(0, 0);
@@ -3416,19 +3229,17 @@ async function streamMemberSave(f, name, mime, slice, fetchAll, onProgress, span
   const end = start + Number(f.csize);
   try {
     if (method === 8) {
-      
       const ds = new DecompressionStream('deflate-raw');
       const feeder = (async () => {
         const w = ds.writable.getWriter();
         try {
           for (let a = start; a < end; a += SAVE_PAGE) {
             await w.write(await slice(a, Math.min(a + SAVE_PAGE, end) - 1));
-            
             if (onProgress) onProgress(Math.min(a + SAVE_PAGE, end) - start, end - start);
           }
           await w.close();
         } catch (e) {
-          try { await w.abort(e); } catch (e2) {  }
+          try { await w.abort(e); } catch (e2) { }
           throw e;
         }
       })();
@@ -3450,7 +3261,7 @@ async function streamMemberSave(f, name, mime, slice, fetchAll, onProgress, span
     if (onProgress) onProgress(end - start, end - start);
     return 'streamed';
   } catch (e) {
-    try { await writable.abort(); } catch (e2) {  }
+    try { await writable.abort(); } catch (e2) { }
     throw e;
   }
 }
@@ -3485,7 +3296,6 @@ function memberFileHostView(name, entry, archiveLabel, fetchBytes, slice, spanBa
     etag: '"nohash-' + size.toString(16) + '"',
     from: archiveLabel,
   };
-  
   if (back && back.href) info.back = back;
   paintSkin(info, async (btn) => {
     const label = btn.textContent;
@@ -3497,7 +3307,6 @@ function memberFileHostView(name, entry, archiveLabel, fetchBytes, slice, spanBa
     const clock = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
     const t0 = clock();
     const samples = [];
-    
     const shows = (done, total) => {
       const t = clock();
       if (!total) {
@@ -3547,11 +3356,10 @@ function memberFileHostView(name, entry, archiveLabel, fetchBytes, slice, spanBa
 }
 
 async function binaryView(bytes, name, fromLabel) {
-  
   name = name || src.name;
   const mime = mimeFromName(name) || 'application/octet-stream';
   let sha = '';
-  try { sha = await sha256(bytes); } catch (e) {  }
+  try { sha = await sha256(bytes); } catch (e) { }
   const info = {
     name, bytes: bytes.length, sha, mime,
     modified: src.modified || null,
@@ -3602,7 +3410,6 @@ function fileInfo(index) {
     mime: mimeFromName(name) || 'application/octet-stream',
     modified: date && !isNaN(date) ? date : null,
     chunks: Array.isArray(index.chunks) ? index.chunks.length : 0,
-    
     etag: '"' + (sha ? sha.slice(0, 32) : 'nohash') + '-' + bytes.toString(16) + '"',
   };
 }
@@ -3738,6 +3545,8 @@ const SKINS = {
       .sk-gofile .foot nav { display:flex; gap:28px; justify-content:center; margin-bottom:8px; }
       .sk-gofile .foot a { color:#cbd5e1; }
       .sk-gofile .heart { color:#e5484d; }
+      
+
       .sk-gofile .crumbs { display:flex; align-items:center; margin:0 0 14px; }
       .sk-gofile .crumbs a { display:inline-flex; align-items:center; gap:8px; height:34px;
         padding:0 14px 0 8px; border-radius:10px; background:rgba(255,255,255,.06); color:#e2e8f0;
@@ -3745,6 +3554,8 @@ const SKINS = {
         max-width:min(100%,620px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .sk-gofile .crumbs a:hover { background:rgba(255,255,255,.12); }
       .sk-gofile .crumbs svg { width:16px; height:16px; }
+      
+
       .sk-gofile .folder .kg { margin-left:auto; }
     `,
     html: (i) => `
@@ -4132,10 +3943,8 @@ const SAVE_REQUEST = /(?:^|[?&])(?:save|dl|s)(?:=1)?(?:&|$)/i.test(location.sear
   || /[?&](?:save|dl|s)(?:=1)?$/i.test(location.hash);
 function addressFromLocation() {
   let hash = location.hash.replace(/^#/, '');
-  
   if (/[?&](save|dl|s)(=1)?$/i.test(hash)) hash = hash.replace(/[?&](save|dl|s)(=1)?$/i, '');
   if (hash) return { raw: decodeURIComponent(hash).trim(), hint: '' };
-  
   const idAtRoot = /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
   const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
     || (idAtRoot ? location.pathname.slice(1) : '');
@@ -4143,19 +3952,16 @@ function addressFromLocation() {
   const raw = fromPath ? decodeURIComponent(fromPath).replace(/\/+$/, '').trim() : '';
   let hint = location.search.replace(/^\?/, '');
   try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
-  
   if (/^(save|dl|s)(=|$)/i.test(hint)) hint = '';
   if (!raw || !hint || hint.includes('=') || /[?#]/.test(hint)) hint = '';
   return { raw, hint, trailing };
 }
 
 async function run() {
-  
   window.__b2pZip = null;
   indexSeen = null;
   const where = addressFromLocation();
   let raw = where.raw;
-  
   let ranged = false, forceMedia = false;
   for (;;) {
     if (raw.length > 1 && raw.startsWith('.')) { ranged = true; raw = raw.slice(1); continue; }
@@ -4171,12 +3977,9 @@ async function run() {
     return;
   }
 
-  
   const firstMime = where.hint ? mimeFromName(where.hint) : (ranged ? '' : mimeFromName(raw));
-  
   const typedToken = raw.split('/')[0];
   let index = null;
-  
   if (!ranged && !forceMedia) {
     const inside = raw.includes('/');
     const lastSeg = raw.split('/').filter(Boolean).pop() || '';
@@ -4185,24 +3988,21 @@ async function run() {
     }
   }
   if (ranged) {
-    
     index = indexView('/', 0, { base: typedToken });
   }
   let player = null;
-  if (SAVE_REQUEST) player = null;            
+  if (SAVE_REQUEST) player = null;            // a save is not a player: nothing is drawn for it
   else if (forceMedia) player = bareMedia('video');
   else if (/^(video|audio)\//.test(firstMime)) {
     player = bareMedia(firstMime.startsWith('audio/') ? 'audio' : 'video');
   }
 
-  
   let token, member = null;
   try {
     token = await resolveToken(raw);
   } catch (e) {
     const cut = raw.indexOf('/');
     if (cut <= 0) {
-      
       if (isNameToken(raw) && !dictFreshOnce) {
         dictFreshOnce = true;
         try {
@@ -4210,7 +4010,6 @@ async function run() {
           token = await resolveToken(raw);
         } catch (e2) { console.warn('address not resolved:', e2.message); show404(); return; }
       } else {
-        
         console.warn('address not resolved:', e.message);
         show404();
         return;
@@ -4229,26 +4028,20 @@ async function run() {
     guess: !!token.guess,
     direct: /^https?:/i.test(raw) && token.urls.length === 1 && !/pbs\.twimg\.com\/media\//.test(raw),
   };
-  
   partCache.clear();
-  
   const namedArchive = /\.(zip|apk|jar|tar)$/i.test(src.name);
   const namedSeven = /\.7z$/i.test(src.name);
   let mime = src.ranged && !namedArchive && !namedSeven ? '' : mimeFromName(src.name);
   let zipByName = namedArchive;
-  
   if (!player && !index) document.title = src.name;
 
-  
   if (!mime && !zipByName) {
     try {
-      
       for (let hop = 0; hop < 2 && !mime && !zipByName; hop++) {
         const probe = await sniffSource();
         if (probe.packed) src.packed = true;
         if (probe.zip) { zipByName = true; break; }
         if (await followIndex(probe.head)) {
-          
           const nowArchive = /\.(zip|apk|jar|tar)$/i.test(src.name);
           const nowSeven = /\.7z$/i.test(src.name);
           mime = src.ranged && !nowArchive && !nowSeven ? '' : mimeFromName(src.name);
@@ -4260,72 +4053,56 @@ async function run() {
           mime = probe.mime;
           const ext = { 'video/mp4': 'mp4', 'video/x-matroska': 'mkv', 'video/webm': 'webm',
                         'audio/mpeg': 'mp3', 'audio/ogg': 'ogg', 'audio/flac': 'flac' }[mime] || '';
-          
           if (ext && !mimeFromName(src.name)) src.name = `${src.name}.${ext}`;
         }
         break;
       }
     } catch (e) {
-      
       console.warn('probe failed:', e && e.message);
     }
     if (!player && !index) document.title = src.name;
   }
-  
   if (!mime && !zipByName && indexSeen && !isRenderableName(indexSeen.name)) {
     if (player) player.remove();
     renderFileInfo(indexSeen);
     return;
   }
-  
   if (src.guess) {
     try {
       const res = await fetch(src.urls[0], {
         headers: { Range: 'bytes=0-1' }, mode: 'cors', credentials: 'omit',
       });
       if (res.status === 404 || res.status === 410) { show404(); return; }
-    } catch (e) {  }
+    } catch (e) { }
   }
 
   try {
     if (/^(video|audio)\//.test(mime)) {
-      
       await renderMedia(mime);
       return;
     }
-    
     const sevenRoot = !zipByName && (mime === 'application/x-7z-compressed' || namedSeven
                                      || /\.7z$/i.test(src.name));
-    
     if (sevenRoot) {
       const known = Number(src.tt && src.tt.bytes) || 0;
       if (known > LIST_TOO_BIG) { sevenTooBigView(known); return; }
     }
-    
     const tarRoot = !zipByName && !sevenRoot && (mime === 'application/x-tar'
                                                  || /\.tar$/i.test(src.name));
     if (mime === 'application/zip' || zipByName || sevenRoot || tarRoot) {
       if (player) player.remove();
-      
       if (!src.tt && !src.direct && src.urls.length === 1) {
         await followIndex(await partPayload(0).catch(() => null));
       }
-      
       const label = sevenRoot || tarRoot ? src.name
         : (/[.](zip|apk|jar|tar)$/i.test(src.name) ? src.name : `${src.name}.zip`);
-      
       window.__b2pZip = { label, addr: typedToken };
-      
       if (SAVE_REQUEST && !member) { await saveWholeArchive(null); return; }
-      
       if (member) {
-        
         await renderZipPath(label, member, typedToken);
         return;
       }
-      
       const rows0 = await rootRows();
-      
       const atRoot = childEntries(rows0, '');
       const plainRoot = /^(index|raw)$/i.test(new URLSearchParams(location.search).get('view') || '');
       if (!plainRoot && hasPreviews(atRoot)) {
@@ -4340,7 +4117,6 @@ async function run() {
       if (index) index.setLabel(label);
       else index = indexView(label, 0, { base: typedToken });
       fillFolder(index, '', rows0);
-      
       if (!sevenRoot && !tarRoot) shareArchivePlan(typedToken || label);
       return;
     }
@@ -4348,9 +4124,7 @@ async function run() {
       bareImage(await wholeFile(), mime, src.name);
       return;
     }
-    
     const bytes = await wholeFile();
-    
     const master = manifestDepth < 1 ? followManifest(bytes) : null;
     if (master) {
       manifestDepth++;
@@ -4361,10 +4135,8 @@ async function run() {
       return renderBytes(await wholeFile(), master.name, '');
     }
     document.title = src.name;
-    
     const tt2png = parseTt2png(bytes);
     if (tt2png) return renderTt2png(tt2png);
-    
     if (mime === 'text/html') {
       window.__fileHtml = src.name;
       document.open();
@@ -4381,7 +4153,6 @@ async function run() {
     }
     await binaryView(bytes);
   } catch (e) {
-    
     if (src.guess || e.httpStatus === 404 || e.httpStatus === 410) show404();
     else status(e.message, true);
   }
