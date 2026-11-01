@@ -150,7 +150,7 @@ const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the e
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
 
-const BUILT_VER = "b14304d5c498c7d6";
+const BUILT_VER = "3afc5ce87d259e50";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -4496,15 +4496,17 @@ function renderFileInfo(index) {
 // after the browser's own "Save video as" failed — see the worker's `dl` branch for the measurement).
 // Accepted both ways round, because both are addresses this page hands out: `/file/<id>?save` and
 // `#<id>?save` (the hash form is what a copied `/file.html#…` address looks like).
-const SAVE_REQUEST = /(?:^|[?&])(?:save|dl)(?:=1)?(?:&|$)/i.test(location.search)
-  || /[?&](?:save|dl)(?:=1)?$/i.test(location.hash);
+// `?s` is the ONE-LETTER form (his ask 2026-11-01: "if a url has ?s in it, it will download the
+// file … an instant download"); `?save`, `?dl=1` and `?save=1` stay because they are addresses this
+// site has already handed out and a saved link has to keep working.
+const SAVE_REQUEST = /(?:^|[?&])(?:save|dl|s)(?:=1)?(?:&|$)/i.test(location.search)
+  || /[?&](?:save|dl|s)(?:=1)?$/i.test(location.hash);
 function addressFromLocation() {
   let hash = location.hash.replace(/^#/, '');
   // The `?save` tail belongs to the ADDRESS, never to the file name it carries.
-  if (/[?&](save|dl)(=1)?$/i.test(hash)) hash = hash.replace(/[?&](save|dl)(=1)?$/i, '');
+  if (/[?&](save|dl|s)(=1)?$/i.test(hash)) hash = hash.replace(/[?&](save|dl|s)(=1)?$/i, '');
   if (hash) return { raw: decodeURIComponent(hash).trim(), hint: '' };
-  // `/file/<id>` and a bare `/<id>` at the site root are the same address; the second is the short
-  // form he asked for on 2026-10-19 (`jarivizero.github.io/HU-ABexW0AASf2m`).
+  
   const idAtRoot = /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
   const fromPath = (location.pathname.match(/\/file\/(.+)$/) || [])[1]
     || (idAtRoot ? location.pathname.slice(1) : '');
@@ -4514,7 +4516,7 @@ function addressFromLocation() {
   try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
   // `?save` carries no `=`, so without this it reads as a file name and the save address would
   // rename the file to "save". The flag is an instruction, never a name.
-  if (/^(save|dl)(=|$)/i.test(hint)) hint = '';
+  if (/^(save|dl|s)(=|$)/i.test(hint)) hint = '';
   if (!raw || !hint || hint.includes('=') || /[?#]/.test(hint)) hint = '';
   return { raw, hint, trailing };
 }
@@ -4526,9 +4528,7 @@ async function run() {
   indexSeen = null;
   const where = addressFromLocation();
   let raw = where.raw;
-  // Prefix grammar, left to right: `.` = an archive (its index page is up before the bytes arrive),
-  // `,` = a video (its player is up before the bytes arrive). Both are his 2026-10-19 ask:
-  // `/file/,<id>` prepares like the worker checks for webm/mp4, `/file/.<id>` is an archive.
+  
   let ranged = false, forceMedia = false;
   for (;;) {
     if (raw.length > 1 && raw.startsWith('.')) { ranged = true; raw = raw.slice(1); continue; }
@@ -4547,15 +4547,10 @@ async function run() {
   // The first frame is decided by the ADDRESS alone: `,` says video, an extension in the path or in
   // `?name` says which element, `.` says the index page. Nothing is fetched to find out.
   const firstMime = where.hint ? mimeFromName(where.hint) : (ranged ? '' : mimeFromName(raw));
-  // The address AS TYPED, which is what every url this page writes keeps — an id stays an id, and
-  // only the heading says the decoded name (his ask 2026-10-25).
+  
   const typedToken = raw.split('/')[0];
   let index = null;
-  // A PATH inside an archive puts the empty `Index of /` up IMMEDIATELY, the way a `.` address does
-  // (his ask 2026-10-25: `/file/<id>/Screenshots/` went white until the listing arrived). The address
-  // already says so: there is a segment after the archive name, and a folder link always ends in `/`
-  // (our own rows write it that way). A last segment with an extension is a FILE — those keep their
-  // own blank tab and get no listing shell.
+  
   if (!ranged && !forceMedia) {
     const inside = raw.includes('/');
     const lastSeg = raw.split('/').filter(Boolean).pop() || '';
@@ -4564,9 +4559,7 @@ async function run() {
     }
   }
   if (ranged) {
-    // `.` says archive, the way `,` says video: an EMPTY `Index of /` is on screen before a byte is
-    // read — the heading a file manager opens with — and the rows arrive when the directory does.
-    // `setLabel` renames it to the real file once the archive has been read (his ask 2026-10-25).
+    
     index = indexView('/', 0, { base: typedToken });
   }
   let player = null;
@@ -4585,9 +4578,7 @@ async function run() {
   } catch (e) {
     const cut = raw.indexOf('/');
     if (cut <= 0) {
-      // NOT FOUND — and a dictionary one deploy behind is the one fixable reason: re-read it ONCE
-      // with the cache bypassed before giving up (his rule 2026-10-19: "after everything is all
-      // loaded and it says 404, recache to check if video does actually exist").
+      
       if (isNameToken(raw) && !dictFreshOnce) {
         dictFreshOnce = true;
         try {
@@ -4716,6 +4707,8 @@ async function run() {
       // whole archive, so a folder costs nothing at all (walkTo below). The address it was opened
       // by and the heading label are all that state needs.
       window.__b2pZip = { label, addr: typedToken };
+      
+      if (SAVE_REQUEST && !member) { await saveWholeArchive(null); return; }
       // A path INSIDE the archive: `/file/<archive>/docs/readme.txt` or `/file/<archive>/docs/`.
       if (member) {
         // No resetPage() here: the folder page replaces the shell by building its own, and clearing
