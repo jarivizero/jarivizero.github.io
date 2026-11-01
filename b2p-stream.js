@@ -787,34 +787,48 @@ function manifestFilePlan(bytes, previous) {
            cap: previous.cap, parts, total: 0, tt: false };
 }
 
+async function listPayload(plan) {
+  const raw = plan.parts.length === 1 ? await partPayload(plan, 0)
+    : await fileBytes(plan, 0, plan.total - 1);
+  const wrapped = raw.length > 9 && raw[0] === 0x42 && raw[1] === 0x32 && raw[2] === 0x50 &&
+                  raw[3] === 0x5a;
+  return wrapped ? await inflateTolerant(raw.subarray(9)) : raw;
+}
+
 async function filePlan(name) {
   let plan = await archivePlan(name);
-  for (let depth = 0; plan && depth < 3; depth++) {
+  for (let depth = 0; plan && depth < 4; depth++) {
     if (!plan.total) plan.total = await totalBytes(plan);
     if (!plan.total) return null;
+    // A 64-BYTE HEAD decides whether anything else has to be read. Reading the whole payload just to
+    // ask "is this a list?" would decode every part of a 267 MB archive before its download started.
     const head = await fileBytes(plan, 0, Math.min(63, plan.total - 1));
-    const text = new TextDecoder('utf-8', { fatal: false }).decode(head).trimStart();
-    if (text.startsWith('#bin2png-manifest')) {
-      const full = await fileBytes(plan, 0, Math.min(plan.total - 1, 262143));
-      const next = manifestFilePlan(full, plan);
+    const wrapped = head.length > 3 && head[0] === 0x42 && head[1] === 0x32 && head[2] === 0x50 &&
+                    head[3] === 0x5a;
+    const text = new TextDecoder('utf-8', { fatal: false }).decode(head).replace(/^\uFEFF/, '').trimStart();
+    if (!wrapped && !text.startsWith('#bin2png-manifest') && text.charAt(0) !== '{') {
+      return plan;                                               // the payload IS the file
+    }
+    const body = await listPayload(plan);
+    const list = new TextDecoder('utf-8', { fatal: false }).decode(body).replace(/^\uFEFF/, '');
+    if (list.trimStart().startsWith('#bin2png-manifest')) {
+      const next = manifestFilePlan(body, plan);
       if (!next) return null;
       plan = next;
       continue;
     }
-    if (text.charAt(0) === '{') {
-      let index = null;
-      try { index = JSON.parse(new TextDecoder().decode(await fileBytes(plan, 0, plan.total - 1))); }
-      catch (e) { return null; }
-      if (!index || index.tool !== 'tt2png' || !Array.isArray(index.chunks) || !index.chunks.length) return null;
-      plan = { id: null, name: index.name || plan.name,
-               mime: mimeFromName(index.name) || plan.mime || 'application/zip',
-               cap: Number(index.chunk_size) || plan.cap || 2421906,
-               parts: index.chunks.map((c) => c.url),
-               masks: index.chunks.map((c) => Number(c.mask) || 0),
-               total: Number(index.bytes) || 0, tt: true };
-      continue;
-    }
-    return plan;                                                 // the payload IS the file
+    let index = null;
+    try { index = JSON.parse(list); } catch (e) { return plan; }  // a .json that really is a file
+    // ONLY a tt2png index is followed. Any other JSON is the file the address names, and serving it
+    // verbatim is correct — the page makes the same distinction.
+    if (!index || index.tool !== 'tt2png') return plan;
+    if (!Array.isArray(index.chunks) || !index.chunks.length) return null;
+    plan = { id: null, name: index.name || plan.name,
+             mime: mimeFromName(index.name) || plan.mime || 'application/zip',
+             cap: Number(index.chunk_size) || plan.cap || 2421906,
+             parts: index.chunks.map((c) => c.url),
+             masks: index.chunks.map((c) => Number(c.mask) || 0),
+             total: Number(index.bytes) || 0, tt: true };
   }
   return null;
 }
@@ -828,6 +842,15 @@ async function serveFileSave(name, request) {
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const total = Number(plan.total) || 0;
     if (!total) return null;
+    
+    if (plan.parts && plan.parts.length) {
+      try {
+        const cache = await caches.open(PLAN_CACHE);
+        await cache.put(planKey('archive-' + await digestHex(name)), new Response(JSON.stringify(plan), {
+          headers: { 'Content-Type': 'application/json' },
+        }));
+      } catch (e) { /* a cache that refuses only costs the next visit its 4.5 s */ }
+    }
     const from = resumeStart(request, total);
     const headers = {
       'Content-Type': mimeFromName(named) || plan.mime || 'application/octet-stream',
@@ -836,6 +859,8 @@ async function serveFileSave(name, request) {
       'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': '*',
       'Content-Length': String(total - from),
+      
+      'X-B2P-Save': named,
     };
     if (from > 0) headers['Content-Range'] = `bytes ${from}-${total - 1}/${total}`;
     return new Response(streamRange(plan, from, total - 1, total), {
