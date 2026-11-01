@@ -25,7 +25,10 @@
 // not compress, so it never is; the worker refuses with 415 and the page falls back to the old
 // whole-file path rather than serving shifted bytes.
 
-const PLAN_CACHE = 'b2p-plan-v1';
+// v2 (2026-11-01): a plan now carries `masks` beside `parts`. A plan written by a worker that did
+// not know about masked chunks is a plan whose ranges come back XORed, so the old namespace is
+// abandoned rather than trusted.
+const PLAN_CACHE = 'b2p-plan-v2';
 const PART_CACHE = 'b2p-part-v1';
 const MARK = '/__b2p/';
 
@@ -36,7 +39,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "455074085042ced5";
+const BUILT_VER = "b14304d5c498c7d6";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
 // A copy the NETWORK gave us is kept for the build that asked for it, never across builds: a worker
 // update that carries a newer baked list must not be shadowed by a cache entry an older worker wrote.
@@ -262,7 +265,7 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.endsWith('/__b2p/zip/')) {
     // A rejected promise here is a network error in the frame's download; the job's own failures are
     // already a page that tells the parent why, so this is only the last resort.
-    event.respondWith(serveZipJob(url, event.clientId).catch((e) => zipErrorPage('', e.message)));
+    event.respondWith(serveZipJob(url, event.clientId, event.request).catch((e) => zipErrorPage('', e.message)));
     return;
   }
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
@@ -919,7 +922,13 @@ function windowStream(skip, take) {
   });
 }
 
-async function serveZipJob(url, clientId) {
+function resumeStart(request, total) {
+  const r = parseRange(request && request.headers.get('Range'), total);
+  if (!r || r.unsatisfiable) return 0;
+  return r.start;
+}
+
+async function serveZipJob(url, clientId, request) {
   const id = url.searchParams.get('id') || '';
   const job = id ? await readPlan('zip-' + id) : null;
   if (!job || !job.plan) return zipErrorPage(id, 'there is no such zip job — its plan is gone from the cache');
@@ -985,39 +994,54 @@ async function serveZipJob(url, clientId) {
         'Cache-Control': 'no-store',
         'Access-Control-Allow-Origin': '*',
       };
-      if (out) headers['Content-Length'] = String(out);
-      let body = streamRange(plan, start, start + csize - 1, csize);
+      // A STORED member is a byte range, so a Resume can be answered from its offset. An INFLATED
+      // one cannot: the output offset has no relation to the input, so no range is advertised and the
+      // browser restarts it whole (200) rather than being told a range this job cannot serve.
+      const from = method === 0 ? resumeStart(request, csize) : 0;
+      if (out) headers['Content-Length'] = String(Math.max(0, out - from));
+      if (method === 0) {
+        headers['Accept-Ranges'] = 'bytes';
+        if (from > 0) headers['Content-Range'] = `bytes ${from}-${csize - 1}/${csize}`;
+      }
+      let body = streamRange(plan, start + from, start + csize - 1, csize);
       if (method === 8) body = body.pipeThrough(new DecompressionStream('deflate-raw'));
-      let told = 0, toldAt = 0;
+      let told = from, toldAt = 0;
       body = countingStream(body, (n) => {
+        const done = from + n;
         const now = Date.now();
-        if ((out && n === out) || n - told >= 262144 || now - toldAt >= 250) {
-          told = n; toldAt = now;
-          zipProgress(sends, job.id, n, out || csize, 'bytes', n, out || csize);
+        if ((out && done === out) || done - told >= 262144 || now - toldAt >= 250) {
+          told = done; toldAt = now;
+          zipProgress(sends, job.id, done, out || csize, 'bytes', done, out || csize);
         }
       });
-      return new Response(body, { status: 200, headers });
+      return new Response(body, { status: from > 0 ? 206 : 200, headers });
     }
     if (job.kind === 'file') {
       // The whole archive as it stands: the same bytes Download Zip used to buffer, streamed instead.
+      // This body IS a byte range of the payload, so a Resume is answered as 206 from the offset
+      // Chrome asks for — the difference between a saved file and "file wasn't available on site".
+      const from = resumeStart(request, plan.total);
       const headers = {
         'Content-Type': job.mime || 'application/octet-stream',
         'Content-Disposition': attachmentHeader(job.name),
         'Cache-Control': 'no-store',
         'Access-Control-Allow-Origin': '*',
+        'Accept-Ranges': 'bytes',
       };
-      headers['Content-Length'] = String(plan.total);
+      headers['Content-Length'] = String(plan.total - from);
+      if (from > 0) headers['Content-Range'] = `bytes ${from}-${plan.total - 1}/${plan.total}`;
       // A few messages a second, not one per megabyte: the page's rate is a slope over TIME, so more
       // numbers only cost messages (a 1 GB save at 100 MB/s was ~1000 of them).
-      let told = 0, toldAt = 0;
-      const body = countingStream(streamRange(plan, 0, plan.total - 1, plan.total), (n) => {
+      let told = from, toldAt = 0;
+      const body = countingStream(streamRange(plan, from, plan.total - 1, plan.total), (n) => {
+        const done = from + n;
         const now = Date.now();
-        if (n === plan.total || n - told >= 262144 || now - toldAt >= 250) {
-          told = n; toldAt = now;
-          zipProgress(sends, job.id, n, plan.total, 'bytes', n, plan.total);
+        if (done === plan.total || done - told >= 262144 || now - toldAt >= 250) {
+          told = done; toldAt = now;
+          zipProgress(sends, job.id, done, plan.total, 'bytes', done, plan.total);
         }
       });
-      return new Response(body, { status: 200, headers });
+      return new Response(body, { status: from > 0 ? 206 : 200, headers });
     }
     const prefix = String(job.prefix || '');
     
@@ -1278,11 +1302,15 @@ async function ttHeader(plan, i, key) {
   return job;
 }
 async function finishWindow(plan, i, key, off, want, res) {
-  const body = new Uint8Array(await res.arrayBuffer());
-  netBytes.set(key, (netBytes.get(key) || 0) + body.length);
-  noteReq('win:' + String(plan.name || plan.id || '?').slice(0, 12), key, off, want, body.length);
+  const raw = new Uint8Array(await res.arrayBuffer());
+  netBytes.set(key, (netBytes.get(key) || 0) + raw.length);
+  noteReq('win:' + String(plan.name || plan.id || '?').slice(0, 12), key, off, want, raw.length);
+  
+  const body = unmaskBytes(raw, ttMask(plan, i));
   // A read that covers the whole chunk keeps it (payloadOf is checked before any fetch), so the next
   // reader of this chunk — a second stream, or the member after its directory — costs nothing.
+  // `payloadOf` and the window cache hold UNMASKED bytes: a second reader must never have to know
+  // whether the chunk on the wire was masked.
   if (off === 0 && plan.cap && body.length === plan.cap) {
     payloadOf.set(key, body);
     prefixOf.delete(key);
@@ -1315,8 +1343,12 @@ async function ttPartPayload(plan, i, need = Infinity) {
   const job = (partLocks.get(key) || Promise.resolve()).then(async () => {
     const cached = await (await caches.open(PART_CACHE)).match(key);
     if (cached) {
-      
-      const whole = unmaskBytes(new Uint8Array(await cached.arrayBuffer()), mask);
+      // THE CACHE HOLDS UNMASKED PAYLOAD BYTES — `settleTT` is the only writer and it is handed what
+      // already came out of `unmaskBytes`. Un-masking here as well applied the XOR a SECOND time and
+      // turned a refused chunk into garbage on every cache hit (the exact symptom the old comment
+      // blamed on the cache storing wire bytes). One rule: the wire is masked, everything this worker
+      // keeps is not.
+      const whole = new Uint8Array(await cached.arrayBuffer());
       payloadOf.set(key, whole);
       return whole;
     }
