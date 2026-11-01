@@ -9,8 +9,8 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "70fd804ca1bc0592";
-const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
+const BUILT_VER = "5e01cd1d5e3f0b89";
+const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\nv1 df1c178d84d0d37b8df8a34e33b4d2ee97ae96b2a3f87b42d8e512fea1e50231 _FJ4n5kup6kaYMM2H0_8wjgWFrB7TpqFpz1MBWjYYb8\n";
 const dictKey = DICT_URL + '?cache=' + BUILT_VER;
 
 self.addEventListener('install', (event) => {
@@ -758,13 +758,21 @@ async function fileBytes(plan, start, end) {
   return new Uint8Array(await body.arrayBuffer());
 }
 
+function viewOf(plan) {
+  return {
+    total: plan.total,
+    key: plan.parts.join('|') + '#' + plan.total,
+    read: (start, end) => fileBytes(plan, start, end),
+  };
+}
+
 const DIRS = new Map();
-async function zipDir(plan) {
-  const key = plan.parts.join('|') + '#' + plan.total;
+async function zipDir(view) {
+  const key = view.key;
   if (DIRS.has(key)) return DIRS.get(key);
-  const total = plan.total;
+  const total = view.total;
   const tailStart = Math.max(0, total - 65557);
-  const tail = await fileBytes(plan, tailStart, total - 1);
+  const tail = await view.read(tailStart, total - 1);
   let eocd = -1;
   for (let i = tail.length - 22; i >= 0; i--) if (U32(tail, i) === 0x06054b50) { eocd = i; break; }
   if (eocd < 0) throw new Error('no zip end-of-directory record in the last 64 KB');
@@ -772,7 +780,7 @@ async function zipDir(plan) {
   const cdSize = U32(tail, eocd + 12);
   if (cdOff === 0xffffffff || cdSize === 0xffffffff) throw new Error('ZIP64: the page reads these');
   const from = Math.min(cdOff, tailStart);
-  const cd = await fileBytes(plan, from, Math.min(total - 1, cdOff + cdSize + 64));
+  const cd = await view.read(from, Math.min(total - 1, cdOff + cdSize + 64));
   const dir = new Map();
   let k = cdOff - from;
   const end = Math.min(k + cdSize, cd.length);
@@ -792,11 +800,11 @@ async function zipDir(plan) {
   return dir;
 }
 
-async function zipEntry(plan, want) {
-  const dir = await zipDir(plan);
+async function zipEntry(view, want) {
+  const dir = await zipDir(view);
   const entry = dir.get(want) || dir.get(want + '/');
   if (!entry || entry.dir) return null;
-  const head = await fileBytes(plan, entry.localOff, entry.localOff + 29);
+  const head = await view.read(entry.localOff, entry.localOff + 29);
   if (!(head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4)) return null;
   const nlen = U16(head, 26), elen = U16(head, 28);
   return { ...entry, start: entry.localOff + 30 + nlen + elen };
@@ -818,7 +826,7 @@ function memberMime(name) {
     'application/octet-stream';
 }
 
-async function memberResponse(plan, entry, request, save) {
+async function memberResponse(view, entry, request, save) {
   const name = entry.name.replace(/^.*\//, '');
   const headers = {
     'Content-Type': memberMime(name),
@@ -836,14 +844,14 @@ async function memberResponse(plan, entry, request, save) {
       return new Response(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${entry.csize}` } });
     }
     if (r) {
-      const body = await fileBytes(plan, entry.start + r.start, entry.start + r.end);
+      const body = await view.read(entry.start + r.start, entry.start + r.end);
       return new Response(body, { status: 206, headers: {
         ...headers, 'Content-Range': `bytes ${r.start}-${r.end}/${entry.csize}`,
         'Content-Length': String(body.length),
       } });
     }
   }
-  const comp = await fileBytes(plan, entry.start, entry.start + entry.csize - 1);
+  const comp = await view.read(entry.start, entry.start + entry.csize - 1);
   let bytes = comp;
   if (entry.method === 8) {
     bytes = new Uint8Array(await new Response(new Blob([comp]).stream()
@@ -1038,15 +1046,55 @@ async function serveFileRaw(name, request, asCatbox) {
   }
 }
 
+const NESTED_ARCHIVE = /\.(zip|apk|jar|7z)$/i;
+const NEST_MAX = 64 * 1024 * 1024;
+const NESTS = new Map();
+async function openNested(view, entry) {
+  if (entry.dir || !entry.csize) return null;
+  const key = view.key + '/' + entry.name + '#' + entry.csize;
+  if (NESTS.has(key)) return NESTS.get(key);
+  let nested = null;
+  if (entry.method === 0) {
+    const from = entry.start, size = entry.csize;
+    nested = { total: size, key, read: (s, e) => view.read(from + s, from + Math.min(e, size - 1)) };
+  } else if (entry.method === 8 && entry.csize <= NEST_MAX && Number(entry.size) <= NEST_MAX) {
+    const comp = await view.read(entry.start, entry.start + entry.csize - 1);
+    const mem = new Uint8Array(await new Response(new Blob([comp]).stream()
+      .pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+    nested = { total: mem.length, key, read: (s, e) => mem.subarray(s, Math.min(e, mem.length - 1) + 1) };
+  }
+  if (nested) NESTS.set(key, nested);     // one inflate per nested archive, like the directories
+  return nested;
+}
+
 async function serveMember(address, request, save) {
   try {
     const plan = await archivePlan(address.archive, undefined, true);
     if (!plan) return null;
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
-    const entry = await zipEntry(plan, address.member);
-    if (!entry) return null;
-    if (/\.(zip|apk|jar|7z)$/i.test(entry.name)) return null;
-    return await memberResponse(plan, entry, request, save);
+    const segs = String(address.member).split('/');
+    let view = viewOf(plan), prefix = '', depth = 0;
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      if (!seg) return null;
+      const last = i === segs.length - 1;
+      const entry = await zipEntry(view, prefix + seg);
+      if (!entry) {
+        if (last) return null;
+        prefix += seg + '/';
+        continue;
+      }
+      if (last) {
+        if (NESTED_ARCHIVE.test(entry.name)) return null;
+        return await memberResponse(view, entry, request, save);
+      }
+      if (!NESTED_ARCHIVE.test(entry.name) || ++depth > 3) return null;
+      const nested = await openNested(view, entry);
+      if (!nested) return null;          // too big to inflate here: the renderer's job
+      view = nested;
+      prefix = '';
+    }
+    return null;
   } catch (e) {
     return null;                       // the renderer, which renders a member by itself
   }
@@ -1324,7 +1372,7 @@ async function serveZipJob(url, clientId, request) {
                                   method: Number(e.method) || 0, crc: Number(e.crc) >>> 0,
                                   time: Number(e.time) || 0, date: Number(e.date) || 0,
                                   localOff: base + (Number(e.localOff) || 0) }))
-      : [...(await zipDir(plan)).values()]
+      : [...(await zipDir(viewOf(plan))).values()]
         .filter((e) => !e.dir && e.name.startsWith(prefix) && e.name.length > prefix.length)
         .sort((a, b) => a.localOff - b.localOff);
     if (!members.length) throw new Error(`there are no files under "${prefix}" in ${plan.name || 'the archive'}`);
