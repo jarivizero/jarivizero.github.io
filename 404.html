@@ -2,22 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="referrer" content="no-referrer"><!-- pbs.twimg.com answers 351 to any non-X Referer (measured 2026-10-29); no Referer is served, and a page cannot send x.com's -->
+<meta name="referrer" content="no-referrer">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>404 — not found</title>
 <noscript><style>html.file-address body > main { display:block; }</style></noscript>
 <script>
-// BEFORE THE FIRST PAINT. `/file/<name>` is a file address dressed as a path: this document is only
-// the frame around the renderer, so it must never paint the 404 art or the home link on its way to
-// the payload (his 2026-10-19 report: "will still load a page, then a video loading"). `/<id>` at the
-// site root is the same address as `/file/<id>` (the short form he asked for).
-//
-// WHICH frame is decided by the ADDRESS ALONE, and a text address is a TEXT frame: black is right for
-// a player and wrong for a .txt, whose tab is white in light mode and dark in dark mode because of
-// `<meta name="color-scheme" content="light dark">` (his 2026-10-19 ask: "it does this for video
-// files but txt have a special style"). The kinds mirror file.html's pre-paint — keep the two lists
-// in step; they are the same decision made twice, once for the server's 404 and once for the worker's
-// precached renderer.
+
 (function () {
   const path = location.pathname;
   const inFile = path.match(/\/file\/(.+)$/);
@@ -26,7 +16,7 @@
   const address = decodeURIComponent(inFile ? inFile[1] : path.slice(1)).replace(/\/+$/, '').trim();
   let hint = location.search.replace(/^\?/, '');
   try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
-  let raw = address;                       // the prefix grammar: `.` archive, `,` video
+  let raw = address;                       
   for (;;) {
     if (raw.length > 1 && (raw.charAt(0) === '.' || raw.charAt(0) === ',')) { raw = raw.slice(1); continue; }
     break;
@@ -37,8 +27,7 @@
   const e = ext ? ext.toLowerCase() : '';
   const MEDIA = ['mp4','m4v','mov','webm','mkv','avi','mp3','m4a','aac','ogg','oga','opus','flac','wav'];
   const IMAGE = ['png','jpg','jpeg','gif','webp','bmp','avif','ico','svg'];
-  // `id` = an address with no extension at all: nothing is known yet, and black is the better guess
-  // (an id is usually a player); file.html's own pre-paint clears it if the sniff says otherwise.
+  
   let kind = 'id';
   if (forcedMedia || MEDIA.includes(e)) kind = 'media';
   else if (raw.charAt(0) === '.') kind = 'text';
@@ -52,20 +41,16 @@
     meta.content = 'light dark';
     document.head.appendChild(meta);
   }
-  window.__fileKind = kind;               // the video frame below is built only for `media`
+  window.__fileKind = kind;               
 })();
 </script>
 <style>
   :root { --bg:#fff; --fg:#1b1b1f; --muted:#666; --accent:#0645ad; }
   html.file-media, html.file-media body { background:#000; }
   html.file-image, html.file-image body { background:#0e0e0e; }
-  /* `file-text` and `file-id` set no colour on purpose: the canvas comes from the color-scheme meta
-     (light mode white, dark mode near-black), which is what a `file:///` tab does. */
-  html.file-path body > main { display:none; }   /* the iframe is a child of body, and must show */
-  /* Until the address is decided, a file address shows its own frame and NOT the 404 art: the art is
-     the answer for a name that turns out not to exist, never something to flash on the way to a
-     file. `aside` is cleared in the decide step for the art case (and a no-JS visitor gets the art
-     back through the <noscript> rule in the head). */
+  
+  html.file-path body > main { display:none; }   
+  
   html.file-address body > main { display:none; }
   * { box-sizing:border-box; }
   html,body { margin:0; min-height:100%; background:var(--bg); color:var(--fg);
@@ -98,7 +83,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
 
 (async () => {
   
-  const BUILT_VER = "3afc5ce87d259e50";
+  const BUILT_VER = "2ef47eeb43cef0bc";
   const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
   const art = document.getElementById('art');
   const msg = document.getElementById('msg');
@@ -110,8 +95,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     msg.textContent = text;
     home.innerHTML = '<a href="/bin2png">click me to go home</a>';
   };
-  // The art is the ANSWER for "no such file", and it is fetched at that moment — never on the way to
-  // a file. One request, once: a name that turns out to be unknown asks for it AFTER the decision.
+  
   let artAsked = false;
   function showArt() {
     if (artAsked) return;
@@ -119,7 +103,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     art.src = '/404.png';
   }
 
-  // ── the baked dictionary: the first answer, and it costs nothing ──────────────────────────
+  
   function dictMap(text) {
     const map = new Map();
     for (const line of String(text || '').split('\n')) {
@@ -136,7 +120,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
     return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
   }
-  // The prefixes the address grammar allows (`.` archive, `,` video, `n:` / `name:` / `id:`), gone.
+  
   function cleanToken(name) {
     let t = String(name || '').replace(/\/+$/, '').trim();
     for (;;) {
@@ -145,17 +129,13 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     }
     return t.replace(/^(?:n|name|id):/i, '');
   }
-  // In the list this page was built with ⟺ it is a file. No request, no crypto for a hash the
-  // dictionary already spells out. NOT BAKED (`BAKED.size === 0`: the editor's copy, a local server)
-  // means this page cannot answer the question at all, so it must not claim "no" — the renderer is
-  // asked instead, exactly as before. Only a baked page gets to say "art, now".
+  
   async function knownName(bare) {
     if (!BAKED.size || !bare) return !BAKED.size;
     const h = await digestHex(bare);
     return !!h && BAKED.has(h);
   }
-  // A pbs id is EXACTLY 15 characters — the shape the worker's own root route accepts, so this can
-  // never call somebody else's page a file. `id+id+…` is a stitched file; a bare url is a file.
+  
   function looksLikeId(bare) {
     const t = String(bare || '').trim();
     if (!t) return false;
@@ -163,11 +143,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     return t.split('+').map((s) => s.trim()).filter(Boolean)
       .every((p) => /^[A-Za-z0-9_-]{15}$/.test(p.replace(/\.[A-Za-z0-9]+$/, '')));
   }
-  // The renderer takes THIS document over — same url, same document, no iframe to paint first. It
-  // reads the name from the path, and its own pre-paint script keeps the window black.
-  // The `/file` SEGMENT, not `lastIndexOf('/file')` — that also matches the start of a later
-  // segment, so `/file/<id>/x/files/` asked for `…/x/file.html` (404) and the page stayed blank
-  // (measured live 2026-10-25).
+  
   async function openRenderer(name, root) {
     document.title = decodeURIComponent(name);
     
@@ -192,7 +168,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
       document.close();
       return;
     } catch (e) {
-      // No renderer to write (offline, or a first deploy): fall back to framing it.
+      
       const frame = document.createElement('iframe');
       frame.title = decodeURIComponent(name);
       frame.src = '/file#' + encodeURIComponent(name);
@@ -212,7 +188,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     home.textContent = '';
     const tried = 'b2p-s:' + location.href;
     let again = true;
-    try { again = !sessionStorage.getItem(tried); sessionStorage.setItem(tried, '1'); } catch (e) { /* private mode: no guard */ }
+    try { again = !sessionStorage.getItem(tried); sessionStorage.setItem(tried, '1'); } catch (e) {  }
     if (!('serviceWorker' in navigator) || !window.isSecureContext || !again) {
       fail('A download needs this site\u2019s worker, and this browser did not install it. Reload the page once.');
       return;
@@ -254,13 +230,13 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
           document.close();
           return;
         }
-      } catch (e) { /* offline: the art below is the answer */ }
+      } catch (e) {  }
     }
   }
 
-  // ── 1. /file/<name> ─────────────────────────────────────────────────────────────────────────
+  
   const asPath = location.pathname.match(/^\/file\/(.+)$/);
-  // `jarivizero.github.io/<id>` — no `/file` in the path, and still a file address.
+  
   const asRoot = !asPath && /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
   if (asPath || asRoot) {
     const name = (asPath ? asPath[1] : location.pathname.slice(1)).replace(/\/+$/, '');
@@ -270,17 +246,15 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     
     const bare = cleanToken(name).split('/')[0] || '';
     
-    if (await knownName(bare) || looksLikeId(bare)) {   // (un-baked: knownName is always true)
+    if (await knownName(bare) || looksLikeId(bare)) {   
       await openRenderer(name, root);
       return;
     }
-    document.documentElement.className = '';      // the art is not a player's black frame
+    document.documentElement.className = '';      
     showArt();
     msg.textContent = '';
     document.title = '404 — not found';
-    // LAST, because both of these are the network and neither can change the art on its own:
-    // sw-ver tells the worker to re-cache, and the fresh dictionary can still turn up the name —
-    // which is exactly what happens the minute a deploy adds one and this page is a build behind.
+    
     try {
       const ver = await fetch(root + 'sw-ver.txt', { cache: 'no-store' });
       if (ver.ok && 'serviceWorker' in navigator) {
@@ -289,7 +263,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
         const w = reg && (reg.active || reg.waiting || reg.installing);
         if (live && w) w.postMessage({ type: 'resync', ver: live });
       }
-    } catch (e) { /* offline: the art stands */ }
+    } catch (e) {  }
     try {
       const res = await fetch(root + 'IDSDICTIONARY.txt?fresh=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
@@ -297,12 +271,12 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
         const h = await digestHex(bare);
         if (h && fresh.has(h)) await openRenderer(name, root);
       }
-    } catch (e) { /* still not a file */ }
+    } catch (e) {  }
     return;
   }
   if (location.pathname === '/file/') { location.replace('/file'); return; }
 
-  // ── 2. a stream url opened cold ─────────────────────────────────────────────────────────────
+  
   if (location.pathname.includes('/__b2p/')) {
     msg.className = 'msg';
     msg.textContent = 'Preparing the stream…';
@@ -312,8 +286,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
       return;
     }
     try {
-      // Absolute, on purpose: this page is served for the requested path, so a relative script url
-      // would resolve against a directory that does not exist.
+      
       await navigator.serviceWorker.register('/b2p-stream.js', { scope: '/' });
       await navigator.serviceWorker.ready;
       if (!navigator.serviceWorker.controller) {
@@ -326,8 +299,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
         fail('The worker installed but did not take control of this page. Reload it once.');
         return;
       }
-      // Two bytes prove the plan is reachable: 206 with them, or 410 when the address carries no
-      // plan and this browser has never cached one.
+      
       const probe = await fetch(location.href, { headers: { Range: 'bytes=0-1' }, cache: 'no-store' });
       if (probe.status === 206 || probe.status === 200) {
         msg.textContent = 'Stream ready — opening it.';
@@ -346,7 +318,7 @@ if ('serviceWorker' in navigator && window.isSecureContext) {
     return;
   }
 
-  // ── 3. an ordinary missing page: the art says it, so nothing else is added ──────────────────
+  
   showArt();
   msg.textContent = '';
 })();
