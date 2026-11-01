@@ -9,7 +9,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "d3944ca7fa3ba6b8";
+const BUILT_VER = "70fd804ca1bc0592";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\n";
 const dictKey = DICT_URL + '?cache=' + BUILT_VER;
 
@@ -58,7 +58,84 @@ const REAL_PATH = new RegExp('^/(?:' +
 const isRealPath = (p) => p === '/' || REAL_PATH.test(p);
 
 const FILE_PAGE = /(?:^|\/)file(?:\/.*)?$/;
-const ROOT_ADDRESS = /^\/[A-Za-z0-9_-]{15}(?:\.[A-Za-z0-9]+)?$/;
+const ROOT_ADDRESS = /^\/(?:[A-Za-z0-9_-]{15}|[a-z0-9]{6})(?:\.[A-Za-z0-9]+)?$/;
+
+const CATBOX_ID = /^[a-z0-9]{6}$/;
+
+const SUPABASE_ID = /^[A-Za-z0-9]{4}$/;
+const SUPA_URL = 'https://ahyjufzfnozcexviegoo.supabase.co';
+const SUPA_KEY = 'sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR';
+const SUPA_PASS = 'bin2png/manifest/v1';
+const SUPA_PREFIX = 'b2p1:';
+
+function b2pB64Url(text) {
+  const t = String(text || '').replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(t + '='.repeat((4 - (t.length % 4)) % 4));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+async function supaManifestText(id) {
+  if (!SUPA_KEY || SUPA_KEY.startsWith('SUPA_')) return null;      // --key has not run
+  try {
+    const res = await fetch(SUPA_URL + '/rest/v1/rpc/resolve_manifest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPA_KEY,
+                 Authorization: 'Bearer ' + SUPA_KEY },
+      body: JSON.stringify({ p_id: id }),
+    });
+    if (!res.ok) return null;
+    const blob = await res.json().catch(() => null);
+    if (typeof blob !== 'string' || !blob.startsWith(SUPA_PREFIX)) return null;
+    const all = b2pB64Url(blob.slice(SUPA_PREFIX.length));
+    if (all.length < 28) return null;                         // 12-byte IV + 16-byte tag
+    const key = await crypto.subtle.importKey('raw', await crypto.subtle.digest('SHA-256',
+      new TextEncoder().encode(SUPA_PASS)), 'AES-GCM', false, ['decrypt']);
+    const plain = await crypto.subtle.decrypt({
+      name: 'AES-GCM', iv: all.subarray(0, 12),
+      additionalData: new TextEncoder().encode('b2p/' + id),
+    }, key, all.subarray(12));
+    return new TextDecoder().decode(plain);
+  } catch (e) {
+    return null;                        // an id that cannot be opened is an id that does not exist
+  }
+}
+
+function planFromList(text, address) {
+  const raw = String(text || '').replace(/^\uFEFF/, '');
+  const t = raw.trimStart();
+  if (t.startsWith('#bin2png-manifest')) {
+    const parts = [];
+    let name = null;
+    for (const line of raw.split('\n')) {
+      const f = line.split('\t');
+      if (f[0] === 'file' && f[1]) name = name || f[1];
+      if (f[0] === 'part' && f[2]) parts.push(f[2]);
+    }
+    return parts.length ? { id: null, name: name || address, mime: 'application/zip', cap: 2421906,
+                            parts, total: 0 } : null;
+  }
+  if (t.charAt(0) === '{') {
+    let index = null;
+    try { index = JSON.parse(raw); } catch (e) { return null; }
+    if (!index || index.tool !== 'tt2png' || !Array.isArray(index.chunks) ||
+        !index.chunks.length) return null;
+    return { id: null, name: index.name || address, mime: 'application/zip',
+             cap: Number(index.chunk_size) || 2421906,
+             parts: index.chunks.map((c) => c.url),
+             masks: index.chunks.map((c) => Number(c.mask) || 0),
+             total: Number(index.bytes) || 0, tt: true };
+  }
+  return null;
+}
+
+function mediaUrl(part) {
+  const p = String(part || '').trim();
+  if (/^https?:/i.test(p)) return p;
+  if (CATBOX_ID.test(p)) return 'https://files.catbox.moe/' + p + '.png';
+  return 'https://pbs.twimg.com/media/' + p + '?format=png';
+}
 const PAGE_URL = new URL('file', self.location.href).href;
 
 async function serveFilePage(logger) {
@@ -223,7 +300,8 @@ self.addEventListener('fetch', (event) => {
       const rawName = fileAddress(url.pathname);
       if (rawName) {
         const nav = event.request.mode === 'navigate';
-        event.respondWith(serveFileRaw(rawName, event.request).then((res) => res || (nav
+        event.respondWith(serveFileRaw(rawName, event.request, url.searchParams.has('c'))
+          .then((res) => res || (nav
           ? loggerTags().catch(() => '').then((tags) => serveFilePage(tags))
           : new Response('', { status: 404 }))));
         return;
@@ -279,8 +357,8 @@ function planFromUrl(url) {
   const ids = url.searchParams.get('p');
   if (ids) {
     const list = ids.split('+').map((s) => s.trim()).filter(Boolean);
-    if (list.length && list.every((id) => /^[A-Za-z0-9_-]{10,}$/.test(id))) {
-      parts = list.map((id) => `https://pbs.twimg.com/media/${id}?format=png`);
+    if (list.length && list.every((id) => /^[A-Za-z0-9_-]{15}$/.test(id) || CATBOX_ID.test(id))) {
+      parts = list.map((id) => mediaUrl(id));
     }
   }
   const urls = url.searchParams.get('u');
@@ -313,7 +391,7 @@ function isSaveAddress(url) {
   return SAVE_PARAMS.some((k) => url.searchParams.has(k));
 }
 
-const RAW_PARAMS = ['r'];
+const RAW_PARAMS = ['r', 'c'];
 function isRawAddress(url) {
   return RAW_PARAMS.some((k) => url.searchParams.has(k));
 }
@@ -344,7 +422,19 @@ function sniffMime(head) {
   if (at(0, 'OggS')) return 'audio/ogg';
   if (at(0, 'ID3')) return 'audio/mpeg';
   if (b.length >= 2 && b[0] === 0xff && (b[1] & 0xe0) === 0xe0) return 'audio/mpeg';
+  if (looksLikeText(b)) return 'text/plain; charset=utf-8';
   return '';
+}
+
+function looksLikeText(b) {
+  if (!b || !b.length) return false;
+  for (let i = 0; i < b.length; i++) {
+    const c = b[i];
+    if (c === 0) return false;
+    if (c < 9 || (c > 13 && c < 32)) return false;
+  }
+  try { new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { return false; }
+  return true;
 }
 
 function headersFor(plan) {
@@ -507,16 +597,122 @@ function archiveAddress(pathname) {
   } catch (e) { return null; }
 }
 
-async function archivePlan(address) {
+const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16, IDS_VERSION = 'v1';
+let dictInlineCache = null;
+
+function b64uDecode(text) {
+  const s = String(text).replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(s + '='.repeat((4 - (s.length % 4)) % 4));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function idsKey(name) {
+  const secret = new TextEncoder().encode(name);
+  const salt = new Uint8Array(await crypto.subtle.digest('SHA-256', secret));
+  const base = await crypto.subtle.importKey('raw', secret, 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt, iterations: IDS_ITERATIONS, hash: 'SHA-256' }, base, 256);
+  return new Uint8Array(bits);
+}
+async function idsHmac(key, data) {
+  const k = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', k, data));
+}
+async function idsXor(key, iv, data) {
+  const out = new Uint8Array(data.length);
+  let counter = 0, at = 0;
+  while (at < data.length) {
+    const block = new Uint8Array(iv.length + 4);
+    block.set(iv, 0);
+    new DataView(block.buffer).setUint32(iv.length, counter, false);
+    const ks = await idsHmac(key, block);
+    for (let i = 0; i < ks.length && at < data.length; i++, at++) out[at] = data[at] ^ ks[i];
+    counter++;
+  }
+  return out;
+}
+async function idsDecrypt(name, payloadB64) {
+  const raw = b64uDecode(payloadB64);
+  if (raw.length < IDS_IV + IDS_TAG) return '';
+  const iv = raw.subarray(0, IDS_IV);
+  const ct = raw.subarray(IDS_IV, raw.length - IDS_TAG);
+  const tag = raw.subarray(raw.length - IDS_TAG);
+  const key = await idsKey(name);
+  const buf = new Uint8Array(iv.length + ct.length);
+  buf.set(iv, 0); buf.set(ct, iv.length);
+  const want = (await idsHmac(key, buf)).subarray(0, IDS_TAG);
+  let same = tag.length === want.length;
+  for (let i = 0; same && i < tag.length; i++) same = tag[i] === want[i];
+  if (!same) return '';
+  return new TextDecoder().decode(await idsXor(key, iv, ct));
+}
+
+async function dictText() {
+  if (dictInlineCache !== null) return dictInlineCache;
+  if (DICT_INLINE) return (dictInlineCache = DICT_INLINE);
+  try {
+    const res = await fetch(sitePath + 'IDSDICTIONARY.txt', { cache: 'no-cache' });
+    const text = res.ok ? await res.text() : '';
+    if (!text.trim()) return '';
+    return (dictInlineCache = text);
+  } catch (e) {
+    return '';
+  }
+}
+
+async function partsForName(name) {
+  try {
+    const hash = await digestHex(name);
+    for (const line of String(await dictText()).split('\n')) {
+      const t = line.trim();
+      if (!t || t.startsWith('#')) continue;
+      const p = t.split(/\s+/);
+      if (p.length !== 3 || p[0] !== IDS_VERSION || p[1] !== hash) continue;
+      const plain = await idsDecrypt(name, p[2]);
+      const four = String(plain).trim();
+      if (SUPABASE_ID.test(four)) {
+        const blob = await supaManifestText(four);
+        const dbPlan = blob ? planFromList(blob, name) : null;
+        return dbPlan && dbPlan.parts.length ? dbPlan.parts : null;
+      }
+      const parts = plain.split('+').map((k) => k.trim()).filter(Boolean).map(mediaUrl);
+      return parts.length ? parts : null;
+    }
+  } catch (e) { }
+  return null;
+}
+
+async function archivePlan(address, asCatbox, allowNames) {
   const key = planKey('archive-' + await digestHex(address));
   const hit = await (await caches.open(PLAN_CACHE)).match(key).catch(() => null);
   if (hit) {
-    try { return await hit.json(); } catch (e) { }
+    try {
+      const cached = await hit.json();
+      if (cached && /\.(?:[A-Za-z0-9]{1,8})$/.test(String(cached.name || '')) &&
+          Array.isArray(cached.parts) && cached.parts.length) return cached;
+    } catch (e) { }
   }
   const id = String(address).replace(/\.[A-Za-z0-9]+$/, '');
-  if (!/^[A-Za-z0-9_-]{15}$/.test(id)) return null;                // a name needs the page's keyring
+  if (SUPABASE_ID.test(id)) {
+    const sealedText = await supaManifestText(id);
+    if (sealedText) {
+      const fromDb = planFromList(sealedText, address);
+      if (fromDb) return fromDb;
+    }
+  }
+  if (asCatbox && !/^[A-Za-z0-9_-]+$/.test(id)) return null;
+  const byShape = asCatbox || /^[A-Za-z0-9_-]{15}$/.test(id) || CATBOX_ID.test(id);
+  if (!byShape) {
+    if (!allowNames) return null;
+    const named = await partsForName(address);
+    if (!named) return null;
+    return { id: null, name: address, mime: mimeFromName(address) || 'application/zip',
+             cap: 2421906, parts: named, total: 0 };
+  }
   const plan = { id: null, name: address, mime: 'application/zip', cap: 2421906,
-                 parts: ['https://pbs.twimg.com/media/' + id + '?format=png'], total: 0 };
+                 parts: [asCatbox ? 'https://files.catbox.moe/' + id + '.png' : mediaUrl(id)],
+                 total: 0 };
   let got;
   try { got = await firstPayload(plan); } catch (e) { return null; }
   if (!got || !got.payload) return null;
@@ -676,8 +872,7 @@ function manifestFilePlan(bytes, previous) {
     if (!line || line.startsWith('#')) continue;
     const f = line.split('\t');
     if (f[0] === 'file' && f[1] && !name) name = f[1];
-    else if (f[0] === 'part' && f[2]) parts.push(/^https?:/i.test(f[2])
-      ? f[2] : 'https://pbs.twimg.com/media/' + f[2] + '?format=png');
+    else if (f[0] === 'part' && f[2]) parts.push(mediaUrl(f[2]));
   }
   if (!parts.length) return null;
   return { id: null, name: name || previous.name, mime: mimeFromName(name) || 'application/octet-stream',
@@ -692,8 +887,8 @@ async function listPayload(plan) {
   return wrapped ? await inflateTolerant(raw.subarray(9)) : raw;
 }
 
-async function filePlan(name) {
-  let plan = await archivePlan(name);
+async function filePlan(name, asCatbox, allowNames) {
+  let plan = await archivePlan(name, asCatbox, allowNames);
   for (let depth = 0; plan && depth < 4; depth++) {
     if (!plan.total) plan.total = await totalBytes(plan);
     if (!plan.total) return null;
@@ -701,6 +896,7 @@ async function filePlan(name) {
     const wrapped = head.length > 3 && head[0] === 0x42 && head[1] === 0x32 && head[2] === 0x50 &&
                     head[3] === 0x5a;
     const text = new TextDecoder('utf-8', { fatal: false }).decode(head).replace(/^\uFEFF/, '').trimStart();
+    if (wrapped) plan.packed = true;      // the payload is the file's CONTAINER, not the file
     if (!wrapped && !text.startsWith('#bin2png-manifest') && text.charAt(0) !== '{') {
       return plan;                                               // the payload IS the file
     }
@@ -726,15 +922,49 @@ async function filePlan(name) {
   return null;
 }
 
+async function packedResponse(plan, named, request, save) {
+  const bytes = await listPayload(plan);         // already inflates a B2PZ body, tolerantly
+  const full = bytes.length;
+  if (!full) throw new Error('a packed payload inflated to nothing');
+  const type = sniffMime(bytes.subarray(0, Math.min(31, full - 1))) ||
+    mimeFromName(named) || plan.mime || 'application/octet-stream';
+  const headers = {
+    'Content-Type': save ? (mimeFromName(named) || type) : type,
+    'Content-Disposition': save ? attachmentHeader(named) : filenameHeader(named),
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': save ? 'no-store' : 'public, max-age=600',
+    'ETag': '"b2p-' + full.toString(16) + '-' + (type.includes('image') ? 'i' : 'f') + '"',
+    'Access-Control-Allow-Origin': '*',
+    'X-B2P-Packed': String(Number(plan.total) || 0),
+  };
+  if (save) {
+    const from = resumeStart(request, full);
+    headers['Content-Length'] = String(full - from);
+    if (from > 0) headers['Content-Range'] = `bytes ${from}-${full - 1}/${full}`;
+    return new Response(bytes.subarray(from), { status: from > 0 ? 206 : 200, headers });
+  }
+  const rng = parseRange(request.headers.get('Range'), full);
+  if (rng && rng.unsatisfiable) {
+    return new Response(null, { status: 416,
+      headers: { ...headers, 'Content-Range': `bytes */${full}`, 'Content-Length': '0' } });
+  }
+  const from = rng ? rng.start : 0;
+  const to = rng ? rng.end : full - 1;
+  headers['Content-Length'] = String(to - from + 1);
+  if (rng) headers['Content-Range'] = `bytes ${from}-${to}/${full}`;
+  return new Response(bytes.subarray(from, to + 1), { status: rng ? 206 : 200, headers });
+}
+
 async function serveFileSave(name, request) {
   try {
-    const plan = await filePlan(name);
+    const plan = await filePlan(name, false, true);
     if (!plan || !Array.isArray(plan.parts) || !plan.parts.length) return null;
     const named = plan.name || name;
     if (!/\.[A-Za-z0-9]{1,8}$/.test(named)) return null;          // no usable file name
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const total = Number(plan.total) || 0;
     if (!total) return null;
+    if (plan.packed) return packedResponse(plan, named, request, true);
     if (plan.parts && plan.parts.length) {
       try {
         const cache = await caches.open(PLAN_CACHE);
@@ -763,14 +993,15 @@ async function serveFileSave(name, request) {
   }
 }
 
-async function serveFileRaw(name, request) {
+async function serveFileRaw(name, request, asCatbox) {
   try {
-    const plan = await filePlan(name);
+    const plan = await filePlan(name, asCatbox, true);     // `?r` resolves a NAME, nobody else
     if (!plan || !Array.isArray(plan.parts) || !plan.parts.length) return null;
     const named = plan.name || name;
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const total = Number(plan.total) || 0;
     if (!total) return null;
+    if (plan.packed) return packedResponse(plan, named, request, false);
     try {
       const cache = await caches.open(PLAN_CACHE);
       await cache.put(planKey('archive-' + await digestHex(name)), new Response(JSON.stringify(plan), {
@@ -779,7 +1010,6 @@ async function serveFileRaw(name, request) {
     } catch (e) { }
     const head = await fileBytes(plan, 0, Math.min(31, total - 1)).catch(() => new Uint8Array(0));
     const type = sniffMime(head) || mimeFromName(named) || plan.mime || 'application/octet-stream';
-    const from = resumeStart(request, total);
     const headers = {
       'Content-Type': type,
       'Content-Disposition': filenameHeader(named),
@@ -787,22 +1017,30 @@ async function serveFileRaw(name, request) {
       'Cache-Control': 'public, max-age=600',
       'ETag': '"b2p-' + total.toString(16) + '-' + (type.includes('image') ? 'i' : 'f') + '"',
       'Access-Control-Allow-Origin': '*',
-      'Content-Length': String(total - from),
       'X-B2P-Raw': named,
       'X-B2P-Sw': BUILT_VER || 'unbaked',
     };
-    if (from > 0) headers['Content-Range'] = `bytes ${from}-${total - 1}/${total}`;
-    return new Response(streamRange(plan, from, total - 1, total), {
-      status: from > 0 ? 206 : 200, headers,
+    const rng = parseRange(request.headers.get('Range'), total);
+    if (rng && rng.unsatisfiable) {
+      return new Response(null, { status: 416,
+        headers: { ...headers, 'Content-Range': `bytes */${total}`, 'Content-Length': '0' } });
+    }
+    const from = rng ? rng.start : 0;
+    const to = rng ? rng.end : total - 1;
+    headers['Content-Length'] = String(to - from + 1);
+    if (rng) headers['Content-Range'] = `bytes ${from}-${to}/${total}`;
+    return new Response(streamRange(plan, from, to, total), {
+      status: rng ? 206 : 200, headers,
     });
   } catch (e) {
-    return null;
+    return new Response('', { status: 500,
+      headers: { 'X-B2P-Raw-Err': String((e && e.message) || e).slice(0, 160) } });
   }
 }
 
 async function serveMember(address, request, save) {
   try {
-    const plan = await archivePlan(address.archive);
+    const plan = await archivePlan(address.archive, undefined, true);
     if (!plan) return null;
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const entry = await zipEntry(plan, address.member);
