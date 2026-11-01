@@ -78,7 +78,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "d3944ca7fa3ba6b8";
+  const BUILT_VER = "70fd804ca1bc0592";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register(SW_URL, { scope: '/' })
