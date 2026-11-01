@@ -7,7 +7,6 @@
 <title>404 — not found</title>
 <noscript><style>html.file-address body > main { display:block; }</style></noscript>
 <script>
-
 (function () {
   const path = location.pathname;
   const inFile = path.match(/\/file\/(.+)$/);
@@ -16,7 +15,7 @@
   const address = decodeURIComponent(inFile ? inFile[1] : path.slice(1)).replace(/\/+$/, '').trim();
   let hint = location.search.replace(/^\?/, '');
   try { hint = decodeURIComponent(hint); } catch (e) { hint = ''; }
-  let raw = address;                       
+  let raw = address;                       // the prefix grammar: `.` archive, `,` video
   for (;;) {
     if (raw.length > 1 && (raw.charAt(0) === '.' || raw.charAt(0) === ',')) { raw = raw.slice(1); continue; }
     break;
@@ -27,13 +26,11 @@
   const e = ext ? ext.toLowerCase() : '';
   const MEDIA = ['mp4','m4v','mov','webm','mkv','avi','mp3','m4a','aac','ogg','oga','opus','flac','wav'];
   const IMAGE = ['png','jpg','jpeg','gif','webp','bmp','avif','ico','svg'];
-  
   let kind = 'id';
   if (forcedMedia || MEDIA.includes(e)) kind = 'media';
   else if (raw.charAt(0) === '.') kind = 'text';
   else if (e) kind = IMAGE.includes(e) ? 'image' : 'text';
   document.documentElement.className = 'file-' + kind;
-  
   document.documentElement.classList.add('file-address');
   if (kind === 'text') {
     const meta = document.createElement('meta');
@@ -41,7 +38,7 @@
     meta.content = 'light dark';
     document.head.appendChild(meta);
   }
-  window.__fileKind = kind;               
+  window.__fileKind = kind;               // the video frame below is built only for `media`
 })();
 </script>
 <style>
@@ -49,8 +46,10 @@
   html.file-media, html.file-media body { background:#000; }
   html.file-image, html.file-image body { background:#0e0e0e; }
   
+
   html.file-path body > main { display:none; }   
   
+
   html.file-address body > main { display:none; }
   * { box-sizing:border-box; }
   html,body { margin:0; min-height:100%; background:var(--bg); color:var(--fg);
@@ -69,6 +68,7 @@
 <body>
 <main id="stage">
   
+
   <img id="art" alt="404 — whatever you are looking for, it is not here">
   <noscript><img src="/404.png" alt="404 — whatever you are looking for, it is not here"></noscript>
   <p class="msg" id="msg"></p>
@@ -78,9 +78,7 @@
 'use strict';
 
 (async () => {
-  
-  const BUILT_VER = "a977a94ed4e27e36";
-  
+  const BUILT_VER = "4ef3b42d9c6645b0";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register(SW_URL, { scope: '/' })
@@ -97,7 +95,6 @@
     msg.textContent = text;
     home.innerHTML = '<a href="/bin2png">click me to go home</a>';
   };
-  
   let artAsked = false;
   function showArt() {
     if (artAsked) return;
@@ -105,7 +102,6 @@
     art.src = '/404.png';
   }
 
-  
   function dictMap(text) {
     const map = new Map();
     for (const line of String(text || '').split('\n')) {
@@ -122,7 +118,6 @@
     const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
     return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
   }
-  
   function cleanToken(name) {
     let t = String(name || '').replace(/\/+$/, '').trim();
     for (;;) {
@@ -131,13 +126,11 @@
     }
     return t.replace(/^(?:n|name|id):/i, '');
   }
-  
   async function knownName(bare) {
     if (!BAKED.size || !bare) return !BAKED.size;
     const h = await digestHex(bare);
     return !!h && BAKED.has(h);
   }
-  
   function looksLikeId(bare) {
     const t = String(bare || '').trim();
     if (!t) return false;
@@ -145,10 +138,8 @@
     return t.split('+').map((s) => s.trim()).filter(Boolean)
       .every((p) => /^[A-Za-z0-9_-]{15}$/.test(p.replace(/\.[A-Za-z0-9]+$/, '')));
   }
-  
   async function openRenderer(name, root) {
     document.title = decodeURIComponent(name);
-    
     if (window.__fileKind === 'media') {
       const v = document.createElement('video');
       v.controls = true;
@@ -163,14 +154,12 @@
     try {
       const res = await fetch(root + 'file.html', { cache: 'no-store' });
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      
       const html = await res.text();
       document.open();
       document.write(html);
       document.close();
       return;
     } catch (e) {
-      
       const frame = document.createElement('iframe');
       frame.title = decodeURIComponent(name);
       frame.src = '/file#' + encodeURIComponent(name);
@@ -181,7 +170,6 @@
     }
   }
 
-  
   const SAVE_ASK = /(?:^|[?&])(?:s|dl|save)(?:=1)?(?:&|$)/i.test(location.search);
   if (SAVE_ASK) {
     document.title = 'download';
@@ -190,7 +178,7 @@
     home.textContent = '';
     const tried = 'b2p-s:' + location.href;
     let again = true;
-    try { again = !sessionStorage.getItem(tried); sessionStorage.setItem(tried, '1'); } catch (e) {  }
+    try { again = !sessionStorage.getItem(tried); sessionStorage.setItem(tried, '1'); } catch (e) { }
     if (!('serviceWorker' in navigator) || !window.isSecureContext || !again) {
       fail('A download needs this site\u2019s worker, and this browser did not install it. Reload the page once.');
       return;
@@ -216,7 +204,6 @@
     }
   }
 
-  
   const PASS_SHA = '955fa245ee3fba06bb5f48b872dda065eea79d86854b26243c136090483c4e69';
   const asSpecial = location.pathname.match(/^(.*?\/)specialized\/(.+?)\/?$/);
   if (asSpecial && PASS_SHA) {
@@ -232,31 +219,26 @@
           document.close();
           return;
         }
-      } catch (e) {  }
+      } catch (e) { }
     }
   }
 
-  
   const asPath = location.pathname.match(/^\/file\/(.+)$/);
-  
   const asRoot = !asPath && /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
   if (asPath || asRoot) {
     const name = (asPath ? asPath[1] : location.pathname.slice(1)).replace(/\/+$/, '');
     if (!name) { location.replace('/file'); return; }
     const atFile = location.pathname.match(/\/file(\/|$)/);
     const root = atFile ? location.pathname.slice(0, atFile.index + 1) : '/';
-    
     const bare = cleanToken(name).split('/')[0] || '';
-    
-    if (await knownName(bare) || looksLikeId(bare)) {   
+    if (await knownName(bare) || looksLikeId(bare)) {   // (un-baked: knownName is always true)
       await openRenderer(name, root);
       return;
     }
-    document.documentElement.className = '';      
+    document.documentElement.className = '';      // the art is not a player's black frame
     showArt();
     msg.textContent = '';
     document.title = '404 — not found';
-    
     try {
       const ver = await fetch(root + 'sw-ver.txt', { cache: 'no-store' });
       if (ver.ok && 'serviceWorker' in navigator) {
@@ -265,7 +247,7 @@
         const w = reg && (reg.active || reg.waiting || reg.installing);
         if (live && w) w.postMessage({ type: 'resync', ver: live });
       }
-    } catch (e) {  }
+    } catch (e) { }
     try {
       const res = await fetch(root + 'IDSDICTIONARY.txt?fresh=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
@@ -273,12 +255,11 @@
         const h = await digestHex(bare);
         if (h && fresh.has(h)) await openRenderer(name, root);
       }
-    } catch (e) {  }
+    } catch (e) { }
     return;
   }
   if (location.pathname === '/file/') { location.replace('/file'); return; }
 
-  
   if (location.pathname.includes('/__b2p/')) {
     msg.className = 'msg';
     msg.textContent = 'Preparing the stream…';
@@ -288,7 +269,6 @@
       return;
     }
     try {
-      
       await navigator.serviceWorker.register(SW_URL, { scope: '/' });
       await navigator.serviceWorker.ready;
       if (!navigator.serviceWorker.controller) {
@@ -301,7 +281,6 @@
         fail('The worker installed but did not take control of this page. Reload it once.');
         return;
       }
-      
       const probe = await fetch(location.href, { headers: { Range: 'bytes=0-1' }, cache: 'no-store' });
       if (probe.status === 206 || probe.status === 200) {
         msg.textContent = 'Stream ready — opening it.';
@@ -320,7 +299,6 @@
     return;
   }
 
-  
   showArt();
   msg.textContent = '';
 })();
