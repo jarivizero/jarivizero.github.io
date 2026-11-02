@@ -9,7 +9,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "5e01cd1d5e3f0b89";
+const BUILT_VER = "18365f0cc94080d1";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\nv1 df1c178d84d0d37b8df8a34e33b4d2ee97ae96b2a3f87b42d8e512fea1e50231 _FJ4n5kup6kaYMM2H0_8wjgWFrB7TpqFpz1MBWjYYb8\n";
 const dictKey = DICT_URL + '?cache=' + BUILT_VER;
 
@@ -62,7 +62,7 @@ const ROOT_ADDRESS = /^\/(?:[A-Za-z0-9_-]{15}|[a-z0-9]{6})(?:\.[A-Za-z0-9]+)?$/;
 
 const CATBOX_ID = /^[a-z0-9]{6}$/;
 
-const SUPABASE_ID = /^[A-Za-z0-9]{4}$/;
+const SUPABASE_ID = /^(?:[A-Za-z0-9]{4}|[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}\.[A-Za-z0-9]{1,10})$/;
 const SUPA_URL = 'https://ahyjufzfnozcexviegoo.supabase.co';
 const SUPA_KEY = 'sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR';
 const SUPA_PASS = 'bin2png/manifest/v1';
@@ -300,10 +300,21 @@ self.addEventListener('fetch', (event) => {
       const rawName = fileAddress(url.pathname);
       if (rawName) {
         const nav = event.request.mode === 'navigate';
-        event.respondWith(serveFileRaw(rawName, event.request, url.searchParams.has('c'))
+        event.respondWith(serveFileRaw(rawName, event.request, sourceOf(url))
           .then((res) => res || (nav
           ? loggerTags().catch(() => '').then((tags) => serveFilePage(tags))
           : new Response('', { status: 404 }))));
+        return;
+      }
+    }
+    if (!isRawAddress(url) && !PAGE_PARAMS.some((k) => url.searchParams.has(k))) {
+      const direct = fileAddress(url.pathname);
+      if (direct && RENDER_NAME.test(direct)) {
+        const nav = event.request.mode === 'navigate';
+        event.respondWith(serveFileRaw(direct, event.request, null)
+          .then((res) => res || (nav
+            ? loggerTags().catch(() => '').then((tags) => serveFilePage(tags))
+            : new Response('', { status: 404 }))));
         return;
       }
     }
@@ -393,10 +404,25 @@ function isSaveAddress(url) {
   return SAVE_PARAMS.some((k) => url.searchParams.has(k));
 }
 
-const RAW_PARAMS = ['r', 'c'];
+const RAW_PARAMS = ['r', 'c', 'cb'];
 function isRawAddress(url) {
   return RAW_PARAMS.some((k) => url.searchParams.has(k));
 }
+function sourceOf(url) {
+  if (url.searchParams.has('c')) return 'supabase';
+  if (url.searchParams.has('cb')) return 'catbox';
+  return null;
+}
+const RENDER_NAME = /\.(?:mp4|m4v|webm|mov|mp3|m4a|ogg|oga|opus|wav|flac|gif|png|jpe?g|webp|avif|pdf|txt|log|json|md|srt|vtt)$/i;
+function nameHint(request) {
+  try {
+    for (const [k, v] of new URL(request.url).searchParams) {
+      if (!v && /\.[A-Za-z0-9]{1,8}$/.test(k)) return k;
+    }
+  } catch (e) { }
+  return '';
+}
+const PAGE_PARAMS = ['g', 'skin', 'view'];
 
 function sniffMime(head) {
   const b = head || new Uint8Array(0);
@@ -685,7 +711,7 @@ async function partsForName(name) {
   return null;
 }
 
-async function archivePlan(address, asCatbox, allowNames) {
+async function archivePlan(address, asCatbox, allowNames, forceDb) {
   const key = planKey('archive-' + await digestHex(address));
   const hit = await (await caches.open(PLAN_CACHE)).match(key).catch(() => null);
   if (hit) {
@@ -696,6 +722,13 @@ async function archivePlan(address, asCatbox, allowNames) {
     } catch (e) { }
   }
   const id = String(address).replace(/\.[A-Za-z0-9]+$/, '');
+  if (forceDb && !SUPABASE_ID.test(id)) {
+    const sealedText = await supaManifestText(address);
+    if (sealedText) {
+      const fromDb = planFromList(sealedText, address);
+      if (fromDb) return fromDb;
+    }
+  }
   if (SUPABASE_ID.test(id)) {
     const sealedText = await supaManifestText(id);
     if (sealedText) {
@@ -904,8 +937,8 @@ async function listPayload(plan) {
   return wrapped ? await inflateTolerant(raw.subarray(9)) : raw;
 }
 
-async function filePlan(name, asCatbox, allowNames) {
-  let plan = await archivePlan(name, asCatbox, allowNames);
+async function filePlan(name, asCatbox, allowNames, forceDb) {
+  let plan = await archivePlan(name, asCatbox, allowNames, forceDb);
   for (let depth = 0; plan && depth < 4; depth++) {
     if (!plan.total) plan.total = await totalBytes(plan);
     if (!plan.total) return null;
@@ -1010,11 +1043,12 @@ async function serveFileSave(name, request) {
   }
 }
 
-async function serveFileRaw(name, request, asCatbox) {
+async function serveFileRaw(name, request, source) {
   try {
-    const plan = await filePlan(name, asCatbox, true);     // `?r` resolves a NAME, nobody else
+    const asCatbox = source === 'catbox';
+    const plan = await filePlan(name, asCatbox, true, source === 'supabase'); // `?r` resolves a NAME, nobody else
     if (!plan || !Array.isArray(plan.parts) || !plan.parts.length) return null;
-    const named = plan.name || name;
+    const named = nameHint(request) || plan.name || name;
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const total = Number(plan.total) || 0;
     if (!total) return null;
