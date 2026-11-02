@@ -451,9 +451,10 @@ function logBytesAnswer(name, request) {
     ['', name],
     ['ua', (request.headers.get('User-Agent') || '')],
     ['ref', (request.headers.get('Referer') || '')],
-    ['fullurl', request.url],
+    ['fullurl', request.url + ' @ ' + new Date().toISOString()],
     ['swver', BUILT_VER || 'unbaked'],
     ['window', ''],                      // a worker has no window.name, and inventing one would lie
+    ['date', new Date().toISOString()],
   ]);
 }
 
