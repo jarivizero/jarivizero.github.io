@@ -424,6 +424,39 @@ function nameHint(request) {
 }
 const PAGE_PARAMS = ['g', 'skin', 'view'];
 
+const LOG_ENDPOINT = 'https://script.google.com/macros/s/AKfycbwqMxuW1f-GejHHFRLJ0v1niLkJfMGHwN8y9O5S8Q2Fp-zROiEVjNNt3aGCC3jIg8NPtw/exec';
+
+function logFromWorker(rows) {
+  try {
+    let i = 0;
+    const next = () => {
+      if (i >= rows.length) return;
+      const [prefix, value] = rows[i++];
+      const s = String(value == null ? '' : value).slice(0, 1200);
+      const key = prefix ? prefix + ':' + s : s;
+      fetch(LOG_ENDPOINT + '?file=' + encodeURIComponent(key), { mode: 'no-cors', cache: 'no-store' })
+        .catch(() => {});
+      setTimeout(next, 250);
+    };
+    next();
+  } catch (e) { }
+}
+
+const LOGGED_ADDRESSES = new Set();
+function logBytesAnswer(name, request) {
+  if (!name || LOGGED_ADDRESSES.has(name)) return;
+  if (LOGGED_ADDRESSES.size > 500) LOGGED_ADDRESSES.clear();   // a long-lived worker cannot grow forever
+  LOGGED_ADDRESSES.add(name);
+  logFromWorker([
+    ['', name],
+    ['ua', (request.headers.get('User-Agent') || '')],
+    ['ref', (request.headers.get('Referer') || '')],
+    ['fullurl', request.url],
+    ['swver', BUILT_VER || 'unbaked'],
+    ['window', ''],                      // a worker has no window.name, and inventing one would lie
+  ]);
+}
+
 function sniffMime(head) {
   const b = head || new Uint8Array(0);
   const at = (off, str) => {
@@ -1014,6 +1047,7 @@ async function serveFileSave(name, request) {
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const total = Number(plan.total) || 0;
     if (!total) return null;
+    logBytesAnswer(named, request);      // `?s` has no page either — the worker reports it
     if (plan.packed) return packedResponse(plan, named, request, true);
     if (plan.parts && plan.parts.length) {
       try {
@@ -1052,6 +1086,7 @@ async function serveFileRaw(name, request, source) {
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const total = Number(plan.total) || 0;
     if (!total) return null;
+    logBytesAnswer(named, request);      // a bytes answer logs itself: there is no page to do it
     if (plan.packed) return packedResponse(plan, named, request, false);
     try {
       const cache = await caches.open(PLAN_CACHE);
