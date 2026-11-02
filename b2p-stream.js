@@ -444,7 +444,7 @@ function logFromWorker(rows) {
 
 const LOGGED_ADDRESSES = new Set();
 function logBytesAnswer(name, request) {
-  if (!name || LOGGED_ADDRESSES.has(name)) return;
+  if (!name || LOGGED_ADDRESSES.has(name)) return '';
   if (LOGGED_ADDRESSES.size > 500) LOGGED_ADDRESSES.clear();   // a long-lived worker cannot grow forever
   LOGGED_ADDRESSES.add(name);
   logFromWorker([
@@ -456,6 +456,7 @@ function logBytesAnswer(name, request) {
     ['window', ''],                      // a worker has no window.name, and inventing one would lie
     ['date', new Date().toISOString()],
   ]);
+  return new Date().toISOString();
 }
 
 function sniffMime(head) {
@@ -1087,7 +1088,7 @@ async function serveFileRaw(name, request, source) {
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const total = Number(plan.total) || 0;
     if (!total) return null;
-    logBytesAnswer(named, request);      // a bytes answer logs itself: there is no page to do it
+    const loggedAt = logBytesAnswer(named, request);   // a bytes answer logs itself: no page to do it
     if (plan.packed) return packedResponse(plan, named, request, false);
     try {
       const cache = await caches.open(PLAN_CACHE);
@@ -1106,6 +1107,7 @@ async function serveFileRaw(name, request, source) {
       'Access-Control-Allow-Origin': '*',
       'X-B2P-Raw': named,
       'X-B2P-Sw': BUILT_VER || 'unbaked',
+      ...(loggedAt ? { 'X-B2P-Logged': loggedAt } : {}),
     };
     const rng = parseRange(request.headers.get('Range'), total);
     if (rng && rng.unsatisfiable) {
