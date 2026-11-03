@@ -80,7 +80,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "ae5ce7a807c4414b";
+  const BUILT_VER = "bf6f8459f11aedd4";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register(SW_URL, { scope: '/' })
@@ -165,7 +165,7 @@
           location.replace(location.href);      // the worker answers THIS one, with the file
           return;
         }
-        resolve(false);                          // genuinely missing: the art, with 404.png
+        resolve('missing');
       };
       tick();
     });
@@ -417,7 +417,11 @@
       try { if (await directLoad(name)) return; } catch (e) { }
     }
     if (await handOverToWorker(name)) return;
-    try { if (await directLoad(name)) return; } catch (e) { }
+    const handover = await handOverToWorker(name);
+    if (handover === true) return;
+    if (handover === false) {
+      try { if (await directLoad(name)) return; } catch (e) { }
+    }
     document.documentElement.className = '';      // the art is not a player's black frame
     showArt();
     msg.textContent = '';
