@@ -285,14 +285,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
-  if (event.request.method === 'GET' && url.origin === self.location.origin) {
+  const headOnly = (res) => (event.request.method === 'HEAD' && res)
+    ? new Response(null, { status: res.status, headers: res.headers })
+    : res;
+  if ((event.request.method === 'GET' || event.request.method === 'HEAD') && url.origin === self.location.origin) {
     if (isSaveAddress(url)) {
       const saveName = fileAddress(url.pathname);
       if (saveName) {
         const nav = event.request.mode === 'navigate';
         event.respondWith(serveFileSave(saveName, event.request).then((res) => res || (nav
           ? loggerTags().catch(() => '').then((tags) => serveFilePage(tags))
-          : new Response('', { status: 404 }))));
+          : new Response('', { status: 404 }))).then(headOnly));
         return;
       }
     }
@@ -303,7 +306,7 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(serveFileRaw(rawName, event.request, sourceOf(url))
           .then((res) => res || (nav
           ? loggerTags().catch(() => '').then((tags) => serveFilePage(tags))
-          : new Response('', { status: 404 }))));
+          : new Response('', { status: 404 }))).then(headOnly));
         return;
       }
     }
@@ -314,7 +317,7 @@ self.addEventListener('fetch', (event) => {
         event.respondWith(serveFileRaw(direct, event.request, null)
           .then((res) => res || (nav
             ? loggerTags().catch(() => '').then((tags) => serveFilePage(tags))
-            : new Response('', { status: 404 }))));
+            : new Response('', { status: 404 }))).then(headOnly));
         return;
       }
     }
@@ -324,7 +327,7 @@ self.addEventListener('fetch', (event) => {
       event.respondWith(serveMember(inside, event.request, isSaveAddress(url))
         .then((res) => res || (nav
           ? loggerTags().catch(() => '').then((tags) => serveFilePage(tags))
-          : new Response('', { status: 404 }))));
+          : new Response('', { status: 404 }))).then(headOnly));
       return;
     }
   }
@@ -445,6 +448,7 @@ function logFromWorker(rows) {
 const LOGGED_ADDRESSES = new Set();
 function logBytesAnswer(name, request) {
   if (!name || LOGGED_ADDRESSES.has(name)) return '';
+  if (request.method === 'HEAD') return '';
   if (LOGGED_ADDRESSES.size > 500) LOGGED_ADDRESSES.clear();   // a long-lived worker cannot grow forever
   LOGGED_ADDRESSES.add(name);
   logFromWorker([
