@@ -80,7 +80,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "b40587c7721722c5";
+  const BUILT_VER = "ae5ce7a807c4414b";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register(SW_URL, { scope: '/' })
@@ -417,6 +417,7 @@
       try { if (await directLoad(name)) return; } catch (e) { }
     }
     if (await handOverToWorker(name)) return;
+    try { if (await directLoad(name)) return; } catch (e) { }
     document.documentElement.className = '';      // the art is not a player's black frame
     showArt();
     msg.textContent = '';
