@@ -42,9 +42,11 @@
 })();
 </script>
 <style>
-  :root { --bg:#fff; --fg:#1b1b1f; --muted:#666; --accent:#0645ad; }
+  
+
+  :root { --bg:#121212; --fg:#e8e8e8; --muted:#9a9a9a; --accent:#7ab7ff; }
   html.file-media, html.file-media body { background:#000; }
-  html.file-image, html.file-image body { background:#0e0e0e; }
+  html.file-image, html.file-image body { background:#121212; }
   
 
   html.file-path body > main { display:none; }   
@@ -78,7 +80,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "18365f0cc94080d1";
+  const BUILT_VER = "70214389f2e7fa0a";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register(SW_URL, { scope: '/' })
@@ -138,6 +140,37 @@
     return t.split('+').map((s) => s.trim()).filter(Boolean)
       .every((p) => /^[A-Za-z0-9_-]{15}$/.test(p.replace(/\.[A-Za-z0-9]+$/, '')));
   }
+  function handOverToWorker(name) {
+    const key = 'b2p-cold:' + location.href;
+    try {
+      if (!('serviceWorker' in navigator) || !window.isSecureContext) return Promise.resolve(false);
+      if (sessionStorage.getItem(key)) return Promise.resolve(false);
+      sessionStorage.setItem(key, '1');
+    } catch (e) { return Promise.resolve(false); }   // no storage, no hand-over: never a loop
+    return new Promise((resolve) => {
+      const deadline = Date.now() + 6000;
+      const tick = async () => {
+        if (!navigator.serviceWorker.controller) {
+          if (Date.now() > deadline) { resolve(false); return; }
+          setTimeout(tick, 100);
+          return;
+        }
+        let serveable = false;
+        try {
+          const r = await fetch(location.href, { cache: 'no-store', headers: { Range: 'bytes=0-1' } });
+          serveable = r.status === 200 || r.status === 206;
+        } catch (e) { }
+        if (serveable) {
+          resolve(true);
+          location.replace(location.href);      // the worker answers THIS one, with the file
+          return;
+        }
+        resolve(false);                          // genuinely missing: the art, with 404.png
+      };
+      tick();
+    });
+  }
+
   async function openRenderer(name, root) {
     document.title = decodeURIComponent(name);
     if (window.__fileKind === 'media') {
@@ -231,10 +264,12 @@
     const atFile = location.pathname.match(/\/file(\/|$)/);
     const root = atFile ? location.pathname.slice(0, atFile.index + 1) : '/';
     const bare = cleanToken(name).split('/')[0] || '';
-    if (await knownName(bare) || looksLikeId(bare)) {   // (un-baked: knownName is always true)
+    const ARCHIVE_EXT = /\.(?:zip|apk|jar|exe|rbxm|7z)$/i;
+    if (await knownName(bare) || looksLikeId(bare) || ARCHIVE_EXT.test(bare)) {
       await openRenderer(name, root);
       return;
     }
+    if (await handOverToWorker(name)) return;
     document.documentElement.className = '';      // the art is not a player's black frame
     showArt();
     msg.textContent = '';
