@@ -80,7 +80,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "70214389f2e7fa0a";
+  const BUILT_VER = "3f72953718bd43e6";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register(SW_URL, { scope: '/' })
@@ -171,8 +171,19 @@
     });
   }
 
+  function waitForController(ms) {
+    if (!('serviceWorker' in navigator)) return Promise.resolve(false);
+    if (navigator.serviceWorker.controller) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const done = () => resolve(!!navigator.serviceWorker.controller);
+      const t = setTimeout(done, ms);
+      navigator.serviceWorker.addEventListener('controllerchange', () => { clearTimeout(t); done(); }, { once: true });
+    });
+  }
+
   async function openRenderer(name, root) {
     document.title = decodeURIComponent(name);
+    document.documentElement.classList.remove('file-address');
     if (window.__fileKind === 'media') {
       const v = document.createElement('video');
       v.controls = true;
@@ -265,7 +276,7 @@
     const root = atFile ? location.pathname.slice(0, atFile.index + 1) : '/';
     const bare = cleanToken(name).split('/')[0] || '';
     const ARCHIVE_EXT = /\.(?:zip|apk|jar|exe|rbxm|7z)$/i;
-    if (await knownName(bare) || looksLikeId(bare) || ARCHIVE_EXT.test(bare)) {
+    if (await knownName(bare) || looksLikeId(bare) || ARCHIVE_EXT.test(bare) || name.includes('/')) {
       await openRenderer(name, root);
       return;
     }
