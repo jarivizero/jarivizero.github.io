@@ -80,7 +80,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "3f72953718bd43e6";
+  const BUILT_VER = "b40587c7721722c5";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   if ('serviceWorker' in navigator && window.isSecureContext) {
     navigator.serviceWorker.register(SW_URL, { scope: '/' })
@@ -181,6 +181,139 @@
     });
   }
 
+  const SUPA = 'https://ahyjufzfnozcexviegoo.supabase.co';
+  const SUPA_PUB = 'sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR';   // publishable by design
+  const SUPA_PASS = 'bin2png/manifest/v1';
+  const MIME_OF = { gif:'image/gif', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg',
+    webp:'image/webp', avif:'image/avif', bmp:'image/bmp', mp4:'video/mp4', m4v:'video/mp4',
+    webm:'video/webm', mov:'video/quicktime', mkv:'video/x-matroska', mp3:'audio/mpeg',
+    m4a:'audio/mp4', wav:'audio/wav', ogg:'audio/ogg', oga:'audio/ogg', opus:'audio/ogg',
+    flac:'audio/flac', txt:'text/plain', json:'application/json', md:'text/plain',
+    csv:'text/csv', html:'text/html', zip:'application/zip', apk:'application/vnd.android.package-archive' };
+  function b64u(text) {
+    const s = String(text || '').replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(s + '='.repeat((4 - (s.length % 4)) % 4));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  async function supaIndex(id) {
+    try {
+      const res = await fetch(SUPA + '/rest/v1/rpc/resolve_manifest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPA_PUB, Authorization: 'Bearer ' + SUPA_PUB },
+        body: JSON.stringify({ p_id: id }),
+      });
+      if (!res.ok) return null;
+      const blob = await res.json().catch(() => null);
+      if (typeof blob !== 'string' || !blob.startsWith('b2p1:')) return null;
+      const all = b64u(blob.slice(5));
+      if (all.length < 28) return null;
+      const key = await crypto.subtle.importKey('raw', await crypto.subtle.digest('SHA-256',
+        new TextEncoder().encode(SUPA_PASS)), 'AES-GCM', false, ['decrypt']);
+      const plain = await crypto.subtle.decrypt({
+        name: 'AES-GCM', iv: all.subarray(0, 12),
+        additionalData: new TextEncoder().encode('b2p/' + id),
+      }, key, all.subarray(12));
+      return JSON.parse(new TextDecoder().decode(plain));
+    } catch (e) { return null; }
+  }
+  function pngTailOf(bytes) {
+    if (!(bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50)) return null;
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let off = 8;
+    while (off + 8 <= bytes.length) {
+      const len = dv.getUint32(off);
+      const type = String.fromCharCode(bytes[off + 4], bytes[off + 5], bytes[off + 6], bytes[off + 7]);
+      const end = off + 8 + len + 4;
+      if (type === 'IEND') return bytes.subarray(Math.min(end, bytes.length));
+      if (end > bytes.length) return null;
+      off = end;
+    }
+    return null;
+  }
+  async function directLoad(address) {
+    if (!(self.crypto && crypto.subtle)) return false;
+    const bare = cleanToken(address).split('/')[0] || address;
+    msg.className = 'msg';
+    msg.textContent = 'This browser has no service worker — reading the file directly…';
+    home.textContent = '';
+    document.documentElement.classList.remove('file-address');
+    let index = null;
+    for (const id of [bare, address]) {
+      if (!id) continue;
+      index = await supaIndex(id);          // one cheap row read per spelling; a miss is a miss
+      if (index) break;
+    }
+    if (!index || !Array.isArray(index.chunks) || !index.chunks.length) return false;
+    const cap = Number(index.chunk_size) || 2421906;
+    const total = Number(index.bytes) || cap * index.chunks.length;
+    if (total > 180 * 1024 * 1024) {
+      msg.className = 'msg error';
+      msg.textContent = 'This file is ' + Math.round(total / 1048576) +
+        ' MB and needs a browser with service workers — open the link in Chrome or Safari itself.';
+      return true;
+    }
+    const out = new Uint8Array(total);
+    let at = 0;
+    for (let i = 0; i < index.chunks.length; i++) {
+      const c = index.chunks[i];
+      msg.textContent = 'Reading part ' + (i + 1) + ' of ' + index.chunks.length + '…';
+      const res = await fetch(c.url, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer' });
+      if (!res.ok) throw new Error('part ' + (i + 1) + ' answered HTTP ' + res.status);
+      const tail = pngTailOf(new Uint8Array(await res.arrayBuffer()));
+      if (!tail) throw new Error('part ' + (i + 1) + ' is not a PNG any more');
+      const mask = Number(c.mask) || 0;
+      const n = Math.min(tail.length, out.length - at);
+      for (let k = 0; k < n; k++) out[at + k] = mask ? (tail[k] ^ mask) : tail[k];
+      at += n;
+    }
+    const file = String(index.name || bare);
+    const ext = (file.match(/\.([A-Za-z0-9]+)$/) || [])[1];
+    const mime = index.mime || MIME_OF[String(ext || '').toLowerCase()] || 'application/octet-stream';
+    const blob = new Blob([out.subarray(0, Math.min(at, out.length))], { type: mime });
+    const url = URL.createObjectURL(blob);
+    document.title = file;
+    document.documentElement.className = 'file-' + (window.__fileKind || 'id');
+    msg.textContent = '';
+    home.textContent = '';
+    if (/^image\//.test(mime)) {
+      const img = document.createElement('img');
+      img.alt = file;
+      img.src = url;
+      img.style.cssText = 'max-width:100%;max-height:100vh;width:auto;height:auto';
+      stage.textContent = '';
+      stage.appendChild(img);
+      return true;
+    }
+    if (/^(video|audio)\//.test(mime)) {
+      const v = document.createElement(mime.charAt(0) === 'a' ? 'audio' : 'video');
+      v.controls = true; v.autoplay = true; v.playsInline = true; v.src = url;
+      v.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain;background:#000';
+      document.documentElement.style.background = '#000';
+      document.body.textContent = '';
+      document.body.style.cssText = 'margin:0;padding:0;background:#000;display:block';
+      document.body.appendChild(v);
+      return true;
+    }
+    if (/^text\//.test(mime) || /json|javascript/.test(mime)) {
+      const pre = document.createElement('pre');
+      pre.style.cssText = 'margin:0;max-width:100%;white-space:pre-wrap;word-break:break-word;text-align:left';
+      pre.textContent = await blob.text();
+      stage.textContent = '';
+      stage.appendChild(pre);
+      return true;
+    }
+    const a = document.createElement('a');
+    a.href = url; a.download = file; a.textContent = 'Download ' + file;
+    stage.textContent = '';
+    const p = document.createElement('p');
+    p.className = 'msg';
+    p.textContent = 'This browser cannot show it inline, but the bytes are here.';
+    stage.append(p, a);
+    return true;
+  }
+
   async function openRenderer(name, root) {
     document.title = decodeURIComponent(name);
     document.documentElement.classList.remove('file-address');
@@ -279,6 +412,9 @@
     if (await knownName(bare) || looksLikeId(bare) || ARCHIVE_EXT.test(bare) || name.includes('/')) {
       await openRenderer(name, root);
       return;
+    }
+    if (!('serviceWorker' in navigator) || !window.isSecureContext) {
+      try { if (await directLoad(name)) return; } catch (e) { }
     }
     if (await handOverToWorker(name)) return;
     document.documentElement.className = '';      // the art is not a player's black frame
