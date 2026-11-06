@@ -80,7 +80,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "05b16a81494853a3";
+  const BUILT_VER = "bad875ffcc5db8fa";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -166,6 +166,11 @@
         if (serveable) {
           resolve(true);
           location.replace(location.href);      // the worker answers THIS one, with the file
+          return;
+        }
+        if (/^[A-Za-z0-9]{4}$/.test(decodeURIComponent((location.pathname.split('/').filter(Boolean).pop() || '')))) {
+          resolve(true);
+          location.replace(location.href);
           return;
         }
         resolve('missing');
