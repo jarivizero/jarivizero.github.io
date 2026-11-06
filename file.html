@@ -121,7 +121,7 @@ window.addEventListener('load', () => { checkSiteVersion(); });
 const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the encoder cuts it
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
-const BUILT_VER = "bad875ffcc5db8fa";
+const BUILT_VER = "ad92f66a4c0343c8";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\nv1 df1c178d84d0d37b8df8a34e33b4d2ee97ae96b2a3f87b42d8e512fea1e50231 _FJ4n5kup6kaYMM2H0_8wjgWFrB7TpqFpz1MBWjYYb8\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -263,6 +263,114 @@ const SUPA_URL = 'https://ahyjufzfnozcexviegoo.supabase.co';
 const SUPA_KEY = 'sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR';   // rewritten by scripts/supabase-apply.sh --key
 const SUPA_PASS = 'bin2png/manifest/v1';
 const SUPA_PREFIX = 'b2p1:';
+
+const VIEWS_SEEN = 'b2p:counted:';
+function viewsKey() {
+  const m = /^\/file\/([^/]+)\/?$/.exec(location.pathname);
+  const id = m ? decodeURIComponent(m[1]) : '';
+  return SUPABASE_ID.test(id) ? id : '';
+}
+async function viewsRpc(fn, id) {
+  if (!SUPA_KEY || SUPA_KEY.startsWith('SUPA_')) return null;
+  try {
+    const res = await fetch(SUPA_URL + '/rest/v1/rpc/' + fn, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPA_KEY,
+                 Authorization: 'Bearer ' + SUPA_KEY },
+      body: JSON.stringify({ p_id: id }),
+      keepalive: true,
+    });
+    if (!res.ok) return null;
+    const n = await res.json().catch(() => null);
+    return typeof n === 'number' ? n : null;
+  } catch (e) { return null; }        // no number is better than a broken page
+}
+async function paintViews(el) {
+  const id = viewsKey();
+  if (!el || !id) return;
+  let counted = false;
+  try { counted = sessionStorage.getItem(VIEWS_SEEN + id) === '1'; } catch (e) {}
+  const n = await viewsRpc(counted ? 'view_count' : 'count_view', id);
+  if (n === null) return;
+  try { sessionStorage.setItem(VIEWS_SEEN + id, '1'); } catch (e) {}
+  if (!el.isConnected) return;
+  el.textContent = `${n.toLocaleString()} view${n === 1 ? '' : 's'}`;
+  el.title = 'Times this address has been opened';
+  el.hidden = false;
+}
+
+async function commentRpc(fn, body) {
+  if (!SUPA_KEY || SUPA_KEY.startsWith('SUPA_')) return null;
+  try {
+    const res = await fetch(SUPA_URL + '/rest/v1/rpc/' + fn, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPA_KEY,
+                 Authorization: 'Bearer ' + SUPA_KEY },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+    return await res.json().catch(() => null);
+  } catch (e) { return null; }
+}
+function commentStamp(iso) {
+  const d = new Date(iso || '');
+  if (isNaN(d)) return '';
+  return fmtDate(d);
+}
+function mountComments() {
+  const id = viewsKey();
+  const list = $('b2p-comment-list');
+  const form = $('b2p-comment-form');
+  if (!id || !list || !form) return;
+  const note = $('b2p-comment-msg');
+  const count = $('b2p-comment-n');
+  const say = (msg) => { if (note) note.textContent = msg; };
+  let shown = 0;
+  const draw = (c) => {
+    const li = document.createElement('li');
+    const who = document.createElement('b');
+    who.textContent = c && c.author ? String(c.author) : 'anonymous';
+    const when = document.createElement('time');
+    when.textContent = commentStamp(c && c.at);
+    const text = document.createElement('p');
+    text.textContent = c && c.body ? String(c.body) : '';
+    li.append(who, when, text);
+    list.appendChild(li);
+    shown++;
+    if (count) count.textContent = String(shown);
+  };
+  commentRpc('list_comments', { p_id: id }).then((rows) => {
+    if (!Array.isArray(rows)) return;
+    for (const c of rows) draw(c);
+    if (!rows.length) say('No comments yet — yours would be the first.');
+  });
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const body = ($('b2p-comment-body') || {}).value || '';
+    const author = ($('b2p-comment-name') || {}).value || '';
+    if (!body.trim()) { say('Write something first.'); return; }
+    say('Posting…');
+    const saved = await commentRpc('add_comment', { p_id: id, p_body: body, p_author: author });
+    if (!saved || !saved.id) {
+      say('Not accepted — wait a minute and try again, or shorten the comment.');
+      return;
+    }
+    const li = document.createElement('li');
+    li.dataset.fresh = '1';
+    const who = document.createElement('b');
+    who.textContent = saved.author ? String(saved.author) : 'anonymous';
+    const when = document.createElement('time');
+    when.textContent = commentStamp(saved.at);
+    const text = document.createElement('p');
+    text.textContent = String(saved.body || '');
+    li.append(who, when, text);
+    list.prepend(li);
+    shown++;
+    if (count) count.textContent = String(shown);
+    if ($('b2p-comment-body')) $('b2p-comment-body').value = '';
+    say('Posted.');
+  });
+}
 
 function b2pB64Url(text) {
   const t = String(text || '').replace(/-/g, '+').replace(/_/g, '/');
@@ -702,6 +810,45 @@ function zipOf(entries) {                 // [{ path, bytes }] → the archive, 
   return concat([...locals, cd, eocd]);
 }
 
+async function zipOfEncrypted(entries, password) {
+  const enc = new TextEncoder();
+  const locals = [], centrals = [];
+  let at = 0;
+  for (const e of entries) {
+    const name = enc.encode(e.path);
+    const crc = ZipCrypto.crc32(e.bytes);
+    let body = e.bytes, method = 0;
+    const packed = await ZipCrypto.deflateRaw(e.bytes);
+    if (packed && packed.length && packed.length < e.bytes.length) { body = packed; method = 8; }
+    const payload = ZipCrypto.encryptClassic(body, password, crc);
+    const lh = new Uint8Array(30);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true);
+    lv.setUint16(6, 1, true);                                  // bit 0: encrypted
+    lv.setUint16(8, method, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, payload.length, true); lv.setUint32(22, e.bytes.length, true);
+    lv.setUint16(26, name.length, true);
+    locals.push(lh, name, payload);
+    const ch = new Uint8Array(46);
+    const cv = new DataView(ch.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 1, true); cv.setUint16(10, method, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, payload.length, true); cv.setUint32(24, e.bytes.length, true);
+    cv.setUint16(28, name.length, true); cv.setUint32(42, at, true);
+    centrals.push(ch, name);
+    at += 30 + name.length + payload.length;
+  }
+  const cd = concat(centrals);
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, entries.length, true); ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, cd.length, true); ev.setUint32(16, at, true);
+  return concat([...locals, cd, eocd]);
+}
+
 const ZIP_JOBS = new Map();          // job id → the function that renders its progress
 let pageClientId = '';
 let clientWaiter = null;              // one in-flight `whoami` ask
@@ -1002,6 +1149,281 @@ const u16 = (b, o) => b[o] | (b[o + 1] << 8);
 const u32 = (b, o) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
 const u64 = (b, o) => u32(b, o) + u32(b, o + 4) * 4294967296;
 
+const ZipCrypto = (() => {
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  const crc32 = (bytes) => {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const crc32Byte = (crc, b) => (CRC_TABLE[(crc ^ b) & 0xff] ^ (crc >>> 8)) >>> 0;
+
+  function keysInit() {
+    return { k0: 0x12345678, k1: 0x23456789, k2: 0x34567890 };
+  }
+  function updateKeys(key, byte) {
+    key.k0 = crc32Byte(key.k0, byte);
+    key.k1 = (key.k1 + (key.k0 & 0xff)) >>> 0;
+    key.k1 = (Math.imul(key.k1, 134775813) + 1) >>> 0;
+    key.k2 = crc32Byte(key.k2, (key.k1 >>> 24) & 0xff);
+  }
+  function decryptByte(key) {
+    const temp = (key.k2 | 2) >>> 0;
+    return ((Math.imul(temp, temp ^ 1) >>> 8) & 0xff);
+  }
+  function decryptClassic(payload, password, check) {
+    const key = keysInit();
+    const pw = new TextEncoder().encode(password);
+    for (const b of pw) updateKeys(key, b);
+    if (payload.length < 12) throw new Error('this member is shorter than an encrypted zip header');
+    const out = new Uint8Array(payload.length);
+    for (let i = 0; i < payload.length; i++) {
+      const c = payload[i];
+      out[i] = c ^ decryptByte(key);
+      updateKeys(key, out[i]);
+    }
+    const ok = typeof check !== 'number' || (out[11] === (check & 0xff));
+    return { data: out.subarray(12), ok };
+  }
+  function encryptClassic(data, password, crc) {
+    const key = keysInit();
+    const pw = new TextEncoder().encode(password);
+    for (const b of pw) updateKeys(key, b);
+    const header = new Uint8Array(12);
+    crypto.getRandomValues(header.subarray(0, 11));
+    header[11] = (crc >>> 24) & 0xff;
+    const out = new Uint8Array(12 + data.length);
+    const put = (plain, i) => {
+      const c = plain ^ decryptByte(key);
+      updateKeys(key, plain);
+      out[i] = c;
+    };
+    for (let i = 0; i < 12; i++) put(header[i], i);
+    for (let i = 0; i < data.length; i++) put(data[i], 12 + i);
+    return out;
+  }
+
+  function parseAesExtra(extra) {
+    if (!extra || extra.length < 4) return null;
+    let at = 0;
+    while (at + 4 <= extra.length) {
+      const id = extra[at] | (extra[at + 1] << 8);
+      const len = extra[at + 2] | (extra[at + 3] << 8);
+      if (id === 0x9901 && len >= 7) {
+        const p = at + 4;
+        const version = extra[p] | (extra[p + 1] << 8);
+        const vendor = String.fromCharCode(extra[p + 2], extra[p + 3]);
+        if (vendor !== 'AE') return null;
+        return { version, strength: extra[p + 4], method: extra[p + 5] | (extra[p + 6] << 8) };
+      }
+      at += 4 + len;
+    }
+    return null;
+  }
+  const KEY_BYTES = { 1: 16, 2: 24, 3: 32 };
+  const SALT_BYTES = { 1: 8, 2: 12, 3: 16 };
+
+  const gfMul = (a, b) => {
+    let p = 0;
+    for (let i = 0; i < 8; i++) {
+      if (b & 1) p ^= a;
+      const hi = a & 0x80;
+      a = (a << 1) & 0xff;
+      if (hi) a ^= 0x1b;
+      b >>= 1;
+    }
+    return p & 0xff;
+  };
+  const SBOX = (() => {
+    const inv = new Uint8Array(256), s = new Uint8Array(256);
+    for (let x = 1; x < 256; x++) for (let y = 1; y < 256; y++) if (gfMul(x, y) === 1) { inv[x] = y; break; }
+    for (let x = 0; x < 256; x++) {
+      const b = inv[x];
+      let r = b;
+      for (let i = 1; i <= 4; i++) r ^= ((b << i) | (b >>> (8 - i))) & 0xff;
+      s[x] = r ^ 0x63;
+    }
+    return s;
+  })();
+  const mix = (s, o) => {
+    const a0 = s[o], a1 = s[o + 1], a2 = s[o + 2], a3 = s[o + 3];
+    const x = (v) => ((v << 1) ^ ((v & 0x80) ? 0x1b : 0)) & 0xff;
+    s[o] = x(a0) ^ x(a1) ^ a1 ^ a2 ^ a3;
+    s[o + 1] = a0 ^ x(a1) ^ x(a2) ^ a2 ^ a3;
+    s[o + 2] = a0 ^ a1 ^ x(a2) ^ x(a3) ^ a3;
+    s[o + 3] = x(a0) ^ a0 ^ a1 ^ a2 ^ x(a3);
+  };
+  function expandKey(key) {
+    const nk = key.length / 4, nr = nk + 6;
+    const w = new Uint8Array(16 * (nr + 1));
+    w.set(key);
+    let rcon = 1;
+    for (let i = nk; i < 4 * (nr + 1); i++) {
+      let t0 = w[(i - 1) * 4], t1 = w[(i - 1) * 4 + 1], t2 = w[(i - 1) * 4 + 2], t3 = w[(i - 1) * 4 + 3];
+      if (i % nk === 0) {
+        const tmp = t0;
+        t0 = SBOX[t1] ^ rcon; t1 = SBOX[t2]; t2 = SBOX[t3]; t3 = SBOX[tmp];
+        rcon = ((rcon << 1) ^ ((rcon & 0x80) ? 0x1b : 0)) & 0xff;
+      } else if (nk > 6 && i % nk === 4) {
+        t0 = SBOX[t0]; t1 = SBOX[t1]; t2 = SBOX[t2]; t3 = SBOX[t3];
+      }
+      w[i * 4] = w[(i - nk) * 4] ^ t0;
+      w[i * 4 + 1] = w[(i - nk) * 4 + 1] ^ t1;
+      w[i * 4 + 2] = w[(i - nk) * 4 + 2] ^ t2;
+      w[i * 4 + 3] = w[(i - nk) * 4 + 3] ^ t3;
+    }
+    return { w, nr };
+  }
+  function encryptBlock(rk, input) {
+    const s = Uint8Array.from(input);
+    const { w, nr } = rk;
+    for (let i = 0; i < 16; i++) s[i] ^= w[i];
+    for (let round = 1; round <= nr; round++) {
+      for (let i = 0; i < 16; i++) s[i] = SBOX[s[i]];          // SubBytes
+      const t = Uint8Array.from(s);                              // ShiftRows (column-major state)
+      s[0] = t[0]; s[4] = t[4]; s[8] = t[8]; s[12] = t[12];
+      s[1] = t[5]; s[5] = t[9]; s[9] = t[13]; s[13] = t[1];
+      s[2] = t[10]; s[6] = t[14]; s[10] = t[2]; s[14] = t[6];
+      s[3] = t[15]; s[7] = t[3]; s[11] = t[7]; s[15] = t[11];
+      if (round !== nr) for (let c = 0; c < 4; c++) mix(s, c * 4);
+      for (let i = 0; i < 16; i++) s[i] ^= w[16 * round + i];
+    }
+    return s;
+  }
+  function ctrKeystream(key, length, start = 1) {
+    const rk = expandKey(key);
+    const out = new Uint8Array(length);
+    const block = new Uint8Array(16);
+    let counter = start >>> 0;
+    for (let off = 0; off < length; off += 16) {
+      block.fill(0);
+      block[0] = counter & 0xff; block[1] = (counter >>> 8) & 0xff;
+      block[2] = (counter >>> 16) & 0xff; block[3] = (counter >>> 24) & 0xff;
+      const ks = encryptBlock(rk, block);
+      const n = Math.min(16, length - off);
+      for (let i = 0; i < n; i++) out[off + i] = ks[i];
+      counter = (counter + 1) >>> 0;
+    }
+    return out;
+  }
+
+  async function decryptAes(payload, password, aes) {
+    const keyLen = KEY_BYTES[aes.strength];
+    const saltLen = SALT_BYTES[aes.strength];
+    if (!keyLen) throw new Error(`AES strength ${aes.strength} is not one of 1/2/3`);
+    if (payload.length < saltLen + 2 + 10) throw new Error('this AES member is too short to hold its salt and auth code');
+    const salt = payload.subarray(0, saltLen);
+    const verifier = payload.subarray(saltLen, saltLen + 2);
+    const body = payload.subarray(saltLen + 2, payload.length - 10);
+    const auth = payload.subarray(payload.length - 10);
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations: 1000, hash: 'SHA-1' }, base, (keyLen * 2 + 2) * 8);
+    const all = new Uint8Array(bits);
+    if (all[keyLen * 2] !== verifier[0] || all[keyLen * 2 + 1] !== verifier[1]) {
+      throw new Error('wrong password for this member');
+    }
+    const encKey = all.subarray(0, keyLen);
+    const macKey = all.subarray(keyLen, keyLen * 2);
+    const hk = await crypto.subtle.importKey('raw', macKey, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+    const mac = new Uint8Array(await crypto.subtle.sign('HMAC', hk, body)).subarray(0, 10);
+    const same = mac.every((v, i) => v === auth[i]);
+    if (!same) throw new Error('this member was damaged or the password is wrong');
+    const ks = ctrKeystream(encKey, body.length);
+    const out = new Uint8Array(body.length);
+    for (let i = 0; i < body.length; i++) out[i] = body[i] ^ ks[i];
+    return out;
+  }
+
+  function encryptionOf(entry) {
+    const flags = Number(entry.flags) || 0;
+    const method = Number(entry.method) || 0;
+    const aes = method === 99 ? parseAesExtra(entry.extra) : null;
+    if (aes) return { kind: 'aes', aes, check: null };
+    if (flags & 1) {
+      const check = flags & 8 ? ((Number(entry.dosTime) || 0) >>> 8) & 0xff : (Number(entry.crc) >>> 24) & 0xff;
+      return { kind: 'classic', aes: null, check };
+    }
+    return null;
+  }
+  async function decryptMember(raw, entry, password, inflate) {
+    const enc = encryptionOf(entry);
+    if (!enc) return raw;
+    let plain;
+    if (enc.kind === 'aes') {
+      plain = await decryptAes(raw, password, enc.aes);
+    } else {
+      const r = decryptClassic(raw, password, enc.check);
+      if (!r.ok) throw new Error('wrong password for this member');
+      plain = r.data;
+    }
+    const method = enc.kind === 'aes' ? enc.aes.method : (Number(entry.method) || 0);
+    if (method === 0) return plain;
+    if (method === 8) return inflate ? inflate(plain) : inflateRaw(plain);
+    throw new Error(`member uses compression method ${method}, which this page cannot unpack`);
+  }
+
+  async function inflateRaw(bytes) {
+    if (typeof DecompressionStream !== 'function') throw new Error('this browser cannot inflate a zip member');
+    const ds = new DecompressionStream('deflate-raw');
+    return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer());
+  }
+  async function deflateRaw(bytes) {
+    if (typeof CompressionStream !== 'function') return null;
+    const cs = new CompressionStream('deflate-raw');
+    return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer());
+  }
+
+  return {
+    crc32, decryptClassic, encryptClassic, parseAesExtra, decryptAes,
+    encryptionOf, decryptMember, inflateRaw, deflateRaw,
+    _aes: { expandKey, encryptBlock, ctrKeystream, SBOX },
+  };
+})();
+
+const ZIP_PASSWORDS = new Map();          // archive label → the password that worked
+function zipLabel() { return String(src.name || 'this archive'); }
+function askZipPassword(why) {
+  const pw = window.prompt(`${why}\n\nZip password for “${zipLabel()}”:`);
+  return pw === null ? '' : pw;
+}
+function zipPasswordFor() {
+  const label = zipLabel();
+  if (ZIP_PASSWORDS.has(label)) return ZIP_PASSWORDS.get(label);
+  return askZipPassword('This file is password-protected.');
+}
+function memberKey(f) {
+  return {
+    flags: Number(f.flags) || 0, method: Number(f.method) || 0,
+    crc: Number(f.crc) || 0, dosTime: Number(f.dosTime) || 0,
+    extra: f.extra instanceof Uint8Array ? f.extra : (f.extra ? Uint8Array.from(f.extra) : null),
+  };
+}
+function memberEncryption(f) { return ZipCrypto.encryptionOf(memberKey(f)); }
+async function decryptMemberBytes(raw, f) {
+  if (!memberEncryption(f)) return raw;
+  let pw = zipPasswordFor(f.path);
+  for (let attempt = 0; ; attempt++) {
+    if (!pw) throw new Error(`${f.path} is password-protected`);
+    try {
+      const out = await ZipCrypto.decryptMember(raw, memberKey(f), pw, (b) => inflate(b, 'deflate-raw'));
+      ZIP_PASSWORDS.set(zipLabel(), pw);
+      return out;
+    } catch (e) {
+      if (attempt) throw e;
+      pw = askZipPassword(`Wrong password — ${e.message}.`);
+    }
+  }
+}
+
 function findEocd(buf) {
   for (let i = buf.length - 22; i >= 0; i--) if (u32(buf, i) === 0x06054b50) return i;
   return -1;
@@ -1182,6 +1604,7 @@ function parseCentral(block, at, entries, cdSize, cdOff, total) {
   let k = start;
   const end = Math.min(start + cdSize, block.length);
   while (k + 46 <= end && u32(block, k) === 0x02014b50 && files.length < 5000) {
+    const flags = u16(block, k + 8);
     const method = u16(block, k + 10);
     const dosTime = u16(block, k + 12);
     const dosDate = u16(block, k + 14);
@@ -1197,7 +1620,8 @@ function parseCentral(block, at, entries, cdSize, cdOff, total) {
       ? new Date(Date.UTC(1980 + ((dosDate >> 9) & 0x7f), ((dosDate >> 5) & 0x0f) - 1, dosDate & 0x1f,
                           (dosTime >> 11) & 0x1f, (dosTime >> 5) & 0x3f, (dosTime & 0x1f) * 2))
       : null;
-    files.push({ path: name, size, csize, method, localOff, crc,
+    const extra = elen ? block.subarray(k + 46 + nlen, k + 46 + nlen + elen) : null;
+    files.push({ path: name, size, csize, method, localOff, crc, flags, dosTime, extra,
                  dir: /\/$/.test(name), modified: when });
     k += 46 + nlen + elen + clen;
   }
@@ -1265,6 +1689,7 @@ async function memberBytesFresh(f) {
   const dataStart = f.localOff + 30 + nlen + elen;
   if (!f.csize) return new Uint8Array(0);
   const comp = await sourceRange(dataStart, dataStart + f.csize - 1);
+  if (memberEncryption(f)) return decryptMemberBytes(comp, f);
   if (f.method === 0) return comp;
   if (f.method === 8) return inflate(comp, 'deflate-raw');
   throw new Error(`member uses compression method ${f.method}, which this page cannot unpack`);
@@ -1315,6 +1740,7 @@ const INDEX_CSS = `
   a.up { background: url("${ICON_UP}") left top no-repeat; }
   html[dir=rtl] a { background-position-x: right; }
   #parentDirLinkBox, #downloadBox { margin-bottom: 10px; padding-bottom: 10px; }
+  .views-count { display: block; margin: -4px 0 10px; font-size: 12px; color: #5f6368; }
 `;
 const ICON_BY_KIND = {
   image2: 'png jpg jpeg gif webp bmp ico svg avif tif tiff heic'.split(' '),
@@ -1369,6 +1795,13 @@ function indexView(label, total, opts) {
   h1.id = 'header';
   h1.textContent = `Index of ${label}`;
   body.appendChild(h1);
+
+  const viewsEl = document.createElement('span');
+  viewsEl.id = 'b2p-views';
+  viewsEl.className = 'views-count';
+  viewsEl.hidden = true;
+  body.appendChild(viewsEl);
+  paintViews(viewsEl);
 
   if (opts.parentHref) {
     const box = document.createElement('div');
@@ -1749,7 +2182,9 @@ const FOLDER_CSS = `
     gap:16px; }
   .sk-mega-f .grid[hidden], .sk-mega-f .list[hidden] { display:none; }
   .sk-mega-f .card { display:flex; flex-direction:column; background:#fff; border:1px solid #ececec;
-    border-radius:8px; overflow:hidden; color:#303233; }
+    border-radius:8px; overflow:hidden; color:#303233;
+    
+    content-visibility: auto; contain-intrinsic-size: auto 208px; }
   .sk-mega-f .card:hover { border-color:#d0d0d0; }
   .sk-mega-f .thumb { position:relative; display:block; aspect-ratio:16/10; background:#f4f7f9;
     overflow:hidden; }
@@ -1758,6 +2193,9 @@ const FOLDER_CSS = `
     justify-content:center; }
   .sk-mega-f .thumb .dur { position:absolute; right:6px; bottom:6px; padding:1px 6px; border-radius:4px;
     background:rgba(0,0,0,.72); color:#fff; font:500 11px/1.6 Inter,sans-serif; font-style:normal; }
+  .sk-mega-f .thumb .lock { position:absolute; left:6px; top:6px; padding:4px; border-radius:4px;
+    background:rgba(4,16,30,.72); color:#fff; display:flex; font-style:normal; }
+  .sk-mega-f .lock-inline { display:inline-flex; vertical-align:-2px; color:#616366; margin-left:5px; }
   .sk-mega-f .thumb .txt { position:absolute; inset:0; margin:0; padding:10px 12px; overflow:hidden;
     font:11px/1.45 ui-monospace,Menlo,monospace; color:#4a4d50; white-space:pre-wrap; word-break:break-word; }
   .sk-mega-f .card .nm { padding:10px 12px 0; font-size:14px; color:#303233; overflow:hidden;
@@ -1782,6 +2220,7 @@ function previewGlyph(kind) {
   return `<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#616366" stroke-width="1.6"><path d="M6 3h8l4 4v14H6z"/></svg>`;
 }
 const FOLDER_GLYPH = `<svg viewBox="0 0 24 24" width="28" height="28" fill="#f2a53a"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>`;
+const LOCK_GLYPH = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>`;
 const CARET = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#616366"
   stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>`;
 const GRID_ICON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor"
@@ -1826,8 +2265,10 @@ function renderMediaFolder(o) {
       <div class="toolbar">
         <button class="loud" type="button">${IC.import}Save to MEGA</button>
         <button class="ghost" type="button" id="b2p-download">${IC.dl}Download</button>
+        <button class="ghost" type="button" id="b2p-lockdl" title="Build this zip with a password">${LOCK_GLYPH}Password zip</button>
       </div>
       <div class="head"><b>${esc(folderName)}</b>
+        <span class="views-count" id="b2p-views" hidden></span>
         <p>${files} item${files === 1 ? '' : 's'}${bytes ? ' · ' + esc(fmt(bytes)) : ''}${
           upHref ? ` · <a href="${esc(upHref)}" id="b2p-up">[parent folder]</a>` : ''}</p></div>
       <div class="chips"><span class="chip">Type ${CARET}</span>
@@ -1847,24 +2288,48 @@ function renderMediaFolder(o) {
     </div>`;
   const cards = $('b2p-cards');
   const tbody = $('b2p-rows').querySelector('tbody');
-  for (const f of items) {
+  paintViews($('b2p-views'));        // one count for the address, not one per member card
+  const planOf = (f) => {
     const name = f.path.replace(/\/$/, '').split('/').pop();
-    const href = cardHref(f);
-    const kind = f.dir ? 'dir' : previewKind(name);
+    return { f, name, href: cardHref(f), kind: f.dir ? 'dir' : previewKind(name),
+             locked: !f.dir && !!memberEncryption(f), key: String(f.path).toLowerCase() };
+  };
+  const lockedClick = (p, el) => async (ev) => {
+    ev.preventDefault();
+    try {
+      const bytes = await read(p.f.path);
+      saveBytes(bytes, p.name, mimeFromName(p.name) || 'application/octet-stream');
+      status(`decrypted ${p.name} — ${fmt(bytes.length)}`);
+    } catch (err) { status(`could not open ${p.name}: ${err.message}`, true); }
+  };
+  const buildCard = (p) => {
+    const { f, name, href, kind, locked } = p;
     const thumb = f.thumb
-      ? `<img src="${esc(f.thumb)}" alt="" loading="lazy">`
+      ? `<img src="${esc(f.thumb)}" alt="" loading="lazy" decoding="async">`
       : (f.head ? `<pre class="txt">${esc(f.head)}</pre>`
         : `<span class="glyph">${kind === 'dir' ? FOLDER_GLYPH : previewGlyph(kind)}</span>`);
     const card = document.createElement('a');
     card.className = 'card';
+    card.dataset.key = p.key;
     card.href = href || '#';
     if (href && !f.dir) { card.target = '_blank'; card.rel = 'noopener'; }
     if (!href) card.addEventListener('click', (e) => e.preventDefault());
-    card.innerHTML = `<span class="thumb">${thumb}${f.dur ? `<em class="dur">${esc(f.dur)}</em>` : ''}</span>
+    card.innerHTML = `<span class="thumb">${thumb}${f.dur ? `<em class="dur">${esc(f.dur)}</em>` : ''}${
+      locked ? `<em class="lock" title="password-protected">${LOCK_GLYPH}</em>` : ''}</span>
       <span class="nm">${esc(name)}</span><span class="mt">${esc(meta1(f))}</span>`;
-    card.title = `${f.path}${f.dir ? ' — a folder in this archive' : ` (${fmt(f.size)})`}`;
-    cards.appendChild(card);
+    card.title = `${f.path}${f.dir ? ' — a folder in this archive' : ` (${fmt(f.size)})`}${
+      locked ? ' — password-protected' : ''}`;
+    if (locked) {
+      card.removeAttribute('target');
+      card.style.cursor = 'pointer';
+      card.addEventListener('click', lockedClick(p, card));
+    }
+    return card;
+  };
+  const buildRow = (p) => {
+    const { f, name, href, kind, locked } = p;
     const tr = document.createElement('tr');
+    tr.dataset.key = p.key;
     const nameTd = document.createElement('td');
     nameTd.className = 'nm-cell';
     const a = document.createElement('a');
@@ -1873,9 +2338,13 @@ function renderMediaFolder(o) {
     if (href && !f.dir) { a.target = '_blank'; a.rel = 'noopener'; }
     if (!href) a.addEventListener('click', (e) => e.preventDefault());
     a.style.cssText = 'display:flex;align-items:center;gap:14px;color:#303233';
-    a.innerHTML = (f.thumb ? `<img class="list-thumb" src="${esc(f.thumb)}" alt="" loading="lazy">`
+    a.innerHTML = (f.thumb ? `<img class="list-thumb" src="${esc(f.thumb)}" alt="" loading="lazy" decoding="async">`
       : `<span style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;">${f.dir ? FOLDER_GLYPH : previewGlyph(kind)}</span>`)
-      + `<span>${esc(name)}${f.dir ? '/' : ''}</span>`;
+      + `<span>${esc(name)}${f.dir ? '/' : ''}${locked ? ` <span class="lock-inline" title="password-protected">${LOCK_GLYPH}</span>` : ''}</span>`;
+    if (locked) {
+      a.removeAttribute('target');
+      a.addEventListener('click', lockedClick(p, a));
+    }
     nameTd.appendChild(a);
     const dateTd = document.createElement('td');
     dateTd.textContent = fmtDate(f.modified);
@@ -1885,13 +2354,77 @@ function renderMediaFolder(o) {
     sizeTd.style.textAlign = 'right';
     sizeTd.textContent = f.dir ? '—' : fmt(f.size);
     tr.append(nameTd, dateTd, typeTd, sizeTd);
-    tbody.appendChild(tr);
+    return tr;
+  };
+  let plans = items.map(planOf);
+  let rowsBuilt = false;
+  const buildRows = () => {
+    if (rowsBuilt) return;
+    rowsBuilt = true;
+    const frag = document.createDocumentFragment();
+    for (const p of plans) frag.appendChild(buildRow(p));
+    tbody.appendChild(frag);
+  };
+  const render = (list) => {
+    plans = list;
+    cards.textContent = '';
+    const frag = document.createDocumentFragment();
+    for (const p of list) frag.appendChild(buildCard(p));
+    cards.appendChild(frag);
+    if (rowsBuilt) {
+      tbody.textContent = '';
+      const rfrag = document.createDocumentFragment();
+      for (const p of list) rfrag.appendChild(buildRow(p));
+      tbody.appendChild(rfrag);
+    }
+    applyFilter();
+  };
+  const all = plans.slice();
+  for (const p of all) cards.appendChild(buildCard(p));
+  const searchBox = body.querySelector('.search input');
+  const empty = document.createElement('p');
+  empty.className = 'foot';
+  empty.style.display = 'none';
+  empty.textContent = 'nothing in this folder matches that';
+  cards.after(empty);
+  function applyFilter() {
+    const q = ((searchBox && searchBox.value) || '').trim().toLowerCase();
+    let shown = 0;
+    for (const el of cards.children) {
+      const hit = !q || el.dataset.key.includes(q);
+      el.hidden = !hit;
+      if (hit) shown++;
+    }
+    if (rowsBuilt) {
+      for (const tr of tbody.children) tr.hidden = !!q && !tr.dataset.key.includes(q);
+    }
+    empty.style.display = shown ? 'none' : '';
   }
+  if (searchBox) searchBox.addEventListener('input', applyFilter);
+  const SORTS = [
+    (a, b) => typeLabel(a.f.path, a.f.dir).localeCompare(typeLabel(b.f.path, b.f.dir)) || a.name.localeCompare(b.name),
+    (a, b) => (b.f.modified ? +b.f.modified : 0) - (a.f.modified ? +a.f.modified : 0),
+    (a, b) => a.name.localeCompare(b.name),
+  ];
+  const chips = body.querySelectorAll('.chips .chip');
+  chips.forEach((chip, i) => {
+    chip.style.cursor = 'pointer';
+    chip.addEventListener('click', () => {
+      const dir = chip.dataset.sorted === '1' ? -1 : 1;
+      const list = all.slice().sort((a, b) => dir * SORTS[i](a, b));
+      chips.forEach((c) => { delete c.dataset.sorted; c.textContent = c.textContent.replace(/\s*[↑↓]$/, ''); });
+      chip.dataset.sorted = dir === 1 ? '1' : '0';
+      chip.textContent = chip.textContent.replace(/\s*[↑↓]$/, '') + (dir === 1 ? ' ↑' : ' ↓');
+      render(list);
+    });
+  });
   const show = (grid) => {
-    $('b2p-cards').hidden = !grid;
+    if (!grid) buildRows();
+    cards.hidden = !grid;
     $('b2p-rows').hidden = grid;
     $('b2p-grid').setAttribute('aria-pressed', String(grid));
     $('b2p-list').setAttribute('aria-pressed', String(!grid));
+    applyFilter();
   };
   $('b2p-grid').addEventListener('click', () => show(true));
   $('b2p-list').addEventListener('click', () => show(false));
@@ -1900,6 +2433,21 @@ function renderMediaFolder(o) {
     a.setAttribute('href', location.href);
     a.addEventListener('click', (ev) => ev.preventDefault());
     a.addEventListener('auxclick', (ev) => ev.preventDefault());
+  }
+  const lockBtn = $('b2p-lockdl');
+  if (lockBtn) {
+    if (!o.downloadLocked) lockBtn.disabled = true;
+    else lockBtn.addEventListener('click', async () => {
+      if (lockBtn.dataset.busy) return;
+      lockBtn.dataset.busy = '1';
+      const label = lockBtn.innerHTML;
+      try {
+        const got = await o.downloadLocked((t) => { if (typeof t === 'string' && t) lockBtn.textContent = t; });
+        status(`saved ${got.name} — ${fmt(got.size)}${got.encrypted ? ', password-protected' : ''}`);
+      } catch (err) { status(`could not build the zip: ${err.message}`, true); }
+      lockBtn.innerHTML = label;
+      delete lockBtn.dataset.busy;
+    });
   }
   const btn = $('b2p-download');
   if (btn) {
@@ -1934,6 +2482,12 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
     return { name: innerName, size: bytes.length };
   } : (onProgress) => saveWholeArchive(onProgress));
   const downloadDir = prefix ? (onProgress) => downloadFolder(label, prefix, files, read, spanBase, onProgress) : null;
+  const downloadLocked = (onProgress) => {
+    const pw = window.prompt(`Password for “${innerName}” (leave empty for a normal zip):`);
+    if (pw === null) throw new Error('cancelled');
+    if (!pw) return prefix ? downloadDir(onProgress) : downloadZip(onProgress);
+    return downloadFolder(label, prefix, files, read, spanBase, onProgress, pw);
+  };
   const items = childEntries(files, prefix);
   const plainList = /^(index|raw)$/i.test(new URLSearchParams(location.search).get('view') || '');
   const mediaArchive = hasPreviews(childEntries(files, ''));
@@ -1942,6 +2496,7 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
       label, addr, prefix, items,
       parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
       download: prefix ? downloadDir : downloadZip,
+      downloadLocked,
     });
   }
   const view = indexView(shown, 0, {
@@ -2109,13 +2664,13 @@ window.addEventListener('popstate', () => {
   if (zipTarget(location.href)) walkTo(location.href, false);
 });
 
-async function downloadFolder(label, prefix, files, read, spanBase, onProgress) {
+async function downloadFolder(label, prefix, files, read, spanBase, onProgress, password) {
   const members = files.filter((f) => !f.dir && f.path.startsWith(prefix) && f.path.length > prefix.length);
   if (!members.length) throw new Error('this folder is empty');
   const base = prefix.replace(/\/$/, '').split('/').pop() || label.replace(/\.zip$/i, '');
   const name = `${base}.zip`;
   const count = members.length;
-  if (spanBase !== null && canStreamArchive()) {
+  if (!password && spanBase !== null && canStreamArchive()) {
     const plan = planForWorker(label, 'application/zip');
     let list = null;
     if (spanBase > 0) {
@@ -2143,9 +2698,9 @@ async function downloadFolder(label, prefix, files, read, spanBase, onProgress) 
     done += 1; got += b.length;
     say();
   });
-  const bytes = zipOf(out);
+  const bytes = password ? await zipOfEncrypted(out, password) : zipOf(out);
   saveBytes(bytes, name, 'application/zip');
-  return { name, size: bytes.length };
+  return { name, size: bytes.length, encrypted: !!password };
 }
 let js7zLoading = null;
 function loadJs7z() {
@@ -2361,6 +2916,7 @@ async function zipReadRanged(range, f) {
   const start = f.localOff + 30 + u16(head, 26) + u16(head, 28);
   if (!f.csize) return new Uint8Array(0);
   const comp = await range(start, start + f.csize - 1);
+  if (memberEncryption(f)) return decryptMemberBytes(comp, f);
   if (f.method === 0) return comp;
   if (f.method === 8) return inflate(comp, 'deflate-raw');
   throw new Error(`member uses compression method ${f.method}, which this page cannot unpack`);
@@ -2395,12 +2951,17 @@ function indexedEntry(f) {
 function keepEntry(f) {
   return { path: f.path, size: f.size, dir: f.dir,
            modified: f.modified ? f.modified.toISOString() : null,
-           localOff: f.localOff, csize: f.csize, method: f.method, crc: f.crc };
+           localOff: f.localOff, csize: f.csize, method: f.method, crc: f.crc,
+           flags: Number(f.flags) || 0, dosTime: Number(f.dosTime) || 0,
+           extra: f.extra && f.extra.length <= 64 ? Array.from(f.extra) : undefined };
 }
 function reviveEntry(o) {
   const f = listedMember(o);
   if (Number.isFinite(o.localOff)) { f.localOff = o.localOff; f.csize = o.csize; f.method = o.method; }
   if (Number.isFinite(o.crc)) f.crc = o.crc >>> 0;
+  if (Number.isFinite(o.flags)) f.flags = o.flags;
+  if (Number.isFinite(o.dosTime)) f.dosTime = o.dosTime;
+  if (Array.isArray(o.extra)) f.extra = Uint8Array.from(o.extra);
   return f;
 }
 
@@ -2463,6 +3024,7 @@ async function extractFrom(block, f) {
   const nlen = u16(block, lo + 26), elen = u16(block, lo + 28);
   const start = lo + 30 + nlen + elen;
   const comp = block.subarray(start, start + f.csize);
+  if (memberEncryption(f)) return decryptMemberBytes(comp, f);
   if (f.method === 0) return comp;
   if (f.method === 8) return inflate(comp, 'deflate-raw');
   throw new Error(`member uses compression method ${f.method}, which this page cannot unpack`);
@@ -2765,6 +3327,7 @@ async function renderTt2png(index) {
     return saveAsDownload(mimeFromName(src.name) || 'application/octet-stream');
   }
   const mime = mimeFromName(index.name || '');
+  preconnectTt(index.chunks);   // the media path below never enters renderTt2pngFull
   if (!/^(video|audio)\//.test(mime)) return renderTt2pngFull(index);
   try {
     const stream = await renderTt2pngStream(index, mime);
@@ -2781,17 +3344,33 @@ async function renderTt2png(index) {
   return renderTt2pngProgressive(index, mime);
 }
 
+function preconnectTt(chunks) {
+  const seen = new Set();
+  for (const c of chunks || []) {
+    if (!c || !c.url) continue;
+    let origin;
+    try { origin = new URL(c.url).origin; } catch { continue; }
+    if (seen.has(origin)) continue;
+    seen.add(origin);
+    if (document.querySelector('link[rel="preconnect"][href="' + origin + '"]')) continue;
+    for (const rel of ['preconnect', 'dns-prefetch']) {
+      const l = document.createElement('link');
+      l.rel = rel; l.href = origin; l.crossOrigin = 'anonymous';
+      document.head.appendChild(l);
+    }
+  }
+}
+
 async function renderTt2pngFull(index) {
-  const pieces = [];
-  for (let i = 0; i < index.chunks.length; i++) {
-    const c = index.chunks[i] || {};
+  preconnectTt(index.chunks);
+  const pieces = await Promise.all(index.chunks.map(async (c, i) => {
     if (!c.url) throw new Error(`chunk ${i + 1} of ${index.chunks.length} has no url`);
     const res = await fetch(c.url, { mode: 'cors', credentials: 'omit' });
     if (!res.ok) throw new Error(`chunk ${i + 1} of ${index.chunks.length}: HTTP ${res.status}`);
     const payload = chunkPayload(new Uint8Array(await res.arrayBuffer()), Number(c.mask) || 0);
     if (!payload) throw new Error(`chunk ${i + 1} of ${index.chunks.length} is not a tt2png PNG`);
-    pieces.push(payload);
-  }
+    return payload;
+  }));
   const bytes = concat(pieces);
   if (Number(index.bytes) && bytes.length !== Number(index.bytes)) {
     throw new Error(`the chunks hold ${bytes.length} B, the index says ${index.bytes} B`);
@@ -3685,7 +4264,8 @@ const SKINS = {
           <section class="panel folder">
             <span class="folder-ic">${IC.folder}</span>
             <div><h1>${esc(i.name)}</h1>
-              <p>${i.modified ? esc(fmtDate(i.modified)) : 'unknown date'} · 1 item</p>
+              <p>${i.modified ? esc(fmtDate(i.modified)) : 'unknown date'} · 1 item <span
+                class="vw" id="b2p-views" hidden></span></p>
               <span class="chip">public</span></div>
             <span class="kg">${IC.kebab}</span>
           </section>
@@ -3698,6 +4278,37 @@ const SKINS = {
               <p>${i.modified ? esc(fmtDate(i.modified)) : 'unknown date'} · ${i.bytes ? esc(fmt(i.bytes)) : 'unknown size'}</p></div>
             <button type="button" id="b2p-download" class="dl">${IC.dl}Download</button>
             <span class="kg">${IC.kebab}</span>
+          </section>
+          <section class="panel cmt" id="b2p-comments-panel">
+            <style>
+              .sk-gofile .vw { display:inline-block; margin-left:6px; font-size:12px; color:#94a3b8; }
+              .sk-gofile .cmt h2 { margin:0 0 6px; font-size:15px; color:#fff; font-weight:600; }
+              .sk-gofile .cmt h2 span { font-weight:400; color:#94a3b8; }
+              .sk-gofile .cmt ul { list-style:none; margin:0; padding:0; }
+              .sk-gofile .cmt li { padding:12px 0; border-top:1px solid rgba(255,255,255,.08); }
+              .sk-gofile .cmt li:first-child { border-top:0; }
+              .sk-gofile .cmt li b { font-size:13px; color:#fff; }
+              .sk-gofile .cmt li time { margin-left:8px; font-size:12px; color:#94a3b8; }
+              .sk-gofile .cmt li p { margin:4px 0 0; font-size:14px; color:#cbd5e1;
+                white-space:pre-wrap; word-break:break-word; }
+              .sk-gofile .cmt input, .sk-gofile .cmt textarea { display:block; width:100%;
+                box-sizing:border-box; margin-top:8px; padding:10px 12px; border-radius:8px;
+                border:1px solid rgba(255,255,255,.14); background:#0f1729; color:#e2e8f0;
+                font-size:14px; font-family:inherit; }
+              .sk-gofile .cmt button { margin-top:10px; padding:10px 16px; border:0; border-radius:8px;
+                background:#f5b21a; color:#162036; font-weight:600; font-size:14px; cursor:pointer; }
+              .sk-gofile .cmt .cmsg { margin:8px 0 0; font-size:12px; color:#94a3b8; min-height:16px; }
+            </style>
+            <h2>Comments <span id="b2p-comment-n">0</span></h2>
+            <ul id="b2p-comment-list"></ul>
+            <form id="b2p-comment-form">
+              <input id="b2p-comment-name" maxlength="40" autocomplete="nickname"
+                placeholder="Your name (optional)">
+              <textarea id="b2p-comment-body" maxlength="1000" rows="3" required
+                placeholder="Write a comment…"></textarea>
+              <button type="submit">Post comment</button>
+              <p class="cmsg" id="b2p-comment-msg"></p>
+            </form>
           </section>
           <p class="abuse"><a href="#">Report abuse</a></p>
           <section class="panel det"><h2>File details</h2><dl>${rowsHtml(i)}</dl></section>
@@ -4053,6 +4664,8 @@ function paintSkin(info, onDownload) {
   document.head.append(meta, style);
   document.title = info.name;
   body.innerHTML = SKINS[key].html(info);
+  paintViews($('b2p-views'));
+  mountComments();
   for (const a of body.querySelectorAll('a')) {
     if (a.id === 'b2p-back') continue;
     a.setAttribute('href', location.href);
@@ -4136,6 +4749,10 @@ async function run() {
   else if (forceMedia) player = bareMedia('video');
   else if (/^(video|audio)\//.test(firstMime)) {
     player = bareMedia(firstMime.startsWith('audio/') ? 'audio' : 'video');
+  }
+  if (player && player.tagName === 'VIDEO') {
+    const poster = (src.tt && src.tt.poster) || src.poster || '';
+    if (poster) player.poster = poster;
   }
 
   let token, member = null;
