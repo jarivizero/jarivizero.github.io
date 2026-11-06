@@ -80,7 +80,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "bad875ffcc5db8fa";
+  const BUILT_VER = "ad92f66a4c0343c8";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -168,11 +168,10 @@
           location.replace(location.href);      // the worker answers THIS one, with the file
           return;
         }
-        if (/^[A-Za-z0-9]{4}$/.test(decodeURIComponent((location.pathname.split('/').filter(Boolean).pop() || '')))) {
-          resolve(true);
-          location.replace(location.href);
-          return;
-        }
+        try {
+          const seg = decodeURIComponent((location.pathname.split('/').filter(Boolean).pop() || ''));
+          if (seg && (await supaIndex(seg))) { resolve(true); location.replace(location.href); return; }
+        } catch (e) { }
         resolve('missing');
       };
       tick();
@@ -304,6 +303,17 @@
       document.body.appendChild(v);
       return true;
     }
+    if (mime === 'text/html') {
+      const frame = document.createElement('iframe');
+      frame.setAttribute('sandbox',
+        'allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads');
+      frame.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;border:0;background:#121212';
+      frame.srcdoc = await blob.text();
+      document.body.textContent = '';
+      document.body.style.cssText = 'margin:0;padding:0;background:#121212;display:block;height:100%';
+      document.body.appendChild(frame);
+      return true;
+    }
     if (/^text\//.test(mime) || /json|javascript/.test(mime)) {
       const pre = document.createElement('pre');
       pre.style.cssText = 'margin:0;max-width:100%;white-space:pre-wrap;word-break:break-word;text-align:left';
@@ -424,9 +434,9 @@
     if (!('serviceWorker' in navigator) || !window.isSecureContext) {
       try { if (await directLoad(name)) return; } catch (e) { }
     }
-    if (await handOverToWorker(name)) return;
     const handover = await handOverToWorker(name);
     if (handover === true) return;
+    if (/^[A-Za-z0-9]{4}$/.test(bare)) { await openRenderer(name, root); return; }
     if (handover === false) {
       try { if (await directLoad(name)) return; } catch (e) { }
     }
