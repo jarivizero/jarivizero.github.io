@@ -71,7 +71,7 @@
     badge.textContent = live ? 'live' : 'replay';
     badge.className = live ? 'live' : '';
     document.title = slug + (live ? ' — live' : ' — replay');
-    if (!live && !downloaded) dl.hidden = false;
+    if (!live) { dl.hidden = false; showSize(); }
   }
   fetch(src, { cache: 'no-store' }).then(function (r) {
     if (r.status === 404) {
@@ -119,62 +119,25 @@
     v.play().catch(function () {});
   });
 
-  var downloading = false, downloaded = false;
-  function mb(n) { return (n / 1048576).toFixed(1) + ' MB'; }
-  function secs(s) {
-    if (!isFinite(s) || s < 0) return '—';
-    var m = Math.floor(s / 60), q = Math.round(s % 60);
-    return m ? m + 'm ' + (q < 10 ? '0' : '') + q + 's' : Math.round(s) + 's';
+  var mb = function (n) { return (n / 1048576).toFixed(1) + ' MB'; };
+  var sized = false;
+  function showSize() {
+    if (sized) return;
+    sized = true;
+    fetch('/__b2p/live/' + slug + '/all.ts', { method: 'HEAD', cache: 'no-store' })
+      .then(function (r) {
+        var n = Number(r.headers.get('X-B2P-Bytes')) || 0;
+        if (n) { dl.textContent = 'Download ' + mb(n) + ' .ts'; }
+      }).catch(function () {});
   }
-  function paintDownload(got, total, since) {
-    var speed = got / Math.max(0.001, (Date.now() - since) / 1000);
-    var out = mb(got) + (total ? ' / ' + mb(total) : '') + ' · ' + (speed / 1048576).toFixed(1) + ' MB/s';
-    if (total) out = mb(Math.max(0, total - got)) + ' left · ' + (speed / 1048576).toFixed(1) + ' MB/s'
-      + ' · ' + secs((total - got) / Math.max(1, speed)) + ' eta';
-    dlstat.textContent = out;
-  }
-  dl.addEventListener('click', async function () {
-    if (downloading) return;
-    downloading = true; dl.disabled = true;
-    var since = Date.now(), got = 0, total = 0, name = slug + '.ts';
-    dlstat.textContent = 'starting…';
-    try {
-      var writer = null;
-      if (window.showSaveFilePicker) {
-        var handle = await window.showSaveFilePicker({
-          suggestedName: name,
-          types: [{ description: 'MPEG-TS video', accept: { 'video/mp2t': ['.ts'] } }],
-        });
-        writer = await handle.createWritable();
-      }
-      var res = await fetch('/__b2p/live/' + slug + '/all.ts', { cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status + ' — ' + (await res.text()).slice(0, 80));
-      total = Number(res.headers.get('X-B2P-Bytes')) || 0;
-      var reader = res.body.getReader(), parts = [];
-      for (;;) {
-        var step = await reader.read();
-        if (step.done) break;
-        got += step.value.length;
-        if (writer) await writer.write(step.value); else parts.push(step.value);
-        paintDownload(got, total, since);
-      }
-      if (writer) {
-        await writer.close();
-      } else {
-        var url = URL.createObjectURL(new Blob(parts, { type: 'video/mp2t' }));
-        var a = document.createElement('a');
-        a.href = url; a.download = name; a.click();
-        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
-      }
-      downloaded = true;
-      dl.textContent = 'Downloaded';
-      dlstat.textContent = mb(got) + ' in ' + secs((Date.now() - since) / 1000);
-    } catch (e) {
-      dlstat.textContent = (e && e.name === 'AbortError') ? 'cancelled' : 'download failed: ' + (e && e.message);
-      dl.disabled = false;
-      if (e && e.name === 'AbortError') dlstat.textContent = 'cancelled';
-    }
-    downloading = false;
+  dl.addEventListener('click', function () {
+    var a = document.createElement('a');
+    a.href = '/__b2p/live/' + slug + '/all.ts';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    dlstat.textContent = 'in your download bar';
   });
   window.addEventListener('pagehide', function () { try { v.pause(); } catch (e) {} });
 })();
