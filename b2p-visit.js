@@ -4,6 +4,7 @@
   try {
     var SUPA_URL = 'https://ahyjufzfnozcexviegoo.supabase.co';
     var SUPA_KEY = 'sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR';
+    if (/^(localhost|127\.|0\.0\.0\.0$|\[::1\]$|::1$)/i.test(location.hostname)) return;
     var path = location.pathname + (location.search || '');
     var seen = 'b2p-visit:' + path;
     try {
