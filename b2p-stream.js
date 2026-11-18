@@ -1954,6 +1954,7 @@ async function serveAll(slug) {
     status: 200,
     headers: { 'Content-Type': 'video/mp2t',
                'Content-Disposition': 'attachment; filename="' + slug + '.ts"',
+               'Content-Length': String(total),
                'X-B2P-Bytes': String(total),
                'Cache-Control': 'no-store', 'X-B2P-Sw': BUILT_VER || 'unbaked' },
   });
