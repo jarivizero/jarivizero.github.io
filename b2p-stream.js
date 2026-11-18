@@ -9,7 +9,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "ee601701a682ef0d";
+const BUILT_VER = "b723516ec35b4a1c";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\nv1 df1c178d84d0d37b8df8a34e33b4d2ee97ae96b2a3f87b42d8e512fea1e50231 _FJ4n5kup6kaYMM2H0_8wjgWFrB7TpqFpz1MBWjYYb8\n";
 const dictKey = DICT_URL + '?cache=' + BUILT_VER;
 
@@ -283,6 +283,16 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.endsWith('/__b2p/zip/')) {
     event.respondWith(serveZipJob(url, event.clientId, event.request).catch((e) => zipErrorPage('', e.message)));
     return;
+  }
+  if (event.request.method === 'GET' || event.request.method === 'HEAD') {
+    const liveHead = (res) => (event.request.method === 'HEAD' ? new Response(null, {
+      status: res.status, headers: res.headers }) : res);
+    const livePage = url.origin === self.location.origin ? LIVE_PATH.exec(url.pathname) : null;
+    if (livePage) { event.respondWith(serveLivePage(livePage[1]).then(liveHead)); return; }
+    if (url.origin === self.location.origin && url.pathname.startsWith(LIVE_MARK)) {
+      event.respondWith(serveLive(url.pathname.slice(LIVE_MARK.length)).then(liveHead));
+      return;
+    }
   }
   if (url.pathname.includes(MARK)) { event.respondWith(serve(event.request, url)); return; }
   const headOnly = (res) => (event.request.method === 'HEAD' && res)
@@ -1837,4 +1847,110 @@ function rowsToPayload(raw, w, h, color, plte, trns) {
     }
   }
   return new Uint8Array(out);
+}
+
+const LIVE_PATH = /^\/live\/([A-Za-z0-9][A-Za-z0-9._-]{0,79})\/?$/;
+const LIVE_MARK = '/__b2p/live/';
+const LIVE_SEG = /^([A-Za-z0-9][A-Za-z0-9._-]{0,79})\/(\d+)\.ts$/;
+const LIVE_PL = /^([A-Za-z0-9][A-Za-z0-9._-]{0,79})\/index\.m3u8$/;
+const LIVE_STATE = new Map();     // slug -> { at, state }
+const LIVE_STATE_MS = 1000;
+
+function liveRpc(name, body) {
+  return fetch(SUPA_URL + '/rest/v1/rpc/' + name, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPA_KEY,
+               Authorization: 'Bearer ' + SUPA_KEY },
+    body: JSON.stringify(body),
+  }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+}
+
+async function liveState(slug) {
+  const hit = LIVE_STATE.get(slug);
+  if (hit && Date.now() - hit.at < LIVE_STATE_MS) return hit.state;
+  const state = await liveRpc('live_state', { p_slug: slug });
+  if (state && state.slug) LIVE_STATE.set(slug, { at: Date.now(), state });
+  return state;
+}
+
+function live404() {
+  return new Response('no such stream', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+}
+
+function livePlaylist(slug, st, all) {
+  const segs = (st.segments || []).slice().sort((a, b) => a.seq - b.seq);
+  const target = Math.max(1, Math.ceil(Number(st.target) || 8));
+  const first = segs.length ? segs[0].seq : Number(st.first) || 0;
+  const lines = ['#EXTM3U', '#EXT-X-VERSION:3', '#EXT-X-TARGETDURATION:' + target,
+                 '#EXT-X-MEDIA-SEQUENCE:' + first];
+  if (all && !st.live) lines.push('#EXT-X-PLAYLIST-TYPE:VOD');
+  for (const s of segs) {
+    if (s.x) lines.push('#EXT-X-DISCONTINUITY');
+    lines.push('#EXTINF:' + (Number(s.d) || target).toFixed(3) + ',', LIVE_MARK + slug + '/' + s.seq + '.ts');
+  }
+  if (all && !st.live) lines.push('#EXT-X-ENDLIST');
+  return lines.join('\n') + '\n';
+}
+
+async function serveLive(rest) {
+  const seg = LIVE_SEG.exec(rest);
+  const pl = LIVE_PL.exec(rest);
+  const slug = seg ? seg[1] : pl ? pl[1] : null;
+  if (!slug) return new Response('bad stream address', { status: 400 });
+  const st = await liveState(slug);
+  if (!st) return live404();
+
+  if (pl) {
+    const all = !st.live;
+    const state = all && st.count > (st.segments || []).length
+      ? (await liveRpc('live_state', { p_slug: slug, p_from: 0 })) || st
+      : st;
+    return new Response(livePlaylist(slug, state, all), {
+      status: 200,
+      headers: { 'Content-Type': 'application/vnd.apple.mpegurl',
+                 'Cache-Control': 'no-store', 'X-B2P-Sw': BUILT_VER || 'unbaked' },
+    });
+  }
+
+  const row = await liveRpc('live_segment', { p_slug: slug, p_seq: Number(seg[2]) });
+  if (!row || (!row.u && !row.p)) return new Response('no such segment', { status: 404 });
+  const pieces = Array.isArray(row.p) && row.p.length ? row.p : [{ u: row.u, m: row.m }];
+  let out;
+  try {
+    const bufs = await Promise.all(pieces.map(async (p) => {
+      const res = await fetch(p.u, { cache: 'force-cache' });
+      if (!res.ok) throw new Error('cdn answered ' + res.status);
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      const tail = pngTail(bytes);
+      if (!tail) throw new Error('not a wrapped piece');
+      const m = Number(p.m) || 0;
+      return m ? tail.map((b) => b ^ m) : tail;
+    }));
+    if (bufs.length === 1) {
+      out = bufs[0];
+    } else {
+      const n = bufs.reduce((a, b) => a + b.length, 0);
+      out = new Uint8Array(n);
+      let at = 0;
+      for (const b of bufs) { out.set(b, at); at += b.length; }
+    }
+  } catch (e) {
+    return new Response('segment unavailable: ' + e.message, { status: 502 });
+  }
+  return new Response(out, {
+    status: 200,
+    headers: { 'Content-Type': 'video/mp2t', 'Content-Length': String(out.length),
+               'Cache-Control': 'public, max-age=86400, immutable',
+               'X-B2P-Sw': BUILT_VER || 'unbaked' },
+  });
+}
+
+async function serveLivePage(slug) {
+  const res = await fetch(new URL('/live.html', self.location.href).href, { cache: 'no-store' });
+  if (!res.ok) return new Response('the live page is missing from the site', { status: 502 });
+  return new Response(await res.text(), {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
+               'X-B2P-Sw': BUILT_VER || 'unbaked', 'X-B2P-Live': slug },
+  });
 }
