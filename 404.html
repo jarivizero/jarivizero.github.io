@@ -66,7 +66,7 @@
   a:hover { text-decoration:underline; }
   #home { font-size:15px; }
 </style>
-<script src="b2p-visit.js" defer></script>
+<script>(function(){try{if(location.protocol!=="https:")return;var p=location.pathname+(location.search||""),k="b2p-visit:"+p;try{if(sessionStorage.getItem(k))return;sessionStorage.setItem(k,"1")}catch(e){}var U="https://ahyjufzfnozcexviegoo.supabase.co",K="sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR";fetch(U+"/rest/v1/rpc/visit",{method:"POST",mode:"cors",cache:"no-store",keepalive:true,headers:{"Content-Type":"application/json",apikey:K,Authorization:"Bearer "+K},body:JSON.stringify({p_path:p})}).catch(function(){})}catch(e){}})()</script>
 </head>
 <body>
 <main id="stage">
@@ -81,7 +81,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "48e999f816cf4bfc";
+  const BUILT_VER = "35f41a17cccf548e";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
