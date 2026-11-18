@@ -471,12 +471,14 @@ function logBytesAnswer(name, request) {
   try {
     let path = '/file/' + name;
     try { path = new URL(request.url).pathname; } catch (e) { }
-    fetch(SUPA_URL + '/rest/v1/rpc/visit', {
-      method: 'POST', mode: 'cors', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', apikey: SUPA_KEY,
-                 Authorization: 'Bearer ' + SUPA_KEY },
-      body: JSON.stringify({ p_path: path })
-    }).catch(() => {});
+    if (self.location.protocol === 'https:') {
+      fetch(SUPA_URL + '/rest/v1/rpc/visit', {
+        method: 'POST', mode: 'cors', cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', apikey: SUPA_KEY,
+                   Authorization: 'Bearer ' + SUPA_KEY },
+        body: JSON.stringify({ p_path: path })
+      }).catch(() => {});
+    }
   } catch (e) { }
   logFromWorker([
     ['', name],
