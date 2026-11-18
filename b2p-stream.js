@@ -288,7 +288,11 @@ self.addEventListener('fetch', (event) => {
     const liveHead = (res) => (event.request.method === 'HEAD' ? new Response(null, {
       status: res.status, headers: res.headers }) : res);
     const livePage = url.origin === self.location.origin ? LIVE_PATH.exec(url.pathname) : null;
-    if (livePage) { event.respondWith(serveLivePage(livePage[1]).then(liveHead)); return; }
+    if (livePage) {
+      if (url.searchParams.has('c')) { event.respondWith(serveLiveClean(livePage[1], event.request).then(liveHead)); return; }
+      event.respondWith(serveLivePage(livePage[1]).then(liveHead));
+      return;
+    }
     if (url.origin === self.location.origin && url.pathname.startsWith(LIVE_MARK)) {
       event.respondWith(serveLive(url.pathname.slice(LIVE_MARK.length)).then(liveHead));
       return;
@@ -1863,6 +1867,7 @@ const LIVE_PATH = /^\/live\/([A-Za-z0-9][A-Za-z0-9._-]{0,79})\/?$/;
 const LIVE_MARK = '/__b2p/live/';
 const LIVE_SEG = /^([A-Za-z0-9][A-Za-z0-9._-]{0,79})\/(\d+)\.ts$/;
 const LIVE_PL = /^([A-Za-z0-9][A-Za-z0-9._-]{0,79})\/index\.m3u8$/;
+const LIVE_ALL = /^([A-Za-z0-9][A-Za-z0-9._-]{0,79})\/all\.ts$/;
 const LIVE_STATE = new Map();     // slug -> { at, state }
 const LIVE_STATE_MS = 1000;
 
@@ -1902,9 +1907,61 @@ function livePlaylist(slug, st, all) {
   return lines.join('\n') + '\n';
 }
 
+async function liveSegmentBytes(row) {
+  const pieces = Array.isArray(row.p) && row.p.length ? row.p : [{ u: row.u, m: row.m }];
+  const bufs = await Promise.all(pieces.map(async (p) => {
+    const res = await fetch(p.u, { cache: 'force-cache' });
+    if (!res.ok) throw new Error('cdn answered ' + res.status);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const tail = pngTail(bytes);
+    if (!tail) throw new Error('not a wrapped piece');
+    const m = Number(p.m) || 0;
+    return m ? tail.map((b) => b ^ m) : tail;
+  }));
+  if (bufs.length === 1) return bufs[0];
+  const n = bufs.reduce((a, b) => a + b.length, 0);
+  const out = new Uint8Array(n);
+  let at = 0;
+  for (const b of bufs) { out.set(b, at); at += b.length; }
+  return out;
+}
+
+async function serveAll(slug) {
+  const st = await liveState(slug);
+  if (!st) return live404();
+  if (st.live) return new Response('this recording is still being made', { status: 409 });
+  const full = st.count > (st.segments || []).length
+    ? (await liveRpc('live_state', { p_slug: slug, p_from: 0 })) || st
+    : st;
+  const segs = (full.segments || []).slice().sort((a, b) => a.seq - b.seq);
+  if (!segs.length) return new Response('this recording has no segments', { status: 404 });
+  const total = segs.reduce((n, s) => n + (Number(s.b) || 0), 0);
+  let i = 0;
+  const body = new ReadableStream({
+    async pull(c) {
+      if (i >= segs.length) { c.close(); return; }
+      const s = segs[i++];
+      try {
+        c.enqueue(await liveSegmentBytes(s));
+      } catch (e) {
+        c.error(new Error('segment ' + s.seq + ': ' + e.message));
+      }
+    },
+  });
+  return new Response(body, {
+    status: 200,
+    headers: { 'Content-Type': 'video/mp2t',
+               'Content-Disposition': 'attachment; filename="' + slug + '.ts"',
+               'X-B2P-Bytes': String(total),
+               'Cache-Control': 'no-store', 'X-B2P-Sw': BUILT_VER || 'unbaked' },
+  });
+}
+
 async function serveLive(rest) {
   const seg = LIVE_SEG.exec(rest);
   const pl = LIVE_PL.exec(rest);
+  const allSeg = LIVE_ALL.exec(rest);
+  if (allSeg) return serveAll(allSeg[1]);
   const slug = seg ? seg[1] : pl ? pl[1] : null;
   if (!slug) return new Response('bad stream address', { status: 400 });
   const st = await liveState(slug);
@@ -1924,26 +1981,9 @@ async function serveLive(rest) {
 
   const row = await liveRpc('live_segment', { p_slug: slug, p_seq: Number(seg[2]) });
   if (!row || (!row.u && !row.p)) return new Response('no such segment', { status: 404 });
-  const pieces = Array.isArray(row.p) && row.p.length ? row.p : [{ u: row.u, m: row.m }];
   let out;
   try {
-    const bufs = await Promise.all(pieces.map(async (p) => {
-      const res = await fetch(p.u, { cache: 'force-cache' });
-      if (!res.ok) throw new Error('cdn answered ' + res.status);
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      const tail = pngTail(bytes);
-      if (!tail) throw new Error('not a wrapped piece');
-      const m = Number(p.m) || 0;
-      return m ? tail.map((b) => b ^ m) : tail;
-    }));
-    if (bufs.length === 1) {
-      out = bufs[0];
-    } else {
-      const n = bufs.reduce((a, b) => a + b.length, 0);
-      out = new Uint8Array(n);
-      let at = 0;
-      for (const b of bufs) { out.set(b, at); at += b.length; }
-    }
+    out = await liveSegmentBytes(row);
   } catch (e) {
     return new Response('segment unavailable: ' + e.message, { status: 502 });
   }
@@ -1952,6 +1992,30 @@ async function serveLive(rest) {
     headers: { 'Content-Type': 'video/mp2t', 'Content-Length': String(out.length),
                'Cache-Control': 'public, max-age=86400, immutable',
                'X-B2P-Sw': BUILT_VER || 'unbaked' },
+  });
+}
+
+async function serveLiveClean(slug, request) {
+  const accept = (request.headers.get('accept') || '').toLowerCase();
+  if (!accept.includes('text/html')) return serveLive(slug + '/index.m3u8');
+  const st = await liveState(slug);
+  if (!st) return live404();
+  const html = '<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width, initial-scale=1">'
+    + '<title>' + slug + '</title>'
+    + '<style>html,body{margin:0;height:100%;background:#000}'
+    + 'video{display:block;width:100%;height:100%;background:#000}</style>'
+    + '<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js" crossorigin="anonymous"><\/script>'
+    + '</head><body>\n<video id="v" controls playsinline autoplay muted></video>\n<script>'
+    + '(function(){var v=document.getElementById("v"),u=location.pathname+"?c";'
+    + 'if(v.canPlayType("application/vnd.apple.mpegurl")){v.src=u;return;}'
+    + 'if(window.Hls&&Hls.isSupported()){var h=new Hls();h.loadSource(u);h.attachMedia(v);return;}'
+    + 'document.body.textContent="This browser cannot play HLS.";})();'
+    + '<\/script>\n</body></html>\n';
+  return new Response(html, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
+               'X-B2P-Sw': BUILT_VER || 'unbaked', 'X-B2P-Live': slug, 'X-B2P-Clean': '1' },
   });
 }
 
