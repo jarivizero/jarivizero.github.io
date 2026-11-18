@@ -80,7 +80,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "ee601701a682ef0d";
+  const BUILT_VER = "b723516ec35b4a1c";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -464,6 +464,49 @@
     return;
   }
   if (location.pathname === '/file/') { location.replace('/file'); return; }
+
+  const asLive = location.pathname.match(/^\/live\/([A-Za-z0-9][A-Za-z0-9._-]{0,79})\/?$/);
+  if (asLive) {
+    document.title = asLive[1] + ' — live';
+    msg.className = 'msg';
+    msg.textContent = 'Connecting to the stream…';
+    home.textContent = '';
+    if (!('serviceWorker' in navigator) || !window.isSecureContext) {
+      fail('This browser cannot install the worker a stream needs — open it in a normal browser tab.');
+      return;
+    }
+    try {
+      await navigator.serviceWorker.register(SW_URL, { scope: '/' });
+      await navigator.serviceWorker.ready;
+      if (!navigator.serviceWorker.controller) {
+        await new Promise((res) => {
+          const t = setTimeout(res, 10000);
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            clearTimeout(t); res();
+          }, { once: true });
+        });
+      }
+      if (!navigator.serviceWorker.controller) {
+        fail('The worker installed but did not take control of this page. Reload it once.');
+        return;
+      }
+      const probe = await fetch('/__b2p/live/' + asLive[1] + '/index.m3u8', { cache: 'no-store' });
+      if (probe.status === 200) {
+        msg.textContent = 'Stream found — opening it.';
+        location.replace(location.href);
+        return;
+      }
+      if (probe.status === 404) {
+        fail('There is no stream called “' + asLive[1] + '” — the name is the address, so check the ' +
+             'link. A stream appears here as soon as its first OBS segment is uploaded.');
+        return;
+      }
+      fail('The worker answered HTTP ' + probe.status + ' for this stream.');
+    } catch (e) {
+      fail('The worker could not be installed: ' + e.message);
+    }
+    return;
+  }
 
   if (location.pathname.includes('/__b2p/')) {
     msg.className = 'msg';
