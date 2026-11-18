@@ -66,6 +66,7 @@
   a:hover { text-decoration:underline; }
   #home { font-size:15px; }
 </style>
+<script src="b2p-visit.js" defer></script>
 </head>
 <body>
 <main id="stage">
@@ -80,7 +81,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "b723516ec35b4a1c";
+  const BUILT_VER = "48e999f816cf4bfc";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
