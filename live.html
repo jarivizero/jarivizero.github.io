@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live</title>
+
+<style>
+  :root { --bg: #121212; --fg: #e8e8e8; --dim: #9a9a9a; --accent: #ff2d55; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-bottom: 1px solid #262626; }
+  #badge { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; padding: 3px 8px;
+    border-radius: 3px; background: #262626; color: var(--dim); }
+  #badge.live { background: var(--accent); color: #fff; }
+  #name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #name a { color: inherit; text-decoration: none; }
+  main { padding: 0; }
+  video { display: block; width: 100%; max-height: calc(100vh - 96px); background: #000; }
+  footer { display: flex; gap: 14px; align-items: center; padding: 8px 14px; color: var(--dim);
+    font-size: 13px; }
+  #msg { padding: 18px 14px; color: var(--dim); }
+  #msg:empty { display: none; }
+  button { background: #262626; color: var(--fg); border: 1px solid #3a3a3a; border-radius: 4px;
+    padding: 5px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  button:hover { background: #333; }
+</style>
+</head>
+<body>
+<header>
+  <span id="badge">connecting</span>
+  <span id="name"></span>
+</header>
+<main>
+  <video id="v" controls playsinline autoplay muted></video>
+  <div id="msg"></div>
+</main>
+<footer>
+  <button id="sound" hidden>Tap for sound</button>
+  <span id="lag"></span>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js" crossorigin="anonymous"></script>
+<script>
+(function () {
+  'use strict';
+  var m = /^\/live\/([A-Za-z0-9][A-Za-z0-9._-]{0,79})\/?$/.exec(location.pathname);
+  var slug = m ? m[1] : '';
+  var src = '/__b2p/live/' + slug + '/index.m3u8';
+  var v = document.getElementById('v');
+  var badge = document.getElementById('badge');
+  var msg = document.getElementById('msg');
+  var nameEl = document.getElementById('name');
+  var sound = document.getElementById('sound');
+  var lag = document.getElementById('lag');
+
+  if (!slug) { msg.textContent = 'This address is not a stream.'; return; }
+  document.title = slug + ' — live';
+  nameEl.textContent = slug;
+
+  function paintState(text) {
+    var live = text.indexOf('#EXT-X-ENDLIST') < 0;
+    badge.textContent = live ? 'live' : 'replay';
+    badge.className = live ? 'live' : '';
+    document.title = slug + (live ? ' — live' : ' — replay');
+  }
+  fetch(src, { cache: 'no-store' }).then(function (r) {
+    if (r.status === 404) {
+      msg.textContent = 'No stream at “' + slug + '” yet.';
+      badge.textContent = 'not found';
+      return null;
+    }
+    return r.ok ? r.text() : null;
+  }).then(function (text) {
+    if (!text) return;
+    paintState(text);
+    play(text);
+  }).catch(function () { msg.textContent = 'Could not reach the stream.'; });
+
+  function play() {
+    if (window.Hls && Hls.isSupported()) {
+      var hls = new Hls({ liveSyncDurationCount: 2, lowLatencyMode: false,
+                          manifestLoadingMaxRetry: 6 });
+      hls.loadSource(src);
+      hls.attachMedia(v);
+      hls.on(Hls.Events.ERROR, function (_e, data) {
+        if (!data || !data.fatal) return;
+        msg.textContent = 'Playback stopped (' + (data.details || data.type) + ').';
+      });
+      hls.on(Hls.Events.LEVEL_LOADED, function (_e, d) {
+        var details = d && d.details;
+        if (!details) return;
+        paintState(details.live ? '#EXTM3U' : '#EXTM3U\n#EXT-X-ENDLIST');
+        if (details.live && v.duration === Infinity) lag.textContent = 'live edge';
+      });
+    } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
+      v.src = src;                       // Safari and iOS have HLS in the box
+    } else {
+      msg.textContent = 'This browser cannot play HLS.';
+      return;
+    }
+    v.addEventListener('playing', function () {
+      if (v.muted) { sound.hidden = false; }
+    }, { once: true });
+    v.play().catch(function () { });
+  }
+
+  sound.addEventListener('click', function () {
+    v.muted = false; v.volume = 1; sound.hidden = true;
+    v.play().catch(function () {});
+  });
+  window.addEventListener('pagehide', function () { try { v.pause(); } catch (e) {} });
+})();
+</script>
+</body>
+</html>
