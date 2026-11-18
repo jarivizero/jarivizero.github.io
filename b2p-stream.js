@@ -326,7 +326,8 @@ self.addEventListener('fetch', (event) => {
     }
     if (!isRawAddress(url) && !PAGE_PARAMS.some((k) => url.searchParams.has(k))) {
       const direct = fileAddress(url.pathname);
-      if (direct && RENDER_NAME.test(direct)) {
+      if (direct && RENDER_NAME.test(direct)
+          && !(event.request.mode === 'navigate' && MARKDOWN_NAME.test(direct))) {
         const nav = event.request.mode === 'navigate';
         event.respondWith(serveFileRaw(direct, event.request, null)
           .then((res) => res || (nav
@@ -336,7 +337,8 @@ self.addEventListener('fetch', (event) => {
       }
     }
     const inside = archiveAddress(url.pathname);
-    if (inside) {
+    if (inside && !(event.request.mode === 'navigate' && !isSaveAddress(url)
+                    && !isRawAddress(url) && MARKDOWN_NAME.test(inside.member))) {
       const nav = event.request.mode === 'navigate';
       event.respondWith(serveMember(inside, event.request, isSaveAddress(url))
         .then((res) => res || (nav
@@ -434,6 +436,7 @@ function sourceOf(url) {
   return null;
 }
 const RENDER_NAME = /\.(?:mp4|m4v|webm|mov|mp3|m4a|ogg|oga|opus|wav|flac|gif|png|jpe?g|webp|avif|pdf|txt|log|json|md|srt|vtt)$/i;
+const MARKDOWN_NAME = /\.(?:md|markdown|mdown|mkd|mdwn)$/i;
 function nameHint(request) {
   try {
     for (const [k, v] of new URL(request.url).searchParams) {
