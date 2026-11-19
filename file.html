@@ -122,7 +122,7 @@ window.addEventListener('load', () => { checkSiteVersion(); });
 const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the encoder cuts it
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
-const BUILT_VER = "64ae626b00241c4c";
+const BUILT_VER = "3ab493fb1c134ec0";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\nv1 df1c178d84d0d37b8df8a34e33b4d2ee97ae96b2a3f87b42d8e512fea1e50231 _FJ4n5kup6kaYMM2H0_8wjgWFrB7TpqFpz1MBWjYYb8\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -2260,6 +2260,55 @@ const GRID_ICON = `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" s
   height="6.5" rx="1"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1"/><rect x="13.5" y="13.5"
   width="6.5" height="6.5" rx="1"/></svg>`;
 
+function openMemberPlayer(name, src) {
+  const isAudio = /^(audio)\//.test(mimeFromName(name) || '');
+  const wrap = document.createElement('div');
+  wrap.className = 'b2p-player';
+  wrap.innerHTML = `<style>
+    .b2p-player { position:fixed; inset:0; z-index:99999; display:flex; align-items:center;
+      justify-content:center; background:rgba(8,10,14,.92); }
+    .b2p-player video, .b2p-player audio { max-width:min(92vw,1400px); max-height:86vh;
+      background:#000; border-radius:10px; box-shadow:0 24px 80px rgba(0,0,0,.6); }
+    .b2p-player .bar { position:fixed; top:0; left:0; right:0; display:flex; align-items:center;
+      gap:14px; padding:14px 20px; color:#e8eaed;
+      font:600 15px/1.3 Inter,system-ui,sans-serif; }
+    .b2p-player .bar b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .b2p-player .x { margin-left:auto; width:38px; height:38px; border:0; border-radius:10px;
+      cursor:pointer; background:rgba(255,255,255,.12); color:#fff; font-size:20px; line-height:1; }
+    .b2p-player .x:hover { background:rgba(255,255,255,.22); }
+    .b2p-player .big { font:400 60px/1 Arial,sans-serif; color:#f5b21a; }
+  </style>
+  <div class="bar"><b></b><button class="x" type="button" aria-label="Close">✕</button></div>`;
+  wrap.querySelector('b').textContent = name;
+  const media = document.createElement(isAudio ? 'audio' : 'video');
+  media.controls = true;
+  media.preload = 'metadata';
+  media.src = src;
+  media.style.outline = 'none';
+  media.addEventListener('error', () => {
+    const note = document.createElement('p');
+    note.className = 'big';
+    note.textContent = 'this member cannot be streamed — use Download';
+    media.replaceWith(note);
+  });
+  wrap.appendChild(media);
+  document.body.appendChild(wrap);
+  document.body.classList.add('b2p-held');
+  const close = () => {
+    document.removeEventListener('keydown', onKey);
+    wrap.remove();
+    document.body.classList.remove('b2p-held');
+    try { media.pause(); media.removeAttribute('src'); media.load(); } catch (e) { }
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  wrap.querySelector('.x').addEventListener('click', close);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+  document.addEventListener('keydown', onKey);
+  document.body.classList.add('b2p-player-open');
+  try { media.play().catch(() => { }); } catch (e) { }
+  return wrap;
+}
+
 function renderMediaFolder(o) {
   const items = o.items;
   const files = items.length;
@@ -2522,7 +2571,7 @@ async function renderZipFolder(label, prefix, files, read, zipBytes, addr, paren
   };
   const items = childEntries(files, prefix);
   const gridAsk = /^(grid|media|mega)$/i.test(new URLSearchParams(location.search).get('view') || '');
-  if (gridAsk && hasPreviews(items)) {
+  if (FORCE_M || (gridAsk && hasPreviews(items))) {
     return renderMediaFolder({
       label, addr, prefix, items,
       parentHref: prefix ? folderHref(addr, prefix) : (parentHref || null),
@@ -2639,6 +2688,16 @@ async function renderZipPath(baseLabel, rawPath, baseAddr) {
   };
   const known = read === rootRead ? await withOffsets(entry) : entry;
   const memberName = known.path.replace(/^.*\//, '');
+  if (FORCE_M && /^(video|audio)\//.test(mimeFromName(memberName) || '')) {
+    const dir = String(rest).replace(/[^/]+$/, '');
+    const up = lastWasArchive && walked.length > 1 ? walked.slice(0, -1).join('/') : '';
+    const containing = up ? memberHref(addrBase, up) : archiveHref(addrBase);
+    await renderZipFolder(label, dir, files, read, deepest,
+                          lastWasArchive ? addrWalk : addrArch,
+                          lastWasArchive ? containing : null, spanBase);
+    openMemberPlayer(memberName, memberHref(addrArch, rest) + '?r');
+    return;
+  }
   if (!isRenderableName(memberName) && /\.[A-Za-z0-9]{1,6}$/.test(memberName)) {
     return memberFileHostView(memberName, known, label, () => read(known.path), slice, spanBase, archiveSpan, back);
   }
@@ -4279,6 +4338,25 @@ const SKINS = {
       
 
       .sk-gofile .folder .kg { margin-left:auto; }
+      
+
+      .sk-gofile .ggrid { display:grid; margin-top:16px;
+        grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:14px; }
+      .sk-gofile .gcard { display:flex; flex-direction:column; gap:8px; text-decoration:none;
+        color:#e2e8f0; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07);
+        border-radius:12px; padding:10px; overflow:hidden; }
+      .sk-gofile .gcard:hover { background:rgba(255,255,255,.07); border-color:rgba(245,178,26,.35); }
+      .sk-gofile .gcard .thumb { display:flex; align-items:center; justify-content:center;
+        aspect-ratio:16/10; border-radius:8px; background:#0f1729; overflow:hidden; position:relative; }
+      .sk-gofile .gcard img { width:100%; height:100%; object-fit:cover; }
+      .sk-gofile .gcard .glyph { font-size:26px; color:#94a3b8; }
+      .sk-gofile .gcard pre.txt { margin:0; font:11px/1.35 ui-monospace,monospace; color:#94a3b8;
+        white-space:pre; overflow:hidden; padding:8px; width:100%; box-sizing:border-box; }
+      .sk-gofile .gcard .nm { font-size:13px; font-weight:600; color:#f1f5f9;
+        overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+      .sk-gofile .gcard .mt { font-size:11px; color:#94a3b8; }
+      .sk-gofile .gcard .dur { position:absolute; right:6px; bottom:6px; font-style:normal; font-size:11px;
+        background:rgba(0,0,0,.7); color:#fff; padding:1px 6px; border-radius:6px; }
     `,
     html: (i) => `
       <aside class="sb">
@@ -4313,6 +4391,8 @@ const SKINS = {
             <button type="button" id="b2p-download" class="dl">${IC.dl}Download</button>
             <span class="kg">${IC.kebab}</span>
           </section>
+          ${i.items && i.items.length ? `<section class="panel"><h2>${i.items.length} item${i.items.length === 1 ? '' : 's'}</h2>
+            <div class="ggrid">${gofileCards(i.items, i.addr || i.name)}</div></section>` : ''}
           <section class="panel cmt" id="b2p-comments-panel">
             <style>
               .sk-gofile .vw { display:inline-block; margin-left:6px; font-size:12px; color:#94a3b8; }
@@ -4657,7 +4737,7 @@ function skinKey() {
   return SKINS[want] ? want : SKIN_NAMES[0];
 }
 
-function forceSkin() {
+function forceSkin(items) {
   const index = indexSeen;
   if (index && Array.isArray(index.chunks) && index.chunks.length) {
     src = { ...src, name: index.name || src.name,
@@ -4666,7 +4746,7 @@ function forceSkin() {
     ttWhole.clear();
     ttPlan = null;
     const fromIndex = fileInfo(index);
-    paintSkin(fromIndex, (btn) => saveInfoFile(btn, fromIndex));
+    paintSkin({ ...fromIndex, items: items || null }, (btn) => saveInfoFile(btn, fromIndex));
     return;
   }
   const bytes = Number(src.tt && src.tt.bytes) || 0;
@@ -4683,7 +4763,23 @@ function forceSkin() {
   if (!view.etag) {
     view.etag = '"' + (sha ? sha.slice(0, 32) : 'nohash') + '-' + (bytes || 0).toString(16) + '"';
   }
-  paintSkin(view, (btn) => saveInfoFile(btn, view));
+  paintSkin({ ...view, items: items || null }, (btn) => saveInfoFile(btn, view));
+}
+
+function gofileCards(items, addr) {
+  return items.map((f) => {
+    const name = String(f.path).replace(/\/$/, '').split('/').pop();
+    const href = src.direct ? '#' : memberHref(addr, f.path);
+    const kind = f.dir ? 'dir' : previewKind(name);
+    const thumb = f.thumb ? `<img src="${esc(f.thumb)}" alt="" loading="lazy" decoding="async">`
+      : (f.head ? `<pre class="txt">${esc(f.head)}</pre>`
+        : `<span class="glyph">${kind === 'dir' ? FOLDER_GLYPH : previewGlyph(kind)}</span>`);
+    const meta = [f.dir ? '' : fmt(f.size), f.modified ? fmtDate(f.modified) : ''].filter(Boolean).join(' · ')
+      || typeLabel(name, !!f.dir);
+    return `<a class="gcard" href="${esc(href)}"${f.dir ? '' : ' target="_blank" rel="noopener"'} title="${esc(f.path)}">
+      <span class="thumb">${thumb}${f.dur ? `<em class="dur">${esc(f.dur)}</em>` : ''}</span>
+      <span class="nm">${esc(name)}</span><span class="mt">${esc(meta)}</span></a>`;
+  }).join('');
 }
 
 function paintSkin(info, onDownload) {
@@ -4728,6 +4824,7 @@ function renderFileInfo(index) {
 const SAVE_REQUEST = /(?:^|[?&])(?:save|dl|s)(?:=1)?(?:&|$)/i.test(location.search)
   || /[?&](?:save|dl|s)(?:=1)?$/i.test(location.hash);
 const FORCE_G = /(?:^|[?&])g(?:=1)?(?:&|$)/i.test(location.search);
+const FORCE_M = /(?:^|[?&])m(?:=1)?(?:&|$)/i.test(location.search);
 const RAW_ASK = /(?:^|[?&])r(?:=1)?(?:&|$)/i.test(location.search);
 function addressFromLocation() {
   let hash = location.hash.replace(/^#/, '');
@@ -4871,6 +4968,11 @@ async function run() {
 
   if (FORCE_G && !member) {
     if (player) player.remove();
+    if (/^(grid|media|mega)$/i.test(new URLSearchParams(location.search).get('view') || '')) {
+      const rowsG = await rootRows().catch(() => null);
+      const itemsG = rowsG ? childEntries(rowsG, '') : [];
+      if (itemsG.length && hasPreviews(itemsG)) { forceSkin(itemsG); return; }
+    }
     forceSkin();
     return;
   }
@@ -4903,7 +5005,7 @@ async function run() {
       const rows0 = await rootRows();
       const atRoot = childEntries(rows0, '');
       const gridAsk = /^(grid|media|mega)$/i.test(new URLSearchParams(location.search).get('view') || '');
-      if (gridAsk && hasPreviews(atRoot)) {
+      if ((gridAsk && hasPreviews(atRoot)) || FORCE_M) {
         if (player) player.remove();
         await shareArchivePlan(typedToken || label);
         renderMediaFolder({
