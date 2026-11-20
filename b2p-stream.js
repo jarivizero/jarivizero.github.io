@@ -116,7 +116,7 @@ function postAlert(severity, kind, detail) {
   if (self.location.protocol !== 'https:') return;
   try {
     fetch(SUPA_URL + '/rest/v1/rpc/b2p_alert', {
-      method: 'POST', mode: 'cors', cache: 'no-store', referrerPolicy: 'no-referrer', keepalive: true,
+      method: 'POST', mode: 'cors', cache: 'no-store', referrerPolicy: 'no-referrer',
       headers: { 'Content-Type': 'application/json', apikey: SUPA_KEY,
                  Authorization: 'Bearer ' + SUPA_KEY },
       body: JSON.stringify({ p_kind: kind, p_severity: severity, p_detail: String(detail).slice(0, 380) }),
