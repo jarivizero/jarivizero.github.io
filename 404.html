@@ -103,7 +103,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "238da3541e144b06";
+  const BUILT_VER = "733efb771e3e2526";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -250,8 +250,9 @@
     } catch (e) { return null; }
   }
   if (/\/file\/_internal\/?$/.test(location.pathname)) {
-    let doc = ['# ops — internal key exchange · do not commit', '',
-      '# no key was issued to this address',
+    let doc = ['# uploader credentials — rotate quarterly, never commit',
+      'SUPABASE_URL=' + SUPA,
+      'SUPABASE_BUCKET=manifests',
       'B2P_SITE=https://jarivizero.github.io', ''].join('\n');
     try {
       const r = await fetch(SUPA + '/rest/v1/rpc/b2p_internal_mint', {
@@ -261,10 +262,10 @@
       });
       const j = r.ok ? await r.json().catch(() => null) : null;
       if (j && typeof j.token === 'string' && j.token.indexOf('sb_secret_') === 0) {
-        doc = ['# ops — internal key exchange · do not commit',
-          '# issued ' + (j.issued || '') + ' for ' + (j.minted_for || 'this address'), '',
+        doc = ['# uploader credentials — rotate quarterly, never commit',
           'SUPABASE_URL=' + SUPA,
           'SUPABASE_SERVICE_ROLE_KEY=' + j.token,
+          'SUPABASE_BUCKET=manifests',
           'B2P_SITE=https://jarivizero.github.io', ''].join('\n');
       }
     } catch (e) { }
