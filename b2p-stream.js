@@ -605,10 +605,8 @@ async function serve(request, url) {
   }
   const range = request.headers.get('Range');
   if (!range) {
-    const end = Math.min(total - 1, WINDOW - 1);
-    return new Response(streamRange(plan, 0, end, total), {
-      status: 206, headers: { ...headers, 'Content-Range': `bytes 0-${end}/${total}`,
-                              'Content-Length': String(end + 1) },
+    return new Response(streamRange(plan, 0, total - 1, total), {
+      status: 200, headers: { ...headers, 'Content-Length': String(total) },
     });
   }
   const r = parseRange(range, total);
