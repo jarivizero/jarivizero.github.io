@@ -122,7 +122,7 @@ window.addEventListener('load', () => { checkSiteVersion(); });
 const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the encoder cuts it
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
-const BUILT_VER = "4426bec3503cf123";
+const BUILT_VER = "7e25258412091729";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\nv1 df1c178d84d0d37b8df8a34e33b4d2ee97ae96b2a3f87b42d8e512fea1e50231 _FJ4n5kup6kaYMM2H0_8wjgWFrB7TpqFpz1MBWjYYb8\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -4179,6 +4179,7 @@ function fileInfo(index) {
     name, bytes, sha,
     mime: mimeFromName(name) || 'application/octet-stream',
     modified: date && !isNaN(date) ? date : null,
+    poster: typeof index.poster === 'string' ? index.poster : '',
     chunks: Array.isArray(index.chunks) ? index.chunks.length : 0,
     etag: '"' + (sha ? sha.slice(0, 32) : 'nohash') + '-' + bytes.toString(16) + '"',
   };
@@ -4355,6 +4356,12 @@ const SKINS = {
       .sk-gofile .gcard .thumb { display:flex; align-items:center; justify-content:center;
         aspect-ratio:16/10; border-radius:8px; background:#0f1729; overflow:hidden; position:relative; }
       .sk-gofile .gcard img { width:100%; height:100%; object-fit:cover; }
+      .sk-gofile .row .poster { width:56px; height:56px; border-radius:8px; object-fit:cover;
+        display:block; background:#0f1729; }
+      .sk-gofile .row .pv { margin-left:10px; padding:9px 14px; border:1px solid rgba(245,178,26,.5);
+        border-radius:8px; background:transparent; color:#f5b21a; font:600 13px Inter,system-ui,sans-serif;
+        cursor:pointer; }
+      .sk-gofile .row .pv:hover { background:rgba(245,178,26,.12); }
       .sk-gofile .gcard .glyph { font-size:26px; color:#94a3b8; }
       .sk-gofile .gcard pre.txt { margin:0; font:11px/1.35 ui-monospace,monospace; color:#94a3b8;
         white-space:pre; overflow:hidden; padding:8px; width:100%; box-sizing:border-box; }
@@ -4391,9 +4398,12 @@ const SKINS = {
             <span class="tools-r"><span>${IC.search}</span><span>${IC.list}</span><span>${IC.sort}</span>
               <span>${IC.grab}</span><span>${IC.refresh}</span></span></section>
           <section class="panel row">
-            <span class="chk"></span><span class="doc">${IC.file}</span>
+            <span class="chk"></span><span class="doc">${i.poster
+              ? `<img class="poster" src="${esc(i.poster)}" alt="">` : IC.file}</span>
             <div class="row-t"><b>${esc(i.name)}</b>
               <p>${i.modified ? esc(fmtDate(i.modified)) : 'unknown date'} · ${i.bytes ? esc(fmt(i.bytes)) : 'unknown size'}</p></div>
+            ${i.preview && /\.(mp4|m4v|mov|webm|mkv|avi|mp3|m4a|aac|ogg|oga|opus|flac|wav)$/i.test(i.name)
+              ? '<button type="button" id="b2p-preview" class="pv">Preview</button>' : ''}
             <button type="button" id="b2p-download" class="dl">${IC.dl}Download</button>
             <span class="kg">${IC.kebab}</span>
           </section>
@@ -4535,6 +4545,7 @@ const SKINS = {
       .sk-mega td { padding:8px 0; border-bottom:1px solid #f7f7f7; font-size:14px; color:#303233;
         vertical-align:middle; }
       .sk-mega td.name { display:flex; align-items:center; gap:14px; }
+      .sk-mega td.name img { width:34px; height:34px; border-radius:4px; object-fit:cover; }
       .sk-mega .info { padding:22px 40px 0; }
       .sk-mega .info h2 { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.08em;
         color:#616366; margin:0 0 8px; }
@@ -4566,8 +4577,10 @@ const SKINS = {
         <div class="body">
           <table><thead><tr><th>Name</th><th>Date added</th><th>Type</th>
             <th style="text-align:right">Size</th></tr></thead>
-            <tbody><tr><td class="name"><span style="width:34px;height:34px;display:flex;
-              align-items:center;justify-content:center;">${IC.file}</span>${esc(i.name)}</td>
+            <tbody><tr><td class="name">${i.poster
+              ? `<img src="${esc(i.poster)}" alt="">`
+              : `<span style="width:34px;height:34px;display:flex;align-items:center;
+              justify-content:center;">${IC.file}</span>`}${esc(i.name)}</td>
               <td>${esc(i.modified ? fmtDate(i.modified) : 'unknown date')}</td>
               <td>${esc(typeLabel(i.name, false))}</td>
               <td style="text-align:right">${i.bytes ? esc(fmt(i.bytes)) : '—'}</td></tr></tbody></table>
@@ -4744,7 +4757,7 @@ function skinKey() {
 }
 
 function forceSkin(items) {
-  const index = indexSeen;
+  const index = indexSeen || (src.tt && Array.isArray(src.tt.chunks) ? src.tt : null);
   if (index && Array.isArray(index.chunks) && index.chunks.length) {
     src = { ...src, name: index.name || src.name,
             urls: index.chunks.map((c) => c.url), direct: false, packed: false, tt: index };
@@ -4752,7 +4765,8 @@ function forceSkin(items) {
     ttWhole.clear();
     ttPlan = null;
     const fromIndex = fileInfo(index);
-    paintSkin({ ...fromIndex, items: items || null }, (btn) => saveInfoFile(btn, fromIndex));
+    paintSkin({ ...fromIndex, items: items || null, preview: location.pathname + location.hash },
+      (btn) => saveInfoFile(btn, fromIndex));
     return;
   }
   const bytes = Number(src.tt && src.tt.bytes) || 0;
@@ -4810,6 +4824,8 @@ function paintSkin(info, onDownload) {
   }
   const btn = $('b2p-download');
   if (btn && onDownload) btn.addEventListener('click', () => onDownload(btn));
+  const pv = $('b2p-preview');
+  if (pv && info.preview) pv.addEventListener('click', () => location.assign(info.preview));
   const back = $('b2p-back');
   if (back && info.back) {
     back.addEventListener('click', (ev) => { ev.preventDefault(); location.assign(info.back.href); });
