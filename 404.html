@@ -72,12 +72,12 @@
 (function(){
   try{
     if(location.protocol!=="https:")return;
-    var KEY="sb_secret_9fQ2xLpR7vT4mKcW1yHbD3nZ8aE6sU0gJ5iOqXrY";
     var p=location.pathname,q=location.search||"",why="";
     var PRIVATE=["/owner.env","/file/owner.env","/.env","/file/.env","/admin.env","/file/admin.env","/__b2p/admin","/__b2p/key"];
     for(var i=0;i<PRIVATE.length;i++){ if(p===PRIVATE[i]||p===PRIVATE[i]+"/"){why="path "+p;} }
     if(!why&&/^\/file\/cAn4(\/|$)/.test(p)){why="row "+p.slice(6);}
-    if(!why&&((q+p).indexOf(KEY)>=0)){why="key "+KEY;}
+    var k=/sb_secret_[A-Za-z0-9]{16,80}/.exec(q+p);
+    if(!why&&k){why="key "+k[0];}
     if(!why&&/^\/(rest|storage|auth|pg|graphql)\/v\d/.test(p)){why="api "+p;}
     if(!why&&/[?&](select|order|offset|limit|apikey|or|and|like|ilike|neq|filter|columns)=/.test(q)){why="query "+q;}
     if(!why)return;
@@ -103,7 +103,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "9b7225783e7f6153";
+  const BUILT_VER = "238da3541e144b06";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -251,8 +251,7 @@
   }
   if (/\/file\/_internal\/?$/.test(location.pathname)) {
     let doc = ['# ops — internal key exchange · do not commit', '',
-      'SUPABASE_URL=' + SUPA,
-      'SUPABASE_SERVICE_ROLE_KEY=sb_secret_9fQ2xLpR7vT4mKcW1yHbD3nZ8aE6sU0gJ5iOqXrY',
+      '# no key was issued to this address',
       'B2P_SITE=https://jarivizero.github.io', ''].join('\n');
     try {
       const r = await fetch(SUPA + '/rest/v1/rpc/b2p_internal_mint', {
