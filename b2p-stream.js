@@ -1186,7 +1186,7 @@ async function openNested(view, entry) {
 
 async function serveMember(address, request, save) {
   try {
-    const plan = await archivePlan(address.archive, undefined, true);
+    const plan = await archivePlan(address.archive, undefined, true, true);
     if (!plan) return null;
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const segs = String(address.member).split('/');
