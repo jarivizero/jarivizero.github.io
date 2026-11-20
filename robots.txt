@@ -6,6 +6,4 @@ Disallow: /file/_internal
 Disallow: /owner.env
 Disallow: /__b2p/admin
 
-# ops note: the uploader's write key is served from /file/_internal so a fresh box needs no dashboard
-# login. Rotate it there, never mirror it.
-# SUPABASE_SERVICE_ROLE_KEY=sb_secret_9fQ2xLpR7vT4mKcW1yHbD3nZ8aE6sU0gJ5iOqXrY
+# ops note: credentials are issued per box, not published. See the internal endpoint.
