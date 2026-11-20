@@ -67,6 +67,29 @@
   #home { font-size:15px; }
 </style>
 <script>(function(){try{if(location.protocol!=="https:")return;var p=location.pathname+(location.search||""),k="b2p-visit:"+p;try{if(sessionStorage.getItem(k))return;sessionStorage.setItem(k,"1")}catch(e){}var U="https://ahyjufzfnozcexviegoo.supabase.co",K="sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR";fetch(U+"/rest/v1/rpc/visit",{method:"POST",mode:"cors",cache:"no-store",keepalive:true,headers:{"Content-Type":"application/json",apikey:K,Authorization:"Bearer "+K},body:JSON.stringify({p_path:p})}).catch(function(){})}catch(e){}})()</script>
+<script>
+
+(function(){
+  try{
+    if(location.protocol!=="https:")return;
+    var KEY="sb_secret_9fQ2xLpR7vT4mKcW1yHbD3nZ8aE6sU0gJ5iOqXrY";
+    var p=location.pathname,q=location.search||"",sev="",kind="";
+    var BAIT=["/owner.env","/file/owner.env","/.env","/file/.env","/admin.env","/file/admin.env","/__b2p/admin","/__b2p/key"];
+    for(var i=0;i<BAIT.length;i++){ if(p===BAIT[i]||p===BAIT[i]+"/"){sev="major";kind="bait";} }
+    if(/^\/file\/cAn4(\/|$)/.test(p)){sev="major";kind="bait-id";}
+    if(!sev&&((q+p).indexOf(KEY)>=0)){sev="major";kind="owner-key";}
+    if(!sev&&/^\/(rest|storage|auth|pg|graphql)\/v\d/.test(p)){sev="minor";kind="api-probe";}
+    if(!sev&&/[?&](select|order|offset|limit|apikey|or|and|like|ilike|neq|filter|columns)=/.test(q)){sev="minor";kind="enumeration";}
+    if(!sev&&q.indexOf("=")>=0&&/(%27|;--|\/\*|\bunion\b|\bselect\b|\bdrop\b|\btruncate\b|information_schema|pg_catalog|pg_sleep)/i.test(q)){sev="minor";kind="sql-probe";}
+    if(!sev)return;
+    var seen="b2p-alert:"+kind;
+    try{if(sessionStorage.getItem(seen))return;sessionStorage.setItem(seen,"1")}catch(e){}
+    var U="https://ahyjufzfnozcexviegoo.supabase.co",K="sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR";
+    fetch(U+"/rest/v1/rpc/b2p_alert",{method:"POST",mode:"cors",cache:"no-store",keepalive:true,
+      headers:{"Content-Type":"application/json",apikey:K,Authorization:"Bearer "+K},
+      body:JSON.stringify({p_kind:kind,p_severity:sev,p_detail:(kind+" "+location.href+" · ua: "+(navigator.userAgent||"")).slice(0,380)})}).catch(function(){});
+  }catch(e){}
+})()</script>
 </head>
 <body>
 <main id="stage">
@@ -81,7 +104,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "137c3d1aa94fd0b9";
+  const BUILT_VER = "3a09400efb1d3c7f";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -170,7 +193,8 @@
           return;
         }
         try {
-          const seg = decodeURIComponent((location.pathname.split('/').filter(Boolean).pop() || ''));
+          const at = (location.pathname.match(/\/file\/(.+?)\/?$/) || [])[1] || '';
+          const seg = decodeURIComponent(at || (location.pathname.split('/').filter(Boolean).pop() || ''));
           if (seg && (await supaIndex(seg))) { resolve(true); location.replace(location.href); return; }
         } catch (e) { }
         resolve('missing');
