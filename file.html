@@ -122,7 +122,7 @@ window.addEventListener('load', () => { checkSiteVersion(); });
 const CAPACITY = 899 * 898 * 3;          // bytes per PNG part, exactly as the encoder cuts it
 const IDS_DICT_FILE = 'IDSDICTIONARY.txt';
 const IDS_VERSION = 'v1';
-const BUILT_VER = "2b5da7fc08421789";
+const BUILT_VER = "e053f03ca9e88af4";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\nv1 df1c178d84d0d37b8df8a34e33b4d2ee97ae96b2a3f87b42d8e512fea1e50231 _FJ4n5kup6kaYMM2H0_8wjgWFrB7TpqFpz1MBWjYYb8\n";
 const IDS_ITERATIONS = 100000, IDS_IV = 12, IDS_TAG = 16;
 const PACK_MAGIC = [0x42, 0x32, 0x50, 0x5A];   // "B2PZ": the page's DEFLATE wrapper
@@ -2328,6 +2328,100 @@ function openMemberPlayer(name, src) {
   document.addEventListener('keydown', onKey);
   document.body.classList.add('b2p-player-open');
   try { media.play().catch(() => { }); } catch (e) { }
+  return wrap;
+}
+
+function openMemberPlayerList(items, index) {
+  let at = Math.max(0, Math.min(items.length - 1, index | 0));
+  const wrap = document.createElement('div');
+  wrap.className = 'b2p-lightbox';
+  wrap.innerHTML = `<style>
+    .b2p-lightbox { position:fixed; inset:0; z-index:99999; display:flex; align-items:center;
+      justify-content:center; background:rgba(4,8,16,.86); }
+    .b2p-lightbox .box { width:min(560px,94vw); max-height:92vh; display:flex; flex-direction:column;
+      background:#0b1424; border-radius:14px; overflow:hidden;
+      box-shadow:0 30px 90px rgba(0,0,0,.65); }
+    .b2p-lightbox .top { display:flex; align-items:center; gap:10px; padding:12px 14px;
+      color:#e8edf5; font:600 14px/1.3 Inter,system-ui,sans-serif; }
+    .b2p-lightbox .top b { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .b2p-lightbox .cnt { flex:0 0 auto; font-weight:500; color:#9fb0c8; font-size:13px; }
+    .b2p-lightbox .ico { flex:0 0 auto; width:34px; height:34px; border:0; border-radius:9px;
+      cursor:pointer; background:transparent; color:#cbd7e6; font-size:18px; line-height:1;
+      display:flex; align-items:center; justify-content:center; text-decoration:none; }
+    .b2p-lightbox .ico:hover { background:rgba(255,255,255,.1); color:#fff; }
+    .b2p-lightbox .ico[disabled] { opacity:.28; cursor:default; }
+    .b2p-lightbox .stage { flex:1 1 auto; display:flex; align-items:center; justify-content:center;
+      background:#000; min-height:0; }
+    .b2p-lightbox video, .b2p-lightbox img { max-width:100%; max-height:76vh; display:block;
+      background:#000; }
+    .b2p-lightbox pre { margin:0; padding:18px; max-height:76vh; overflow:auto; color:#dbe6f3;
+      font:12px/1.5 ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-word;
+      background:#0b1424; width:100%; box-sizing:border-box; }
+  </style>
+  <div class="box"><div class="top"><b></b><span class="cnt"></span>
+    <button class="ico prev" type="button" aria-label="Previous">‹</button>
+    <button class="ico next" type="button" aria-label="Next">›</button>
+    <a class="ico dl" aria-label="Download" download>⭳</a>
+    <button class="ico x" type="button" aria-label="Close">✕</button></div>
+    <div class="stage"></div></div>`;
+  const nameEl = wrap.querySelector('b');
+  const cntEl = wrap.querySelector('.cnt');
+  const stage = wrap.querySelector('.stage');
+  const prev = wrap.querySelector('.prev');
+  const next = wrap.querySelector('.next');
+  const dl = wrap.querySelector('.dl');
+  let media = null;
+  const show = (i) => {
+    at = Math.max(0, Math.min(items.length - 1, i));
+    const it = items[at];
+    nameEl.textContent = it.name;
+    cntEl.textContent = `${at + 1} / ${items.length}`;
+    dl.href = it.src;
+    dl.setAttribute('download', it.name);
+    prev.disabled = at === 0;
+    next.disabled = at === items.length - 1;
+    if (media) { try { media.pause(); } catch (e) { } media.remove(); }
+    if (it.kind === 'image' || /\.(png|jpe?g|gif|webp|bmp|avif|ico|svg)$/i.test(it.name)) {
+      media = document.createElement('img');
+      media.src = it.src;
+      media.alt = it.name;
+    } else if (it.kind === 'text') {
+      media = document.createElement('pre');
+      media.textContent = 'loading…';
+      fetch(it.src).then((r) => r.text()).then((t) => { media.textContent = t.slice(0, 200000); })
+        .catch(() => { media.textContent = 'this member cannot be read'; });
+    } else {
+      const isAudio = /^(audio)\//.test(mimeFromName(it.name) || '');
+      media = document.createElement(isAudio ? 'audio' : 'video');
+      media.controls = true;
+      media.preload = 'metadata';
+      media.src = it.src;
+      media.addEventListener('error', () => {
+        const note = document.createElement('p');
+        note.className = 'big';
+        note.textContent = 'this member cannot be streamed — use Download';
+        media.replaceWith(note);
+      });
+    }
+    stage.appendChild(media);
+  };
+  const close = () => {
+    try { if (media && media.pause) media.pause(); } catch (e) { }
+    document.removeEventListener('keydown', onKey);
+    wrap.remove();
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') { close(); return; }
+    if (e.key === 'ArrowLeft') { show(at - 1); return; }
+    if (e.key === 'ArrowRight') { show(at + 1); }
+  };
+  prev.addEventListener('click', () => show(at - 1));
+  next.addEventListener('click', () => show(at + 1));
+  wrap.querySelector('.x').addEventListener('click', close);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
+  document.addEventListener('keydown', onKey);
+  show(index);
+  document.body.appendChild(wrap);
   return wrap;
 }
 
@@ -4867,6 +4961,26 @@ function paintSkin(info, onDownload) {
   }
   const btn = $('b2p-download');
   if (btn && onDownload) btn.addEventListener('click', () => onDownload(btn));
+  if (key === 'gofile' && Array.isArray(info.items) && info.items.length) {
+    const list = info.items
+      .filter((f) => !f.dir)
+      .map((f) => {
+        const nm = String(f.path).replace(/\/$/, '').split('/').pop();
+        return { name: nm, src: memberHref(info.addr || info.name, f.path), kind: previewKind(nm) };
+      })
+      .filter((x) => x.kind);
+    if (list.length) {
+      for (const card of body.querySelectorAll('.gcard')) {
+        const href = card.getAttribute('href');
+        const at = list.findIndex((x) => x.src === href);
+        if (at < 0) continue;
+        card.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          openMemberPlayerList(list, at);
+        });
+      }
+    }
+  }
   const openPreview = async (ev) => {
     if (ev) ev.preventDefault();
     let url = null;
