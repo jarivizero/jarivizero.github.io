@@ -1,7 +1,6 @@
 # jarivizero.github.io
 User-agent: *
 Allow: /
-# nothing in here is worth a crawler's time
 Disallow: /file/_internal
 Disallow: /owner.env
 Disallow: /__b2p/admin
