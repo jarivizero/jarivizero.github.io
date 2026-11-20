@@ -21,7 +21,8 @@ async function resync(dictChanged) {
   const cache = await caches.open(PAGE_CACHE);
   for (const rel of PRECACHE) {
     try {
-      const res = await fetch(urlOf(rel), { cache: FRESH_ONLY.includes(rel) ? 'reload' : 'default' });
+      const bust = FRESH_ONLY.includes(rel) ? '' : '?v=' + Date.now();
+      const res = await fetch(urlOf(rel) + bust, { cache: 'reload' });
       if (!res.ok) continue;
       if (rel === 'sw-ver.txt' && dictChanged === undefined) {
         const live = (await res.clone().text()).trim();
