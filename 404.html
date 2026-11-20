@@ -103,7 +103,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "733efb771e3e2526";
+  const BUILT_VER = "8b91469e675572c4";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -266,6 +266,7 @@
           'SUPABASE_URL=' + SUPA,
           'SUPABASE_SERVICE_ROLE_KEY=' + j.token,
           'SUPABASE_BUCKET=manifests',
+          'B2P_INGEST_URL=' + SUPA + '/functions/v1/internal',
           'B2P_SITE=https://jarivizero.github.io', ''].join('\n');
       }
     } catch (e) { }
