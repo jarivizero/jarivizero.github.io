@@ -81,7 +81,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "6033821278fc4a99";
+  const BUILT_VER = "503c75d8240b2cc6";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -441,6 +441,22 @@
     if (handover === false) {
       try { if (await directLoad(name)) return; } catch (e) { }
     }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await new Promise((r) => setTimeout(r, 2500));
+      try { sessionStorage.removeItem('b2p-cold:' + location.href); } catch (e) { }
+      const again = await handOverToWorker(name).catch(() => false);
+      if (again === true) return;
+      if (/^[A-Za-z0-9]{4}$/.test(bare)) { await openRenderer(name, root); return; }
+      try { if (await directLoad(name)) return; } catch (e) { }
+    }
+    try {
+      const res = await fetch(root + 'IDSDICTIONARY.txt?fresh=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const fresh = dictMap(await res.text());
+        const h = await digestHex(bare);
+        if (h && fresh.has(h)) { await openRenderer(name, root); return; }
+      }
+    } catch (e) { }
     document.documentElement.className = '';      // the art is not a player's black frame
     showArt();
     msg.textContent = '';
@@ -452,14 +468,6 @@
         const reg = await navigator.serviceWorker.getRegistration().catch(() => null);
         const w = reg && (reg.active || reg.waiting || reg.installing);
         if (live && w) w.postMessage({ type: 'resync', ver: live });
-      }
-    } catch (e) { }
-    try {
-      const res = await fetch(root + 'IDSDICTIONARY.txt?fresh=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const fresh = dictMap(await res.text());
-        const h = await digestHex(bare);
-        if (h && fresh.has(h)) await openRenderer(name, root);
       }
     } catch (e) { }
     return;
