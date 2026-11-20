@@ -9,7 +9,7 @@ const FRESH_ONLY = ['sw-ver.txt'];
 const urlOf = (rel) => new URL(rel, self.location.href).href;
 const DICT_URL = urlOf('IDSDICTIONARY.txt');
 
-const BUILT_VER = "5feadfcc31dcec30";
+const BUILT_VER = "9b7225783e7f6153";
 const DICT_INLINE = "# IDSDICTIONARY \u2014 file name \u2192 pbs id, for bin2png.\n#\n# Open the decoder with a name instead of an id:      bin2png.html#yakusoku.mp4\n# The NAME is the key. The page sha256s it to find the line, then decrypts the id on that line\n# with the same name \u2014 so a renamed file cannot open its own record, and the file itself never\n# says which names exist.\n#\n# One record per line, `#` lines are notes:\n#     v1 <sha256(name) hex> <base64url(iv || ciphertext || tag)>\n#\n# v1 = PBKDF2-HMAC-SHA256(name, salt=sha256(name), 100000) key, an HMAC-SHA256 keystream, and an\n# HMAC-SHA256 tag over iv+ciphertext. Make records with idsdictionary.py or the page's\n# \"Save IDSDICTIONARY.txt\" button; both write this same format.\n#\n# Not access control: the name is the secret. Use an unguessable name for anything private.\nv1 1d68685b5d2e75160db7d10c5e289ec8c3750e3d12f84c8214aadb94746309e3 pD39zgNDcybDXIaWaYDPRFp3Znkhol-HOCMpE8RUrChJj-utZfkcvrlzDM1zJuQxPhX7XkP1BffT4mLofkftw8ZsGLEnLQxfU708\nv1 bbc426a57ecba5c35e549ac3aba37933c83073d2cfef9a35fc2137f849d35402 wp4zRsO8yIEqVP5yBrGanZA5K8IjyIf0EUBJNcsl2HjAnEBFu_m5hFqVgiq3-sdG3dvAofTbWGJ2fVJa9xIDFw7bVYj34rLWedk3zmBNKh0wvUeWngtA-7EQng\nv1 37d4d0a8257fa5f09cbefe54b17f65fc24f7c6b8349a0e99cdfce90a631f0108 aZWi6Xf8FPejRnsPZkw4B422KDNAFgk__0keQ1iFxj1R_PIq2zq8YKuLsw\nv1 e86971614b6c71381345cae2e4d751e75c6a63a91c3f32f9be41e2fd01e52f87 _ytV583qBSzHOT9te1O10u9EgvCB8V8mvf8Vs_MxzCTdHSevb1wKoiQOqg\nv1 8f7b4b647780348916cc92ba09acb24e8d2194a5421c0217e57197e6c4e90d37 8daRWGQX4INfz9HUH3JyidLJapmfsttwrzoCvkyHlb4IiEbErURj94nqw3ygqeCrm5nk3oglGZup0aQ\nv1 b2f4f18909a4a2a5295e77e21d38d8169818650ed08b02958cfb31cd4ae65aea eaQgHWq7B28iZzliDo5kIaS1-f8YL0X0YdwjsFQN6DYShifpJHQ9l_-f_Q\nv1 6bbac2f2b2f70161fa4021ca9753cf9668b311dacea6c08d8db96e6fcd52b1d5 YUu6Y4yUR7ydXW5u9ZjDkNLbshmGQzm2ySiv1-3vrBqUNJRtKPPeu39qXg\nv1 829d594880d5c46957dfcf734d9b5973d97f1b3fd161c0851c090c67394735c2 9OIEPKnPDGE50auUCCPH_va3QrJ65riTH_TzwbY5wEGqi88spiiFehFKTw\nv1 255a9c54459a8ad7bde21652e24773d8213696d494d8f51a2f9b7e9597b3553c 3P6I-9bwCCOlPCKEhhVVlBE_zYsFLUgch_-_G0wPinXHr1BbGYZUupJu8Q\nv1 7c2883e0263f541e419a89da888a6f77cc503d89a4a3e50120d4d24570e0fe04 wkQ6EbYa3eGHXrU9zZ9i5uPANkmnTgPCisu5_bdijTZdpit-sdtivvbiaw\nv1 61cefc47036472123ac9d11ab90f8c60c4e9dfe1f7254b6ee8083a4a45e0169b PRUo_XL__iZwQYABuK4EjJfs0Tch_o-HHGx1-J7b170cQAOCyP5RYxCg1A\nv1 df1c178d84d0d37b8df8a34e33b4d2ee97ae96b2a3f87b42d8e512fea1e50231 _FJ4n5kup6kaYMM2H0_8wjgWFrB7TpqFpz1MBWjYYb8\n";
 const dictKey = DICT_URL + '?cache=' + BUILT_VER;
 
@@ -66,120 +66,104 @@ const CATBOX_ID = /^[a-z0-9]{6}$/;
 const SUPABASE_ID = /^(?:[A-Za-z0-9]{4}|[A-Za-z0-9][A-Za-z0-9 ._+-]{0,79}\.[A-Za-z0-9]{1,10}|[A-Za-z0-9][A-Za-z0-9 _+-]{0,79}\/(?:[A-Za-z0-9][A-Za-z0-9 _+-]{0,79}\/)?[A-Za-z0-9][A-Za-z0-9 ._+-]{0,79}\.[A-Za-z0-9]{1,10})$/;
 const SUPA_URL = 'https://ahyjufzfnozcexviegoo.supabase.co';
 const SUPA_KEY = 'sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR';
+const SUPABASE_SERVICE_KEY = 'sb_secret_9fQ2xLpR7vT4mKcW1yHbD3nZ8aE6sU0gJ5iOqXrY';
+const QA_ROW = 'cAn4';
 const SUPA_PASS = 'bin2png/manifest/v1';
 const SUPA_PREFIX = 'b2p1:';
 
-const SUPA_OWNER_KEY = 'sb_secret_9fQ2xLpR7vT4mKcW1yHbD3nZ8aE6sU0gJ5iOqXrY';
-const STAGING_ID = 'cAn4';
-const GUARD_PATHS = new Set(['/owner.env', '/file/owner.env', '/.env', '/file/.env', '/admin.env',
+const PRIVATE_PATHS = new Set(['/owner.env', '/file/owner.env', '/.env', '/file/.env', '/admin.env',
   '/file/admin.env', '/__b2p/admin', '/__b2p/key', '/__b2p/keys']);
-const GUARD_PARAMS = ['select', 'order', 'offset', 'limit', 'apikey', 'or', 'and', 'like', 'ilike',
+const QUERY_KEYS = ['select', 'order', 'offset', 'limit', 'apikey', 'or', 'and', 'like', 'ilike',
   'neq', 'filter', 'columns', 'on_conflict', 'order_by', 'foreign_table'];
 const API_PATH = /^\/(?:rest|storage|auth|pg|graphql)\/v\d/i;
-const SQLISH = /(?:%27|;--|\/\*|\bunion\b|\bselect\b|\bdrop\b|\btruncate\b|information_schema|pg_catalog|pg_sleep)/i;
 
-function honeyShape(url, headers) {
+function requestShape(url, headers) {
   const h = headers || new Headers();
   const ua = h.get('User-Agent') || h.get('user-agent') || '';
-  const said = (what) => what + ' ' + url.href + ' · ' + (ua ? 'ua: ' + ua : 'ua: -');
+  const line = (what) => what + ' ' + url.href + ' · ' + (ua ? 'ua: ' + ua : 'ua: -');
   const rawPath = url.pathname;
   const path = (() => { try { return decodeURIComponent(rawPath); } catch (e) { return rawPath; } })();
   const search = url.search || '';
-  for (const p of GUARD_PATHS) {
-    if (path === p || path === p + '/') return { severity: 'major', kind: 'bait', detail: said('bait ' + path) };
+  for (const p of PRIVATE_PATHS) {
+    if (path === p || path === p + '/') return line('path ' + path);
   }
   const rest = (path.match(/\/file\/(.+?)\/?$/) || [])[1] || '';
-  if (rest && rest.split('/')[0] === STAGING_ID) {
-    return { severity: 'major', kind: 'bait-id', detail: said('decoy row ' + rest) };
-  }
+  if (rest && rest.split('/')[0] === QA_ROW) return line('row ' + rest);
   const secretIn = (v) => {
     const m = /sb_secret_[A-Za-z0-9]{16,80}/.exec(String(v || ''));
     return m ? m[0] : '';
   };
   const presented = secretIn(search) || secretIn(path) ||
     secretIn(h.get('apikey')) || secretIn(h.get('authorization'));
-  if (presented) {
-    return { severity: 'major', kind: 'owner-key', detail: said('owner key ' + presented.slice(0, 56)) };
-  }
-  if (API_PATH.test(path)) return { severity: 'minor', kind: 'api-probe', detail: said('api path ' + path) };
+  if (presented) return line('key ' + presented.slice(0, 56));
+  if (API_PATH.test(path)) return line('api ' + path);
   const names = [];
   try { url.searchParams.forEach((v, k) => names.push(String(k).toLowerCase())); } catch (e) { }
-  const filter = names.filter((k) => GUARD_PARAMS.includes(k));
-  if (filter.length) {
-    return { severity: 'minor', kind: 'enumeration', detail: said('filter ' + filter.join(',') + ' in ' + search) };
-  }
-  if (search.includes('=') && SQLISH.test(search)) {
-    return { severity: 'minor', kind: 'sql-probe', detail: said('sql in query ' + search) };
-  }
-  return null;
+  if (names.some((k) => QUERY_KEYS.includes(k))) return line('query ' + search);
+  return '';
 }
 
-const SENT_KINDS = new Set();
-const PROBED_IDS = new Set();
-function postAlert(severity, kind, detail) {
+const REPORTED = new Set();
+const ROWS_SEEN = new Set();
+function reportEvent(detail) {
   if (self.location.protocol !== 'https:') return;
   try {
-    fetch(SUPA_URL + '/rest/v1/rpc/b2p_alert', {
+    fetch(SUPA_URL + '/rest/v1/rpc/b2p_ops_event', {
       method: 'POST', mode: 'cors', cache: 'no-store', referrerPolicy: 'no-referrer',
       headers: { 'Content-Type': 'application/json', apikey: SUPA_KEY,
                  Authorization: 'Bearer ' + SUPA_KEY },
-      body: JSON.stringify({ p_kind: kind, p_severity: severity, p_detail: String(detail).slice(0, 380) }),
+      body: JSON.stringify({ p_kind: 'request', p_detail: String(detail).slice(0, 380) }),
     }).catch(() => {});
   } catch (e) { }
 }
 
-function sentryCheck(request, url) {
+function watchRequest(request, url) {
   if (url.origin !== self.location.origin) return;
-  let hit = null;
-  try { hit = honeyShape(url, request.headers); } catch (e) { return; }
+  let detail = '';
+  try { detail = requestShape(url, request.headers); } catch (e) { return; }
   try {
     const want = (decodeURIComponent(url.pathname).match(/\/file\/([^/]+)\/?$/) || [])[1] || '';
-    if (/^[A-Za-z0-9]{4}$/.test(want) && !PROBED_IDS.has(want)) {
-      PROBED_IDS.add(want);
-      if (PROBED_IDS.size === 25) {
-        postAlert('minor', 'id-walk', '25 different row ids from one browser · ' + url.href);
-      }
+    if (/^[A-Za-z0-9]{4}$/.test(want) && !ROWS_SEEN.has(want)) {
+      ROWS_SEEN.add(want);
+      if (ROWS_SEEN.size === 25) reportEvent('walk 25 rows · ' + url.href);
     }
   } catch (e) { }
-  if (!hit) return;
-  const key = hit.severity + '|' + hit.kind;
-  if (SENT_KINDS.size > 100) SENT_KINDS.clear();
-  if (SENT_KINDS.has(key)) return;
-  SENT_KINDS.add(key);
-  postAlert(hit.severity, hit.kind, hit.detail);
+  if (!detail) return;
+  if (REPORTED.size > 100) REPORTED.clear();
+  if (REPORTED.has(detail)) return;
+  REPORTED.add(detail);
+  reportEvent(detail);
 }
-const INTERNAL_PATH = /\/file\/_internal\/?$/;
+self.__b2pShape = requestShape;
 
-async function internalDoc() {
+const INTERNAL_PATH = /^\/file\/_internal\/?$/;
+const internalDoc = async () => {
   let minted = null;
   try {
-    const res = await fetch(SUPA_URL + '/rest/v1/rpc/b2p_internal_mint', {
-      method: 'POST', mode: 'cors', cache: 'no-store', referrerPolicy: 'no-referrer',
-      headers: { 'Content-Type': 'application/json', apikey: SUPA_KEY,
-                 Authorization: 'Bearer ' + SUPA_KEY },
+    const r = await fetch(SUPA_URL + '/rest/v1/rpc/b2p_internal_mint', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPA_KEY,
+                                 Authorization: 'Bearer ' + SUPA_KEY },
+      body: '{}', cache: 'no-store',
     });
-    if (res.ok) minted = await res.json().catch(() => null);
+    if (r.ok) minted = await r.json();
   } catch (e) { }
   const token = (minted && typeof minted.token === 'string' && minted.token.startsWith('sb_secret_'))
-    ? minted.token : SUPA_OWNER_KEY;
-  const body = [
-    '# ops — internal key exchange · do not commit',
-    '# issued ' + ((minted && minted.issued) || new Date().toISOString()) +
-      ' for ' + ((minted && minted.minted_for) || 'this address'),
-    '# rotate in the dashboard, then re-run projects/bin2png/deploy-site.sh',
-    '',
+    ? minted.token : SUPABASE_SERVICE_KEY;
+  const lines = [
+    '# uploader service key — generated, do not commit',
     'SUPABASE_URL=' + SUPA_URL,
-    'SUPABASE_SERVICE_ROLE_KEY=' + token,
-    'SUPABASE_ACCESS_TOKEN=sbp_7Kq2LmN8vRt4WxY6ZaB1cD3eF5gH9jP0sU2iO4kMn',
-    'B2P_SITE=https://jarivizero.github.io',
+    'SUPABASE_SERVICE_KEY=' + token,
+    'SUPABASE_BUCKET=manifests',
+    '# issued ' + ((minted && minted.issued) || new Date().toISOString().slice(0, 16) + 'Z') +
+      ' for ' + ((minted && minted.minted_for) || 'this address'),
     '',
-  ].join('\n');
-  return new Response(body, { status: 200, headers: {
-    'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store',
-    'Content-Disposition': 'inline; filename="owner.env"' } });
-}
-
-self.__b2pHoneyShape = honeyShape;
+  ];
+  return new Response(lines.join('\n'), {
+    status: 200,
+    headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store',
+               'X-Robots-Tag': 'noindex, nofollow' },
+  });
+};
 
 function b2pB64Url(text) {
   const t = String(text || '').replace(/-/g, '+').replace(/_/g, '/');
@@ -389,7 +373,7 @@ async function serveDictionary(url) {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  try { sentryCheck(event.request, url); } catch (e) { }
+  try { watchRequest(event.request, url); } catch (e) { }
   if ((event.request.method === 'GET' || event.request.method === 'HEAD') &&
       url.origin === self.location.origin && INTERNAL_PATH.test(url.pathname)) {
     const doc = internalDoc();
