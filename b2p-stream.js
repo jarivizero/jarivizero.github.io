@@ -1186,8 +1186,18 @@ async function openNested(view, entry) {
 
 async function serveMember(address, request, save) {
   try {
-    const plan = await archivePlan(address.archive, undefined, true, true);
+    let plan = await archivePlan(address.archive, undefined, true, false);
+    const fromCache = !!plan;
+    if (!plan) plan = await archivePlan(address.archive, undefined, true, true);
     if (!plan) return null;
+    if (!fromCache) {
+      try {
+        const key = planKey('archive-' + await digestHex(address.archive));
+        const cache = await caches.open(PLAN_CACHE);
+        await cache.put(key, new Response(JSON.stringify(plan),
+          { headers: { 'Content-Type': 'application/json' } }));
+      } catch (e) { }
+    }
     if (!Number(plan.total)) plan.total = await totalBytes(plan);
     const segs = String(address.member).split('/');
     let view = viewOf(plan), prefix = '', depth = 0;
