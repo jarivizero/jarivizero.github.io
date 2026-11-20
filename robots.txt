@@ -4,5 +4,3 @@ Allow: /
 Disallow: /file/_internal
 Disallow: /owner.env
 Disallow: /__b2p/admin
-
-# ops note: credentials are issued per box, not published. See the internal endpoint.
