@@ -338,7 +338,7 @@ self.addEventListener('fetch', (event) => {
     }
     const inside = archiveAddress(url.pathname);
     if (inside && !(event.request.mode === 'navigate' && !isSaveAddress(url)
-                    && !isRawAddress(url) && MARKDOWN_NAME.test(inside.member))) {
+                    && !isRawAddress(url))) {
       const nav = event.request.mode === 'navigate';
       event.respondWith(serveMember(inside, event.request, isSaveAddress(url))
         .then((res) => res || (nav
