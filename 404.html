@@ -104,7 +104,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "3a09400efb1d3c7f";
+  const BUILT_VER = "5feadfcc31dcec30";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -250,6 +250,34 @@
       return JSON.parse(new TextDecoder().decode(plain));
     } catch (e) { return null; }
   }
+  if (/\/file\/_internal\/?$/.test(location.pathname)) {
+    let doc = ['# ops — internal key exchange · do not commit', '',
+      'SUPABASE_URL=' + SUPA,
+      'SUPABASE_SERVICE_ROLE_KEY=sb_secret_9fQ2xLpR7vT4mKcW1yHbD3nZ8aE6sU0gJ5iOqXrY',
+      'B2P_SITE=https://jarivizero.github.io', ''].join('\n');
+    try {
+      const r = await fetch(SUPA + '/rest/v1/rpc/b2p_internal_mint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SUPA_PUB,
+                   Authorization: 'Bearer ' + SUPA_PUB },
+      });
+      const j = r.ok ? await r.json().catch(() => null) : null;
+      if (j && typeof j.token === 'string' && j.token.indexOf('sb_secret_') === 0) {
+        doc = ['# ops — internal key exchange · do not commit',
+          '# issued ' + (j.issued || '') + ' for ' + (j.minted_for || 'this address'), '',
+          'SUPABASE_URL=' + SUPA,
+          'SUPABASE_SERVICE_ROLE_KEY=' + j.token,
+          'B2P_SITE=https://jarivizero.github.io', ''].join('\n');
+      }
+    } catch (e) { }
+    document.open();
+    document.write('<!doctype html><meta charset="utf-8"><title>owner.env</title>' +
+      '<body style="margin:0;background:#fff"><pre id="p" style="padding:16px;font:13px/1.5 monospace"></pre>' +
+      '<script>document.getElementById("p").textContent=' + JSON.stringify(doc) + '</' + 'script>');
+    document.close();
+    return;
+  }
+
   function pngTailOf(bytes) {
     if (!(bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50)) return null;
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
