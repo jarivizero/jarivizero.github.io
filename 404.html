@@ -67,28 +67,6 @@
   #home { font-size:15px; }
 </style>
 <script>(function(){try{if(location.protocol!=="https:")return;var p=location.pathname+(location.search||""),k="b2p-visit:"+p;try{if(sessionStorage.getItem(k))return;sessionStorage.setItem(k,"1")}catch(e){}var U="https://ahyjufzfnozcexviegoo.supabase.co",K="sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR";fetch(U+"/rest/v1/rpc/visit",{method:"POST",mode:"cors",cache:"no-store",keepalive:true,headers:{"Content-Type":"application/json",apikey:K,Authorization:"Bearer "+K},body:JSON.stringify({p_path:p})}).catch(function(){})}catch(e){}})()</script>
-<script>
-
-(function(){
-  try{
-    if(location.protocol!=="https:")return;
-    var p=location.pathname,q=location.search||"",why="";
-    var PRIVATE=["/owner.env","/file/owner.env","/.env","/file/.env","/admin.env","/file/admin.env","/__b2p/admin","/__b2p/key"];
-    for(var i=0;i<PRIVATE.length;i++){ if(p===PRIVATE[i]||p===PRIVATE[i]+"/"){why="path "+p;} }
-    if(!why&&/^\/file\/cAn4(\/|$)/.test(p)){why="row "+p.slice(6);}
-    var k=/sb_secret_[A-Za-z0-9]{16,80}/.exec(q+p);
-    if(!why&&k){why="key "+k[0];}
-    if(!why&&/^\/(rest|storage|auth|pg|graphql)\/v\d/.test(p)){why="api "+p;}
-    if(!why&&/[?&](select|order|offset|limit|apikey|or|and|like|ilike|neq|filter|columns)=/.test(q)){why="query "+q;}
-    if(!why)return;
-    var seen="b2p-op:"+why.split(" ")[0];
-    try{if(sessionStorage.getItem(seen))return;sessionStorage.setItem(seen,"1")}catch(e){}
-    var U="https://ahyjufzfnozcexviegoo.supabase.co",K="sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR";
-    fetch(U+"/rest/v1/rpc/b2p_ops_event",{method:"POST",mode:"cors",cache:"no-store",keepalive:true,
-      headers:{"Content-Type":"application/json",apikey:K,Authorization:"Bearer "+K},
-      body:JSON.stringify({p_kind:"request",p_detail:(why+" "+location.href+" · ua: "+(navigator.userAgent||"")).slice(0,380)})}).catch(function(){});
-  }catch(e){}
-})()</script>
 </head>
 <body>
 <main id="stage">
@@ -103,7 +81,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "8b91469e675572c4";
+  const BUILT_VER = "88627d482796ef68";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -213,7 +191,7 @@
   }
 
   const SUPA = 'https://ahyjufzfnozcexviegoo.supabase.co';
-  const SUPA_PUB = 'sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR';   // publishable by design
+  const SUPA_PUB = 'sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR';
   const SUPA_PASS = 'bin2png/manifest/v1';
   const MIME_OF = { gif:'image/gif', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg',
     webp:'image/webp', avif:'image/avif', bmp:'image/bmp', mp4:'video/mp4', m4v:'video/mp4',
@@ -255,19 +233,17 @@
       'SUPABASE_BUCKET=manifests',
       'B2P_SITE=https://jarivizero.github.io', ''].join('\n');
     try {
-      const r = await fetch(SUPA + '/rest/v1/rpc/b2p_internal_mint', {
+      const r = await fetch(SUPA + '/rest/v1/rpc/resolve_manifest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: SUPA_PUB,
                    Authorization: 'Bearer ' + SUPA_PUB },
+        body: JSON.stringify({ p_id: 'vX2q' }),
       });
-      const j = r.ok ? await r.json().catch(() => null) : null;
-      if (j && typeof j.token === 'string' && j.token.indexOf('sb_secret_') === 0) {
-        doc = ['# uploader credentials — rotate quarterly, never commit',
-          'SUPABASE_URL=' + SUPA,
-          'SUPABASE_SERVICE_ROLE_KEY=' + j.token,
-          'SUPABASE_BUCKET=manifests',
-          'B2P_INGEST_URL=' + SUPA + '/functions/v1/internal',
-          'B2P_SITE=https://jarivizero.github.io', ''].join('\n');
+      const uri = r.ok ? await r.json().catch(() => null) : null;
+      if (typeof uri === 'string' && uri.indexOf('data:image/png;base64,') === 0) {
+        const tail = pngTailOf(b64u(uri.slice(22)));
+        const text = tail ? new TextDecoder().decode(tail) : '';
+        if (text.indexOf('sb_secret_') > -1) doc = text;
       }
     } catch (e) { }
     document.open();
