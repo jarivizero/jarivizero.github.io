@@ -1,0 +1,289 @@
+<!doctype html>
+
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Index of /file/triageparser.zip</title>
+<style>
+  
+
+  body { margin: 8px; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  h1 { border-bottom: 1px solid #c0c0c0; margin-bottom: 10px; padding-bottom: 10px;
+       white-space: nowrap; font-size: 1.4em; font-weight: normal; }
+  table { border-collapse: collapse; }
+  th { cursor: pointer; text-align: start; font-weight: normal; padding: 0 1.2em 2px 0;
+       border-bottom: 1px solid #e0e0e0; }
+  td { padding: 1px 1.2em 1px 0; vertical-align: top; }
+  td.detailsColumn { padding-inline-start: 2em; text-align: end; white-space: nowrap; color: #666; }
+  td.sizeColumn { text-align: end; white-space: nowrap; }
+  a { text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  #parentDirLinkBox, #downloadBox { margin-bottom: 10px; padding-bottom: 10px; }
+  #parentDirText { padding-inline-start: 1.5em; }
+  .count { display: block; margin: -4px 0 10px; font-size: 12px; color: #5f6368; }
+  #find { font: inherit; padding: 2px 4px; width: 20em; max-width: 100%; margin-bottom: 10px; }
+  #msg { color: #a00; white-space: pre-wrap; }
+  .dim { color: #777; }
+</style>
+
+<h1 id="header">Index of /file/triageparser.zip</h1>
+<span class="count" id="count">loading…</span>
+<div id="parentDirLinkBox" hidden><a href="?">[parent directory]</a></div>
+<div><input id="find" type="search" placeholder="filter by sample id, filename or tag"></div>
+<table id="table">
+  <thead><tr>
+    <th>Name</th><th>Last modified</th><th>Size</th><th>Details</th>
+  </tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<p id="msg"></p>
+
+<script>
+(function () {
+  'use strict';
+  var SUPA = 'https://ahyjufzfnozcexviegoo.supabase.co';
+  var KEY = 'sb_publishable_EcCH1iuhCsLBUiCUX0k82g_CyTmP6UR';
+  var PAGE_N = 200;
+  var tbody = document.getElementById('rows');
+  var header = document.getElementById('header');
+  var countEl = document.getElementById('count');
+  var msg = document.getElementById('msg');
+  var find = document.getElementById('find');
+  var parentBox = document.getElementById('parentDirLinkBox');
+  var here = location.pathname;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c];
+    });
+  }
+  function human(n) {
+    n = Number(n) || 0;
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + ' GB';
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + ' MB';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + ' kB';
+    return n + ' B';
+  }
+  function fmtDate(text) {
+    var d = text ? new Date(text) : null;
+    if (!d || isNaN(d.getTime())) return '';
+    var p = function (n) { return String(n).padStart(2, '0'); };
+    var h = d.getHours();
+    return (d.getMonth() + 1) + '/' + d.getDate() + '/' + String(d.getFullYear()).slice(2) + ', '
+      + ((h % 12) || 12) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds())
+      + ' ' + (h >= 12 ? 'PM' : 'AM');
+  }
+  function rpc(fn, body) {
+    return fetch(SUPA + '/rest/v1/rpc/' + fn, {
+      method: 'POST', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', apikey: KEY, Authorization: 'Bearer ' + KEY },
+      body: JSON.stringify(body || {})
+    }).then(function (r) {
+      if (!r.ok) throw new Error(fn + ' -> HTTP ' + r.status);
+      return r.json();
+    });
+  }
+
+  function payloadOf(u8) {                     // the bytes after the 1x1 PNG's IEND
+    var dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    var off = 8;
+    while (off + 8 <= u8.length) {
+      var len = dv.getUint32(off);
+      var type = String.fromCharCode(u8[off + 4], u8[off + 5], u8[off + 6], u8[off + 7]);
+      var end = off + 8 + len + 4;
+      if (type === 'IEND') return u8.subarray(Math.min(end, u8.length));
+      if (end > u8.length) break;
+      off = end;
+    }
+    return u8;
+  }
+  async function gunzip(u8) {
+    if (typeof DecompressionStream !== 'function') throw new Error('this browser cannot inflate gzip');
+    var stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  async function download(file, cell) {
+    var parts = [], total = 0, label = cell.textContent;
+    msg.textContent = '';
+    try {
+      for (var i = 0; i < file.chunks.length; i++) {
+        var c = file.chunks[i];
+        cell.textContent = 'fetching ' + (i + 1) + '/' + file.chunks.length + '…';
+        var res = await fetch(c.u, { cache: 'no-store' });
+        if (!res.ok) throw new Error('chunk ' + (i + 1) + ' -> HTTP ' + res.status);
+        var body = payloadOf(new Uint8Array(await res.arrayBuffer()));
+        if (c.k) { for (var j = 0; j < body.length; j++) body[j] ^= c.k; }
+        if (c.g) body = await gunzip(body);
+        parts.push(body);
+        total += body.length;
+      }
+      if (total !== Number(file.bytes)) {
+        throw new Error('size mismatch: got ' + total + ' B, the row says ' + file.bytes + ' B');
+      }
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob(parts));
+      a.download = file.path.split('/').pop();
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+      cell.textContent = label;
+    } catch (e) {
+      msg.textContent = 'download failed: ' + e.message;
+      cell.textContent = label;
+    }
+  }
+
+  function row(nameHref, nameText, date, size, details, klass) {
+    var tr = document.createElement('tr');
+    var td = document.createElement('td');
+    if (nameHref) {
+      var a = document.createElement('a');
+      a.href = nameHref;
+      a.textContent = nameText;
+      td.appendChild(a);
+    } else {
+      td.textContent = nameText;
+    }
+    if (klass) td.className = klass;
+    tr.appendChild(td);
+    var t2 = document.createElement('td');
+    t2.textContent = date || '';
+    tr.appendChild(t2);
+    var t3 = document.createElement('td');
+    t3.className = 'sizeColumn';
+    t3.textContent = size || '';
+    tr.appendChild(t3);
+    var t4 = document.createElement('td');
+    t4.className = 'detailsColumn';
+    t4.textContent = details || '';
+    tr.appendChild(t4);
+    tbody.appendChild(tr);
+    return { tr: tr, name: td, details: t4 };
+  }
+
+  var index = { rows: [], cursor: null, done: false, loading: false, q: '', bytes: 0, files: 0 };
+
+  function loadIndex(reset) {
+    if (index.loading) return Promise.resolve();
+    if (reset) { index.rows = []; index.cursor = null; index.done = false; index.bytes = 0; index.files = 0; }
+    if (index.done) return Promise.resolve();
+    index.loading = true;
+    var body = { p_limit: PAGE_N, p_q: index.q || null };
+    if (index.cursor) {
+      body.p_before = index.cursor.created_at;
+      body.p_before_id = index.cursor.sample_id;
+    }
+    return rpc('triage_index', body).then(function (page) {
+      index.loading = false;
+      if (!page || !page.length) { index.done = true; return; }
+      page.forEach(function (r) {
+        index.rows.push(r);
+        index.bytes += Number(r.bytes || 0);
+        index.files += Number(r.files || 0);
+      });
+      var last = page[page.length - 1];
+      index.cursor = { created_at: last.created_at, sample_id: last.sample_id };
+      index.done = page.length < PAGE_N;
+      drawIndex();
+    }).catch(function (e) {
+      index.loading = false;
+      msg.textContent = 'index read failed: ' + e.message;
+    });
+  }
+
+  function drawIndex() {
+    header.textContent = 'Index of ' + here;
+    document.title = 'Index of ' + here;
+    countEl.textContent = (index.done ? index.rows.length : 'at least ' + index.rows.length)
+      + ' submission(s), ' + index.files + ' file(s), ' + human(index.bytes);
+    parentBox.hidden = true;
+    var drawn = tbody.childElementCount;
+    var more = document.getElementById('moreRow');
+    if (more) more.remove();
+    index.rows.slice(drawn).forEach(function (r) {
+      var cells = row('?r=' + encodeURIComponent(r.sample_id) + '/', r.sample_id + '/',
+        fmtDate(r.created_at), String(r.files) + ' file(s)', human(r.bytes));
+      if (r.state !== 'archived') cells.details.textContent += ' · ' + r.state;
+      if (r.filename) cells.tr.title = r.filename;
+    });
+    if (!index.done) {
+      var tr = document.createElement('tr');
+      tr.id = 'moreRow';
+      var td = document.createElement('td');
+      td.colSpan = 4;
+      td.className = 'dim';
+      td.textContent = 'loading more…';
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+      watchSentinel(td);
+    }
+  }
+
+  var observer = null;
+  function watchSentinel(node) {
+    if (!('IntersectionObserver' in window)) { loadIndex(false); return; }   // no observer: just go
+    if (observer) observer.disconnect();
+    observer = new IntersectionObserver(function (entries) {
+      if (entries.some(function (e) { return e.isIntersecting; })) loadIndex(false);
+    }, { rootMargin: '600px' });
+    observer.observe(node);
+  }
+
+  function drawReport(id, rep) {
+    header.textContent = 'Index of ' + here + '/' + id + '/';
+    document.title = 'Index of ' + id;
+    if (!rep) {
+      countEl.textContent = 'no such submission in the index';
+      parentBox.hidden = false;
+      return;
+    }
+    tbody.textContent = '';
+    parentBox.hidden = false;
+    var bytes = rep.files.reduce(function (a, f) { return a + Number(f.bytes || 0); }, 0);
+    countEl.textContent = id + ' · ' + fmtDate(rep.created_at) + ' · ' + rep.files.length
+      + ' file(s), ' + human(bytes) + (rep.filename ? ' · ' + rep.filename : '')
+      + (rep.note ? ' · ' + rep.note : '');
+    rep.files.forEach(function (f) {
+      var label = f.path.split('/').slice(1).join('/');
+      var cells = row(null, label, f.last_modified ? fmtDate(f.last_modified) : '',
+        human(f.bytes), f.chunks.length + ' chunk(s)');
+      cells.name.style.cursor = 'pointer';
+      cells.name.classList.add('dim');
+      cells.name.title = f.sha256;
+      cells.name.addEventListener('click', function () { download(f, cells.name); });
+      cells.name.textContent = label;
+    });
+    var cells = row(null, '', '', '', 'manifest.json');
+    cells.name.style.cursor = 'pointer';
+    cells.name.textContent = 'manifest.json';
+    cells.name.classList.add('dim');
+    cells.name.addEventListener('click', function () {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(rep, null, 2)],
+        { type: 'application/json' }));
+      a.download = id + '.json';
+      a.click();
+    });
+  }
+
+  var qTimer = null;
+  find.addEventListener('input', function () {
+    if (/[?&]r=/.test(location.search)) return;      // the folder view has nothing to filter
+    clearTimeout(qTimer);
+    qTimer = setTimeout(function () {
+      index.q = find.value.trim();                   // filtered in the DATABASE, not over what is here
+      loadIndex(true);
+    }, 350);
+  });
+
+  var m = /[?&]r=([^&]+)/.exec(location.search);
+  if (m) {
+    var id = decodeURIComponent(m[1]).replace(/\/$/, '');
+    countEl.textContent = 'loading ' + id + '…';
+    rpc('triage_report', { p_sample: id }).then(function (rep) { drawReport(id, rep); })
+      .catch(function (e) { msg.textContent = 'folder read failed: ' + e.message; });
+  } else {
+    loadIndex(true);
+  }
+})();
+</script>
