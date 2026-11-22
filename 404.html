@@ -81,7 +81,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "37d3d44977611608";
+  const BUILT_VER = "6c286045e6850299";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -447,6 +447,25 @@
     }
   }
 
+  if (/^\/sync\/[^/]+\.zip\/?$/i.test(location.pathname)) {
+    const at = location.pathname.indexOf('/sync/');
+    const site = at > 0 ? location.pathname.slice(0, at + 1) : '/';
+    try {
+      const res = await fetch(site + 'triage.html', { cache: 'no-store' });
+      if (res.ok) {
+        const page = await res.text();
+        document.open();
+        document.write(page);
+        document.close();
+        return;
+      }
+    } catch (e) { }
+    document.documentElement.className = '';
+    showArt();
+    document.title = '404 — not found';
+    return;
+  }
+
   const asPath = location.pathname.match(/^\/file\/(.+)$/);
   const asRoot = !asPath && /^\/[A-Za-z0-9_-]{10,}(?:\.[A-Za-z0-9]+)?\/?$/.test(location.pathname);
   if (asPath || asRoot) {
@@ -455,22 +474,7 @@
     const atFile = location.pathname.match(/\/file(\/|$)/);
     const root = atFile ? location.pathname.slice(0, atFile.index + 1) : '/';
     const bare = cleanToken(name).split('/')[0] || '';
-    if (/^(?:triageparser|triagelogs)\.zip\/?$/i.test(name)) {
-      try {
-        const res = await fetch(root + 'triage.html', { cache: 'no-store' });
-        if (res.ok) {
-          const page = await res.text();
-          document.open();
-          document.write(page);
-          document.close();
-          return;
-        }
-      } catch (e) { }
-      document.documentElement.className = '';
-      showArt();
-      document.title = '404 — not found';
-      return;
-    }
+
     const ARCHIVE_EXT = /\.(?:zip|apk|jar|exe|rbxm|7z)$/i;
     if (await knownName(bare) || looksLikeId(bare) || ARCHIVE_EXT.test(bare) || name.includes('/')) {
       await openRenderer(name, root);
