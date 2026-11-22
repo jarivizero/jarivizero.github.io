@@ -5,30 +5,32 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Index of /file/triageparser.zip</title>
 <style>
+
+  h1 { border-bottom: 1px solid #c0c0c0; margin-bottom: 10px; padding-bottom: 10px; white-space: nowrap; }
+  table { border-collapse: collapse; }
+  th { cursor: pointer; }
+  td.detailsColumn { padding-inline-start: 2em; text-align: end; white-space: nowrap; }
+  a.icon { padding-inline-start: 1.5em; text-decoration: none; user-select: auto; }
+  a.icon:hover { text-decoration: underline; }
+  a.file { background: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAABnRSTlMAAAAAAABupgeRAAABEElEQVR42nRRx3HDMBC846AHZ7sP54BmWAyrsP588qnwlhqw/k4v5ZwWxM1hzmGRgV1cYqrRarXoH2w2m6qqiqKIR6cPtzc3xMSML2Te7XZZlnW7Pe/91/dX47WRBHuA9oyGmRknzGDjab1ePzw8bLfb6WRalmW4ip9FDVpYSWZgOp12Oh3nXJ7nxoJSGEciteP9y+fH52q1euv38WosqA6T2gGOT44vry7BEQtJkMAMMpa6JagAMcUfWYa4hkkzAc7fFlSjwqCoOUYAF5RjHZPVCFBOtSBGfgUDji3c3jpibeEMQhIMh8NwshqyRsBJgvF4jMs/YlVR5KhgNpuBLzk0OcUiR3CMhcPaOzsZiAAA/AjmaB3WZIkAAAAASUVORK5CYII=") left top no-repeat; }
+  a.dir { background: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABt0lEQVR42oxStZoWQRCs2cXdHTLcHZ6EjAwnQWIkJyQlRt4Cd3d3d1n5d7q7ju1zv/q+mh6taQsk8fn29kPDRo87SDMQcNAUJgIQkBjdAoRKdXjm2mOH0AqS+PlkP8sfp0h93iu/PDji9s2FzSSJVg5ykZqWgfGRr9rAAAQiDFoB1OfyESZEB7iAI0lHwLREQBcQQKqo8p+gNUCguwCNAAUQAcFOb0NNGjT+BbUC2YsHZpWLhC6/m0chqIoM1LKbQIIBwlTQE1xAo9QDGDPYf6rkTpPc92gCUYVJAZjhyZltJ95f3zuvLYRGWWCUNkDL2333McBh4kaLlxg+aTmyL7c2xTjkN4Bt7oE3DBP/3SRz65R/bkmBRPGzcRNHYuzMjaj+fdnaFoJUEdTSXfaHbe7XNnMPyqryPcmfY+zURaAB7SHk9cXSH4fQ5rojgCAVIuqCNWgRhLYLhJB4k3iZfIPtnQiCpjAzeBIRXMA6emAqoEbQSoDdGxFUrxS1AYcpaNbBgyQBGJEOnYOeENKR/iAd1npusI4C75/c3539+nbUjOgZV5CkAU27df40lH+agUdIuA/EAgDmZnwZlhDc0wAAAABJRU5ErkJggg==") left top no-repeat; }
+  a.up { background: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAACM0lEQVR42myTA+w1RxRHz+zftmrbdlTbtq04qRGrCmvbDWp9tq3a7tPcub8mj9XZ3eHOGQdJAHw77/LbZuvnWy+c/CIAd+91CMf3bo+bgcBiBAGIZKXb19/zodsAkFT+3px+ssYfyHTQW5tr05dCOf3xN49KaVX9+2zy1dX4XMk+5JflN5MBPL30oVsvnvEyp+18Nt3ZAErQMSFOfelCFvw0HcUloDayljZkX+MmamTAMTe+d+ltZ+1wEaRAX/MAnkJdcujzZyErIiVSzCEvIiq4O83AG7LAkwsfIgAnbncag82jfPPdd9RQyhPkpNJvKJWQBKlYFmQA315n4YPNjwMAZYy0TgAweedLmLzTJSTLIxkWDaVCVfAbbiKjytgmm+EGpMBYW0WwwbZ7lL8anox/UxekaOW544HO0ANAshxuORT/RG5YSrjlwZ3lM955tlQqbtVMlWIhjwzkAVFB8Q9EAAA3AFJ+DR3DO/Pnd3NPi7H117rAzWjpEs8vfIqsGZpaweOfEAAFJKuM0v6kf2iC5pZ9+fmLSZfWBVaKfLLNOXj6lYY0V2lfyVCIsVzmcRV9Y0fx02eTaEwhl2PDrXcjFdYRAohQmS8QEFLCLKGYA0AeEakhCCFDXqxsE0AQACgAQp5w96o0lAXuNASeDKWIvADiHwigfBINpWKtAXJvCEKWgSJNbRvxf4SmrnKDpvZavePu1K/zu/due1X/6Nj90MBd/J2Cic7WjBp/jUdIuA8AUtd65M+PzXIAAAAASUVORK5CYII=") left top no-repeat; }
+  html[dir=rtl] a { background-position-x: right; }
+  #parentDirLinkBox, #downloadBox { margin-bottom: 10px; padding-bottom: 10px; }
+  .views-count { display: block; margin: -4px 0 10px; font-size: 12px; color: #5f6368; }
   
 
-  body { margin: 8px; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  h1 { border-bottom: 1px solid #c0c0c0; margin-bottom: 10px; padding-bottom: 10px;
-       white-space: nowrap; font-size: 1.4em; font-weight: normal; }
-  table { border-collapse: collapse; }
-  th { cursor: pointer; text-align: start; font-weight: normal; padding: 0 1.2em 2px 0;
-       border-bottom: 1px solid #e0e0e0; }
-  td { padding: 1px 1.2em 1px 0; vertical-align: top; }
-  td.detailsColumn { padding-inline-start: 2em; text-align: end; white-space: nowrap; color: #666; }
-  td.sizeColumn { text-align: end; white-space: nowrap; }
-  a { text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  #parentDirLinkBox, #downloadBox { margin-bottom: 10px; padding-bottom: 10px; }
-  #parentDirText { padding-inline-start: 1.5em; }
-  .count { display: block; margin: -4px 0 10px; font-size: 12px; color: #5f6368; }
-  #find { font: inherit; padding: 2px 4px; width: 20em; max-width: 100%; margin-bottom: 10px; }
-  #msg { color: #a00; white-space: pre-wrap; }
-  .dim { color: #777; }
+  .views-count[hidden] { display: none; }
+
+  
+
+  #find { font: inherit; margin: 0 0 10px; padding: 1px 3px; width: 20em; max-width: 100%; }
+  #msg { color: #b42318; white-space: pre-wrap; }
 </style>
 
 <h1 id="header">Index of /file/triageparser.zip</h1>
 <span class="count" id="count">loading…</span>
-<div id="parentDirLinkBox" hidden><a href="?">[parent directory]</a></div>
+<div id="parentDirLinkBox" hidden><a id="parentDirLink" class="icon up" href="?"><span id="parentDirText">[parent directory]</span></a></div>
 <div><input id="find" type="search" placeholder="filter by sample id, filename or tag"></div>
 <table id="table">
   <thead><tr>
@@ -157,18 +159,14 @@
     }
   }
 
-  function row(nameHref, nameText, date, size, details, klass) {
+  function row(nameHref, nameText, date, size, details, iconClass) {
     var tr = document.createElement('tr');
     var td = document.createElement('td');
-    if (nameHref) {
-      var a = document.createElement('a');
-      a.href = nameHref;
-      a.textContent = nameText;
-      td.appendChild(a);
-    } else {
-      td.textContent = nameText;
-    }
-    if (klass) td.className = klass;
+    var a = document.createElement('a');
+    a.className = iconClass || 'icon file';
+    a.href = nameHref || '#';
+    a.textContent = nameText;
+    td.appendChild(a);
     tr.appendChild(td);
     var t2 = document.createElement('td');
     t2.textContent = date || '';
@@ -226,7 +224,7 @@
     if (more) more.remove();
     index.rows.slice(drawn).forEach(function (r) {
       var cells = row('?r=' + encodeURIComponent(r.sample_id) + '/', r.sample_id + '/',
-        fmtDate(r.created_at), String(r.files) + ' file(s)', human(r.bytes));
+        fmtDate(r.created_at), String(r.files) + ' file(s)', human(r.bytes), 'icon dir');
       if (r.state !== 'archived') cells.details.textContent += ' · ' + r.state;
       if (r.filename) cells.tr.title = r.filename;
     });
@@ -271,17 +269,13 @@
       var label = f.path.split('/').slice(1).join('/');
       var cells = row(null, label, f.last_modified ? fmtDate(f.last_modified) : '',
         human(f.bytes), f.chunks.length + ' chunk(s)');
-      cells.name.style.cursor = 'pointer';
-      cells.name.classList.add('dim');
-      cells.name.title = f.sha256;
-      cells.name.addEventListener('click', function () { download(f, cells.name); });
-      cells.name.textContent = label;
+      var anchor = cells.name.firstChild;
+      anchor.title = f.sha256;
+      anchor.addEventListener('click', function (ev) { ev.preventDefault(); download(f, anchor); });
     });
-    var cells = row(null, '', '', '', 'manifest.json');
-    cells.name.style.cursor = 'pointer';
-    cells.name.textContent = 'manifest.json';
-    cells.name.classList.add('dim');
-    cells.name.addEventListener('click', function () {
+    var cells = row('#', 'manifest.json', '', '', 'manifest.json', 'icon file');
+    cells.name.firstChild.addEventListener('click', function (ev) {
+      ev.preventDefault();
       var a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([JSON.stringify(rep, null, 2)],
         { type: 'application/json' }));
