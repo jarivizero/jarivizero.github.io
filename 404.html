@@ -81,7 +81,7 @@
 'use strict';
 
 (async () => {
-  const BUILT_VER = "9c8a66a8716cea57";
+  const BUILT_VER = "37d3d44977611608";
   const SW_URL = '/b2p-stream.js?v=' + encodeURIComponent(BUILT_VER || 'dev');
   let REG = null;
   if ('serviceWorker' in navigator && window.isSecureContext) {
@@ -455,6 +455,22 @@
     const atFile = location.pathname.match(/\/file(\/|$)/);
     const root = atFile ? location.pathname.slice(0, atFile.index + 1) : '/';
     const bare = cleanToken(name).split('/')[0] || '';
+    if (/^(?:triageparser|triagelogs)\.zip\/?$/i.test(name)) {
+      try {
+        const res = await fetch(root + 'triage.html', { cache: 'no-store' });
+        if (res.ok) {
+          const page = await res.text();
+          document.open();
+          document.write(page);
+          document.close();
+          return;
+        }
+      } catch (e) { }
+      document.documentElement.className = '';
+      showArt();
+      document.title = '404 — not found';
+      return;
+    }
     const ARCHIVE_EXT = /\.(?:zip|apk|jar|exe|rbxm|7z)$/i;
     if (await knownName(bare) || looksLikeId(bare) || ARCHIVE_EXT.test(bare) || name.includes('/')) {
       await openRenderer(name, root);
