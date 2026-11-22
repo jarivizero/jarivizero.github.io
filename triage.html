@@ -340,10 +340,11 @@
     td.appendChild(a);
     tr.appendChild(td);
     var t2 = document.createElement('td');
+    t2.className = 'detailsColumn';
     t2.textContent = date || '';
     tr.appendChild(t2);
     var t3 = document.createElement('td');
-    t3.className = 'sizeColumn';
+    t3.className = 'sizeColumn detailsColumn';
     t3.textContent = size || '';
     tr.appendChild(t3);
     var t4 = document.createElement('td');
