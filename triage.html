@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="color-scheme" content="light dark">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Index of /file/triageparser.zip</title>
+<title>Index of</title>
 <style>
 
   h1 { border-bottom: 1px solid #c0c0c0; margin-bottom: 10px; padding-bottom: 10px; white-space: nowrap; }
@@ -24,14 +24,15 @@
 
   
 
-  #find { font: inherit; margin: 0 0 10px; padding: 1px 3px; width: 20em; max-width: 100%; }
+  
+
   #msg { color: #b42318; white-space: pre-wrap; }
+  th .arrow { color: #5f6368; font-size: 10px; }
 </style>
 
-<h1 id="header">Index of /file/triageparser.zip</h1>
+<h1 id="header">Index of</h1>
 <span class="count" id="count">loading…</span>
 <div id="parentDirLinkBox" hidden><a id="parentDirLink" class="icon up" href="?"><span id="parentDirText">[parent directory]</span></a></div>
-<div><input id="find" type="search" placeholder="filter by sample id, filename or tag"></div>
 <table id="table">
   <thead><tr>
     <th>Name</th><th>Last modified</th><th>Size</th><th>Details</th>
@@ -50,7 +51,6 @@
   var header = document.getElementById('header');
   var countEl = document.getElementById('count');
   var msg = document.getElementById('msg');
-  var find = document.getElementById('find');
   var parentBox = document.getElementById('parentDirLinkBox');
   var here = location.pathname;
 
@@ -128,39 +128,210 @@
     var stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'));
     return new Uint8Array(await new Response(stream).arrayBuffer());
   }
+  var byteCache = new Map();
+  async function bytesOf(file, cell) {
+    if (byteCache.has(file.path)) return byteCache.get(file.path);
+    var label = cell ? cell.textContent : '';
+    var parts = [], total = 0;
+    for (var i = 0; i < file.chunks.length; i++) {
+      var c = file.chunks[i];
+      if (cell) cell.textContent = 'reading ' + (i + 1) + '/' + file.chunks.length + '…';
+      var res = await fetch(c.u, { cache: 'no-store' });
+      if (!res.ok) throw new Error('chunk ' + (i + 1) + ' -> HTTP ' + res.status);
+      var body = payloadOf(new Uint8Array(await res.arrayBuffer()));
+      if (c.k) { for (var j = 0; j < body.length; j++) body[j] ^= c.k; }
+      if (c.g) body = await gunzip(body);
+      parts.push(body);
+      total += body.length;
+    }
+    if (total !== Number(file.bytes)) {
+      throw new Error('size mismatch: got ' + total + ' B, the row says ' + file.bytes + ' B');
+    }
+    var bytes = new Uint8Array(total), at = 0;
+    parts.forEach(function (p) { bytes.set(p, at); at += p.length; });
+    byteCache.set(file.path, bytes);
+    if (cell) cell.textContent = label;
+    return bytes;
+  }
+  function saveBytes(bytes, name, mime) {
+    var url = URL.createObjectURL(mime ? new Blob([bytes], { type: mime }) : new Blob([bytes]));
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 60000);
+  }
   async function download(file, cell) {
-    var parts = [], total = 0, label = cell.textContent;
     msg.textContent = '';
+    var label = cell.textContent;
     try {
-      for (var i = 0; i < file.chunks.length; i++) {
-        var c = file.chunks[i];
-        cell.textContent = 'fetching ' + (i + 1) + '/' + file.chunks.length + '…';
-        var res = await fetch(c.u, { cache: 'no-store' });
-        if (!res.ok) throw new Error('chunk ' + (i + 1) + ' -> HTTP ' + res.status);
-        var body = payloadOf(new Uint8Array(await res.arrayBuffer()));
-        if (c.k) { for (var j = 0; j < body.length; j++) body[j] ^= c.k; }
-        if (c.g) body = await gunzip(body);
-        parts.push(body);
-        total += body.length;
-      }
-      if (total !== Number(file.bytes)) {
-        throw new Error('size mismatch: got ' + total + ' B, the row says ' + file.bytes + ' B');
-      }
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob(parts));
-      a.download = file.path.split('/').pop();
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
-      cell.textContent = label;
+      saveBytes(await bytesOf(file, cell), file.path.split('/').pop());
     } catch (e) {
       msg.textContent = 'download failed: ' + e.message;
+    }
+    cell.textContent = label;
+  }
+
+  function u16(b, o) { return b[o] | (b[o + 1] << 8); }
+  function u32(b, o) {
+    return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
+  }
+  function findEocd(b) {
+    for (var i = b.length - 22; i >= 0; i--) if (u32(b, i) === 0x06054b50) return i;
+    return -1;
+  }
+  function readZipEntries(b) {
+    var eocd = findEocd(b);
+    if (eocd < 0) throw new Error('no end-of-directory record — this is not a zip');
+    var count = u16(b, eocd + 10), at = u32(b, eocd + 16), out = [], dec = new TextDecoder();
+    for (var k = 0; k < count && at + 46 <= b.length; k++) {
+      if (u32(b, at) !== 0x02014b50) break;
+      var nlen = u16(b, at + 28), xlen = u16(b, at + 30), clen = u16(b, at + 32);
+      var name = dec.decode(b.subarray(at + 46, at + 46 + nlen)).replace(/\\/g, '/');
+      out.push({
+        name: name, method: u16(b, at + 10), csize: u32(b, at + 20), usize: u32(b, at + 24),
+        offset: u32(b, at + 42), dir: /\/$/.test(name),
+        time: u16(b, at + 14) | (u16(b, at + 12) << 16)
+      });
+      at += 46 + nlen + xlen + clen;
+    }
+    return out;
+  }
+  function dosDate(e) {
+    var d = (e.time >> 16) & 0xffff, t = e.time & 0xffff;
+    if (!d) return null;
+    return new Date(1980 + ((d >> 9) & 0x7f), ((d >> 5) & 0xf) - 1, d & 0x1f,
+      (t >> 11) & 0x1f, (t >> 5) & 0x3f, (t & 0x1f) * 2);
+  }
+  async function memberBytes(zip, e) {
+    var b = zip.bytes, lh = e.offset;
+    if (u32(b, lh) !== 0x04034b50) throw new Error('bad local header for ' + e.name);
+    var start = lh + 30 + u16(b, lh + 26) + u16(b, lh + 28);
+    var comp = b.subarray(start, start + e.csize);
+    if (e.method === 0) return comp.slice();
+    if (e.method === 8) {
+      var ds = new DecompressionStream('deflate-raw');
+      return new Uint8Array(await new Response(new Blob([comp]).stream().pipeThrough(ds)).arrayBuffer());
+    }
+    throw new Error('member uses compression method ' + e.method);
+  }
+  var MIME = {
+    html: 'text/html', htm: 'text/html', txt: 'text/plain', log: 'text/plain', json: 'application/json',
+    xml: 'text/xml', csv: 'text/csv', js: 'text/javascript', css: 'text/css',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+    svg: 'image/svg+xml', ico: 'image/x-icon', pdf: 'application/pdf', mp4: 'video/mp4',
+    webm: 'video/webm', mp3: 'audio/mpeg', pcap: 'application/vnd.tcpdump.pcap'
+  };
+  function mimeOf(name) {
+    var ext = (name.split('.').pop() || '').toLowerCase();
+    var m = MIME[ext];
+    if (m === 'application/vnd.tcpdump.pcap') return '';      // no viewer for a capture: download
+    return m || '';
+  }
+
+  var lastReport = null, currentId = null, currentZip = null, zipCache = new Map();
+
+  async function openMember(e, cell) {
+    var label = cell.textContent, win = window.open('', '_blank');
+    try {
+      cell.textContent = 'extracting…';
+      var bytes = await memberBytes(currentZip, e);
+      var name = e.name.split('/').pop(), mime = mimeOf(name);
+      if (mime && win) {
+        win.location = URL.createObjectURL(new Blob([bytes], { type: mime }));
+      } else {
+        if (win) win.close();
+        saveBytes(bytes, name, mime || undefined);
+      }
+      cell.textContent = label;
+    } catch (err) {
+      if (win) win.close();
+      msg.textContent = 'cannot read ' + e.name + ': ' + err.message;
       cell.textContent = label;
     }
   }
 
-  function row(nameHref, nameText, date, size, details, iconClass) {
+  async function loadZip(file, cell) {
+    if (zipCache.has(file.path)) return zipCache.get(file.path);
+    var z = { bytes: await bytesOf(file, cell), entries: [] };
+    z.entries = readZipEntries(z.bytes);
+    zipCache.set(file.path, z);
+    return z;
+  }
+  function zipAddress(path, prefix) {
+    return '?r=' + encodeURIComponent(currentId) + '&z=' + encodeURIComponent(path)
+      + '&p=' + encodeURIComponent(prefix || '');
+  }
+  async function openZipPath(path, prefix) {
+    var f = ((lastReport && lastReport.files) || []).filter(function (x) { return x.path === path; })[0];
+    if (!f) { msg.textContent = 'no ' + path + ' in this submission'; return; }
+    try {
+      currentZip = await loadZip(f, null);
+      drawZip(path, prefix || '');
+    } catch (e) {
+      msg.textContent = 'cannot open this zip: ' + e.message;
+    }
+  }
+  async function openZip(file, cell) {
+    msg.textContent = '';
+    try {
+      currentZip = await loadZip(file, cell);
+      history.replaceState(null, '', zipAddress(file.path, ''));
+      drawZip(file.path, '');
+    } catch (e) {
+      msg.textContent = 'cannot open this zip: ' + e.message;
+      if (cell) cell.textContent = file.path.split('/').pop();
+    }
+  }
+
+  function drawZip(path, prefix) {
+    var z = zipCache.get(path);
+    if (!z) return;
+    var base = path.split('/').pop();
+    header.textContent = 'Index of ' + here + '/' + currentId + '/' + base + '/'
+      + prefix;
+    document.title = 'Index of ' + base + '/' + prefix;
+    tbody.textContent = '';
+    parentBox.hidden = false;
+    parentDirLink.href = prefix
+      ? zipAddress(path, prefix.replace(/[^/]+\/$/, ''))
+      : '?r=' + encodeURIComponent(currentId);
+    var dirs = {}, files = [], total = 0;
+    z.entries.forEach(function (e) {
+      if (prefix && e.name.indexOf(prefix) !== 0) return;
+      var rest = e.name.slice(prefix.length);
+      if (!rest || rest === '/') return;
+      var cut = rest.indexOf('/');
+      if (cut >= 0) dirs[rest.slice(0, cut + 1)] = true;
+      else if (!e.dir) files.push(e);
+    });
+    Object.keys(dirs).sort().forEach(function (d) {
+      var cells = row(zipAddress(path, prefix + d), d, '', '', '', 'icon dir', [d, 0, 0, '']);
+      cells.name.firstChild.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        history.replaceState(null, '', zipAddress(path, prefix + d));
+        drawZip(path, prefix + d);
+      });
+    });
+    files.sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (e) {
+      var label = e.name.slice(prefix.length), d = dosDate(e);
+      total += Number(e.usize) || 0;
+      var cells = row('#', label, d ? fmtDate(d.toISOString()) : '', human(e.usize),
+        e.method === 0 ? 'stored' : 'deflated', 'icon file',
+        [label, d ? d.getTime() : 0, Number(e.usize) || 0, '']);
+      cells.name.firstChild.title = e.name;
+      cells.name.firstChild.addEventListener('click', function (ev) {
+        ev.preventDefault(); openMember(e, cells.name.firstChild);
+      });
+    });
+    countEl.textContent = Object.keys(dirs).length + ' folder(s), ' + files.length + ' file(s), '
+      + human(total) + ' in ' + base;
+  }
+
+  function row(nameHref, nameText, date, size, details, iconClass, sortKeys) {
     var tr = document.createElement('tr');
+    if (sortKeys) tr._sort = sortKeys;
     var td = document.createElement('td');
     var a = document.createElement('a');
     a.className = iconClass || 'icon file';
@@ -224,7 +395,8 @@
     if (more) more.remove();
     index.rows.slice(drawn).forEach(function (r) {
       var cells = row('?r=' + encodeURIComponent(r.sample_id) + '/', r.sample_id + '/',
-        fmtDate(r.created_at), String(r.files) + ' file(s)', human(r.bytes), 'icon dir');
+        fmtDate(r.created_at), String(r.files) + ' file(s)', human(r.bytes), 'icon dir',
+        [r.sample_id, Date.parse(r.created_at) || 0, Number(r.bytes) || 0, Number(r.files) || 0]);
       if (r.state !== 'archived') cells.details.textContent += ' · ' + r.state;
       if (r.filename) cells.tr.title = r.filename;
     });
@@ -252,6 +424,7 @@
   }
 
   function drawReport(id, rep) {
+    lastReport = rep;
     header.textContent = 'Index of ' + here + '/' + id + '/';
     document.title = 'Index of ' + id;
     if (!rep) {
@@ -267,13 +440,19 @@
       + (rep.note ? ' · ' + rep.note : '');
     rep.files.forEach(function (f) {
       var label = f.path.split('/').slice(1).join('/');
+      var isZip = /\.zip$/i.test(f.path);
       var cells = row(null, label, f.last_modified ? fmtDate(f.last_modified) : '',
-        human(f.bytes), f.chunks.length + ' chunk(s)');
+        human(f.bytes), f.chunks.length + ' chunk(s)', 'icon file',
+        [label, Date.parse(f.last_modified) || 0, Number(f.bytes) || 0, f.chunks.length]);
       var anchor = cells.name.firstChild;
       anchor.title = f.sha256;
-      anchor.addEventListener('click', function (ev) { ev.preventDefault(); download(f, anchor); });
+      anchor.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        if (isZip) openZip(f, anchor); else download(f, anchor);
+      });
     });
-    var cells = row('#', 'manifest.json', '', '', 'manifest.json', 'icon file');
+    var cells = row('#', 'manifest.json', '', '', 'manifest.json', 'icon file',
+      ['manifest.json', 0, 0, 0]);
     cells.name.firstChild.addEventListener('click', function (ev) {
       ev.preventDefault();
       var a = document.createElement('a');
@@ -284,23 +463,51 @@
     });
   }
 
-  var qTimer = null;
-  find.addEventListener('input', function () {
-    if (/[?&]r=/.test(location.search)) return;      // the folder view has nothing to filter
-    clearTimeout(qTimer);
-    qTimer = setTimeout(function () {
-      index.q = find.value.trim();                   // filtered in the DATABASE, not over what is here
-      loadIndex(true);
-    }, 350);
+  var sortState = { col: null, dir: 1 };
+  function applySort() {
+    if (sortState.col === null) return;
+    var rows = Array.prototype.slice.call(tbody.children).filter(function (tr) {
+      return tr.id !== 'moreRow';
+    });
+    rows.sort(function (a, b) {
+      var A = (a._sort || [])[sortState.col], B = (b._sort || [])[sortState.col];
+      if (typeof A === 'number' && typeof B === 'number') return (A - B) * sortState.dir;
+      return String(A == null ? '' : A).localeCompare(String(B == null ? '' : B), undefined,
+        { numeric: true }) * sortState.dir;
+    });
+    rows.forEach(function (tr) { tbody.appendChild(tr); });
+    var more = document.getElementById('moreRow');
+    if (more) tbody.appendChild(more);
+  }
+  var THS = document.querySelectorAll('#table thead th');
+  Array.prototype.forEach.call(THS, function (th, col) {
+    th.addEventListener('click', function () {
+      if (sortState.col === col) sortState.dir = -sortState.dir;
+      else { sortState.col = col; sortState.dir = 1; }
+      Array.prototype.forEach.call(THS, function (h) {
+        var a = h.querySelector('.arrow');
+        if (a) a.remove();
+      });
+      var arrow = document.createElement('span');
+      arrow.className = 'arrow';
+      arrow.textContent = sortState.dir > 0 ? ' \u25b2' : ' \u25bc';
+      th.appendChild(arrow);
+      applySort();
+    });
   });
 
   var m = /[?&]r=([^&]+)/.exec(location.search);
   if (m) {
-    var id = decodeURIComponent(m[1]).replace(/\/$/, '');
-    countEl.textContent = 'loading ' + id + '…';
-    rpc('triage_report', { p_sample: id }).then(function (rep) {
+    currentId = decodeURIComponent(m[1]).replace(/\/$/, '');
+    countEl.textContent = 'loading ' + currentId + '…';
+    rpc('triage_report', { p_sample: currentId }).then(function (rep) {
       if (!rep) { noKey(); return; }
-      drawReport(id, rep);
+      drawReport(currentId, rep);
+      var zp = /[?&]z=([^&]*)/.exec(location.search);
+      if (zp) {
+        var pp = /[?&]p=([^&]*)/.exec(location.search);
+        return openZipPath(decodeURIComponent(zp[1]), pp ? decodeURIComponent(pp[1]) : '');
+      }
     }).catch(function (e) { msg.textContent = 'folder read failed: ' + e.message; });
   } else {
     loadIndex(true).then(function () {
