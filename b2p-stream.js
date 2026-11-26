@@ -974,6 +974,7 @@ function viewOf(plan) {
     total: plan.total,
     key: plan.parts.join('|') + '#' + plan.total,
     read: (start, end) => fileBytes(plan, start, end),
+    stream: (start, end) => streamRange(plan, start, end, plan.total),
   };
 }
 
@@ -1054,23 +1055,25 @@ async function memberResponse(view, entry, request, save) {
     if (r && r.unsatisfiable) {
       return new Response(null, { status: 416, headers: { ...headers, 'Content-Range': `bytes */${entry.csize}` } });
     }
-    if (r) {
-      const body = await view.read(entry.start + r.start, entry.start + r.end);
-      return new Response(body, { status: 206, headers: {
-        ...headers, 'Content-Range': `bytes ${r.start}-${r.end}/${entry.csize}`,
-        'Content-Length': String(body.length),
-      } });
-    }
+    const from = r ? r.start : 0;
+    const to = r ? r.end : entry.csize - 1;
+    const len = to - from + 1;
+    const h = { ...headers, 'Content-Length': String(len) };
+    if (r) h['Content-Range'] = `bytes ${from}-${to}/${entry.csize}`;
+    const body = view.stream
+      ? view.stream(entry.start + from, entry.start + to)
+      : await view.read(entry.start + from, entry.start + to);
+    return new Response(body, { status: r ? 206 : 200, headers: h });
   }
-  const comp = await view.read(entry.start, entry.start + entry.csize - 1);
-  let bytes = comp;
-  if (entry.method === 8) {
-    bytes = new Uint8Array(await new Response(new Blob([comp]).stream()
-      .pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
-  } else if (entry.method !== 0) {
-    return null;
-  }
-  return new Response(bytes, { status: 200, headers: { ...headers, 'Content-Length': String(bytes.length) } });
+  if (entry.method !== 8) return null;
+  const comp = view.stream
+    ? view.stream(entry.start, entry.start + entry.csize - 1)
+    : new Blob([await view.read(entry.start, entry.start + entry.csize - 1)]).stream();
+  const out = Number(entry.size) > 0 ? Number(entry.size) : 0;
+  const h8 = { ...headers };
+  if (out) h8['Content-Length'] = String(out);
+  return new Response(comp.pipeThrough(new DecompressionStream('deflate-raw')),
+                      { status: 200, headers: h8 });
 }
 
 function fileAddress(pathname) {
