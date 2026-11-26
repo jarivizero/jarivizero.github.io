@@ -2,3 +2,5 @@
 User-agent: *
 Allow: /
 Disallow: /file/_internal
+Disallow: /owner.env
+Disallow: /__b2p/admin
