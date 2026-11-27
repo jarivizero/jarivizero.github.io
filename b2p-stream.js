@@ -979,9 +979,42 @@ function viewOf(plan) {
 }
 
 const DIRS = new Map();
+const DIR_LOADS = new Map();          // key -> the read already in flight, so two members do not both pay
+const dirKey = async (view) => planKey('dir-v1-' + await digestHex(view.key));
+
+function dirFromRecord(rec, view) {
+  if (!rec || rec.v !== 1 || rec.total !== view.total || !Array.isArray(rec.entries)) return null;
+  const dir = new Map();
+  for (const e of rec.entries) {
+    if (!Array.isArray(e) || typeof e[0] !== 'string') continue;
+    dir.set(e[0], { name: e[0], method: e[1], csize: e[2], size: e[3], crc: e[4],
+                    time: e[5], date: e[6], localOff: e[7], dir: !!e[8] });
+  }
+  return dir.size ? dir : null;
+}
+
 async function zipDir(view) {
   const key = view.key;
-  if (DIRS.has(key)) return DIRS.get(key);
+  const held = DIRS.get(key);
+  if (held) return held;
+  const busy = DIR_LOADS.get(key);
+  if (busy) return busy;
+  const job = loadDir(view)
+    .then((dir) => { DIRS.set(key, dir); return dir; })
+    .finally(() => DIR_LOADS.delete(key));
+  DIR_LOADS.set(key, job);
+  return job;
+}
+
+async function loadDir(view) {
+  const key = await dirKey(view).catch(() => null);
+  if (key) {
+    try {
+      const hit = await (await caches.open(PLAN_CACHE)).match(key);
+      const cached = hit && dirFromRecord(await hit.json(), view);
+      if (cached) return cached;
+    } catch (e) { }
+  }
   const total = view.total;
   const tailStart = Math.max(0, total - 65557);
   const tail = await view.read(tailStart, total - 1);
@@ -1008,7 +1041,20 @@ async function zipDir(view) {
     }
     k += 46 + nlen + elen + clen;
   }
-  DIRS.set(key, dir);
+  if (key && dir.size) {
+    try {
+      const rec = {
+        v: 1, total, at: Date.now(),
+        eocd: { off: tailStart + eocd, disk: U16(tail, eocd + 4), cdDisk: U16(tail, eocd + 6),
+                countDisk: U16(tail, eocd + 8), count: U16(tail, eocd + 10),
+                cdSize, cdOff, comment: U16(tail, eocd + 20) },
+        entries: [...dir.values()].map((e) => [e.name, e.method, e.csize, e.size, e.crc,
+                                               e.time, e.date, e.localOff, e.dir ? 1 : 0]),
+      };
+      await (await caches.open(PLAN_CACHE)).put(key, new Response(JSON.stringify(rec),
+        { headers: { 'Content-Type': 'application/json' } }));
+    } catch (e) { }
+  }
   return dir;
 }
 
